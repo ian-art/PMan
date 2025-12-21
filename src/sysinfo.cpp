@@ -578,10 +578,10 @@ void DetectOSCapabilities()
     // 3. Check Session API
     g_caps.hasSessionApi = true; 
 
-    // 4. Check ETW Availability
+	// 4. Check ETW Availability
     TRACEHANDLE hSession = 0;
     size_t buffSize = sizeof(EVENT_TRACE_PROPERTIES) + 1024;
-    auto* buffer = new (std::nothrow) BYTE[buffSize];
+    std::vector<BYTE> buffer(buffSize); // RAII: Automatically handles memory
     
 	// 5. Check I/O Priority Support
 	bool ioPrioritySupported = DetectIoPrioritySupport();
@@ -595,9 +595,11 @@ void DetectOSCapabilities()
 		Log("WARNING: I/O priority setting may fail on this system - will use fallback methods");
 	}
 	
-    if (buffer)
+	// Remove "if (buffer)" check since vector allocation throws on failure or is empty
+    if (!buffer.empty())
     {
-        EVENT_TRACE_PROPERTIES* pProps = reinterpret_cast<EVENT_TRACE_PROPERTIES*>(buffer);
+        // Use buffer.data() to access the raw pointer
+        EVENT_TRACE_PROPERTIES* pProps = reinterpret_cast<EVENT_TRACE_PROPERTIES*>(buffer.data());
         ZeroMemory(pProps, buffSize);
         pProps->Wnode.BufferSize = static_cast<ULONG>(buffSize);
         pProps->Wnode.Guid = { 0 };
@@ -605,7 +607,8 @@ void DetectOSCapabilities()
         pProps->LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
         pProps->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
         
-        wcscpy_s((wchar_t*)(buffer + pProps->LoggerNameOffset), 512, L"PriorityMgr_CapabilityCheck");
+        // Use buffer.data() for pointer arithmetic
+        wcscpy_s(reinterpret_cast<wchar_t*>(buffer.data() + pProps->LoggerNameOffset), 512, L"PriorityMgr_CapabilityCheck");
 
         ULONG status = StartTraceW(&hSession, L"PriorityMgr_CapabilityCheck", pProps);
         
@@ -620,7 +623,7 @@ void DetectOSCapabilities()
             g_caps.canUseEtw = false;
             Log("ETW Capability: UNAVAILABLE (Error " + std::to_string(status) + ")");
         }
-        delete[] buffer;
+        // delete[] buffer; -> Removed, vector cleans up automatically
     }
     
     // 6. Check GPU Scheduling (Windows 10 2004+)
