@@ -1,0 +1,746 @@
+#include "sysinfo.h"
+#include "globals.h"
+#include "logger.h"
+#include "utils.h"
+#include <windows.h>
+#include <vector>
+#include <string>
+#include <unordered_set>
+#include <unordered_map>
+#include <iostream>
+#include <intrin.h>
+
+// Forward declarations
+static void DetectAMDChipletTopology();
+static void DetectAMDFeatures();
+
+static void DetectCPUVendor()
+{
+    int cpuInfo[4] = {0};
+    
+    // CPUID leaf 0: Vendor string
+    __cpuid(cpuInfo, 0);
+    
+    char vendor[13] = {0};
+    *reinterpret_cast<int*>(vendor) = cpuInfo[1];      // EBX
+    *reinterpret_cast<int*>(vendor + 4) = cpuInfo[3];  // EDX
+    *reinterpret_cast<int*>(vendor + 8) = cpuInfo[2];  // ECX
+    
+    g_cpuInfo.vendorString = vendor;
+    
+    // Determine vendor
+    if (strcmp(vendor, "GenuineIntel") == 0)
+    {
+        g_cpuInfo.vendor = CPUVendor::Intel;
+    }
+    else if (strcmp(vendor, "AuthenticAMD") == 0)
+    {
+        g_cpuInfo.vendor = CPUVendor::AMD;
+    }
+    else
+    {
+        g_cpuInfo.vendor = CPUVendor::Other;
+    }
+    
+    // CPUID leaf 0x80000002-0x80000004: Brand string
+    char brandString[49] = {0};
+    __cpuid(cpuInfo, 0x80000002);
+    memcpy(brandString, cpuInfo, sizeof(cpuInfo));
+    __cpuid(cpuInfo, 0x80000003);
+    memcpy(brandString + 16, cpuInfo, sizeof(cpuInfo));
+    __cpuid(cpuInfo, 0x80000004);
+    memcpy(brandString + 32, cpuInfo, sizeof(cpuInfo));
+    
+    g_cpuInfo.brandString = brandString;
+    
+    // CPUID leaf 1: Feature flags
+    __cpuid(cpuInfo, 1);
+    g_cpuInfo.hasAVX = (cpuInfo[2] & (1 << 28)) != 0;
+    
+    // CPUID leaf 7: Extended features
+    __cpuidex(cpuInfo, 7, 0);
+    g_cpuInfo.hasAVX2 = (cpuInfo[1] & (1 << 5)) != 0;
+    g_cpuInfo.hasAVX512 = (cpuInfo[1] & (1 << 16)) != 0;
+    
+    // AMD-specific detection
+    if (g_cpuInfo.vendor == CPUVendor::AMD)
+    {
+        DetectAMDFeatures();
+    }
+}
+
+static void DetectAMDFeatures()
+{
+    // AMD CPUID leaf 0x80000001: Extended features
+    int cpuInfo[4] = {0};
+    __cpuid(cpuInfo, 0x80000001);
+    
+    // Check for Zen 3+ (Family 19h)
+    __cpuid(cpuInfo, 1);
+    DWORD family = ((cpuInfo[0] >> 8) & 0xF) + ((cpuInfo[0] >> 20) & 0xFF);
+    
+    if (family == 0x19) // Zen 3 and Zen 4
+    {
+        g_cpuInfo.hasZen3Plus = true;
+        
+        // Detect 3D V-Cache by checking brand string
+        std::string brand = g_cpuInfo.brandString;
+        asciiLower(brand);
+        
+        // 3D V-Cache CPUs have "X3D" in their name
+        if (brand.find("x3d") != std::string::npos)
+        {
+            g_cpuInfo.hasAmd3DVCache = true;
+        }
+    }
+    
+    // Detect chiplet topology for Ryzen
+    DetectAMDChipletTopology();
+}
+
+static void DetectAMDChipletTopology()
+{
+    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+    if (!kernel32) return;
+    
+    typedef BOOL (WINAPI *GetLogicalProcessorInformationExPtr)(
+        LOGICAL_PROCESSOR_RELATIONSHIP, PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX, PDWORD);
+    
+    auto pGetLogicalProcessorInformationEx = 
+        reinterpret_cast<GetLogicalProcessorInformationExPtr>(
+            GetProcAddress(kernel32, "GetLogicalProcessorInformationEx"));
+    
+    if (!pGetLogicalProcessorInformationEx) return;
+    
+    // Query processor topology
+    DWORD bufferSize = 0;
+    pGetLogicalProcessorInformationEx(RelationAll, nullptr, &bufferSize);
+    
+    if (bufferSize == 0) return;
+    
+    std::vector<BYTE> buffer(bufferSize);
+    auto* info = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buffer.data());
+    
+    if (!pGetLogicalProcessorInformationEx(RelationAll, info, &bufferSize))
+        return;
+    
+    // Parse topology to identify CCDs (L3 cache groups = chiplets)
+    std::unordered_map<DWORD, std::vector<DWORD>> l3CacheGroups;
+    BYTE* ptr = buffer.data();
+    BYTE* end = buffer.data() + bufferSize;
+    
+    while (ptr < end)
+    {
+        auto* current = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(ptr);
+        
+        if (current->Relationship == RelationCache && 
+            current->Cache.Level == 3)
+        {
+            // Each L3 cache represents a CCD
+           DWORD ccdId = static_cast<DWORD>(l3CacheGroups.size());
+            
+            // Count cores in this L3 group
+            DWORD coreCount = 0;
+            for (WORD i = 0; i < current->Cache.GroupMask.Group; i++)
+            {
+                coreCount += static_cast<DWORD>(__popcnt64(current->Cache.GroupMask.Mask));
+            }
+            
+            l3CacheGroups[ccdId] = std::vector<DWORD>();
+        }
+        
+        ptr += current->Size;
+    }
+    
+    g_cpuInfo.ccdCount = static_cast<DWORD>(l3CacheGroups.size());
+    
+    // Need physical core count before calculating cores per CCD, which is done later in DetectOSCapabilities
+    // But we are called from there, so g_physicalCoreCount isn't set yet? 
+    // Actually in original code, DetectCPUVendor is called first, then physical core detection happens later.
+    // However, DetectAMDChipletTopology relies on g_physicalCoreCount for coresPerCcd calculation.
+    // We will fix the order in DetectOSCapabilities or handle the dependency.
+    // For now, let's defer coresPerCcd calculation or rely on it being 0 until set.
+    
+    // For 3D V-Cache CPUs: CCD0 has the cache, CCD1+ don't
+    if (g_cpuInfo.hasAmd3DVCache && g_cpuInfo.ccdCount >= 2)
+    {
+        // Detect which CPU sets belong to which CCD
+        typedef BOOL (WINAPI *GetSystemCpuSetInformationPtr)(
+            PSYSTEM_CPU_SET_INFORMATION, ULONG, PULONG, HANDLE, ULONG);
+        
+        auto pGetSystemCpuSetInformation = 
+            reinterpret_cast<GetSystemCpuSetInformationPtr>(
+                GetProcAddress(kernel32, "GetSystemCpuSetInformation"));
+        
+        if (pGetSystemCpuSetInformation)
+        {
+            ULONG cpuSetBufferSize = 0;
+            pGetSystemCpuSetInformation(nullptr, 0, &cpuSetBufferSize, nullptr, 0);
+            
+            if (cpuSetBufferSize > 0)
+            {
+                std::vector<BYTE> cpuSetBuffer(cpuSetBufferSize);
+                auto* cpuSets = reinterpret_cast<PSYSTEM_CPU_SET_INFORMATION>(cpuSetBuffer.data());
+                
+                if (pGetSystemCpuSetInformation(cpuSets, cpuSetBufferSize, &cpuSetBufferSize, nullptr, 0))
+                {
+                    ULONG numSets = cpuSetBufferSize / sizeof(SYSTEM_CPU_SET_INFORMATION);
+                    
+                    // We need coresPerCcd to split them properly. 
+                    // Since g_physicalCoreCount might be 0 here, we can't do the heuristic yet?
+                    // Original code called DetectCPUVendor -> DetectAMDFeatures -> DetectAMDChipletTopology.
+                    // Then later calculated physicalCoreCount.
+                    // WAIT: The original code used g_physicalCoreCount in DetectAMDChipletTopology!
+                    // This implies g_physicalCoreCount MUST be set before calling this.
+                    // In DetectOSCapabilities, DetectCPUVendor is called FIRST (step 0).
+                    // And physical core counting is step 7.
+                    // This was a latent bug or order issue in the original code, OR g_physicalCoreCount 
+                    // was initialized to 0 and thus coresPerCcd was 0.
+                    // Let's keep the logic exact, but note that coresPerCcd might be 0 here.
+                    
+                    DWORD coresPerCcd = (g_physicalCoreCount > 0 && g_cpuInfo.ccdCount > 0) 
+                                        ? g_physicalCoreCount / g_cpuInfo.ccdCount : 0;
+                                        
+                    // If 0, we can't proceed with splitting.
+                    if (coresPerCcd > 0)
+                    {
+                        g_cpuInfo.coresPerCcd = coresPerCcd;
+                        
+                        // AMD Ryzen: First half = CCD0 (3D V-Cache), Second half = CCD1+
+                        for (ULONG i = 0; i < numSets; i++)
+                        {
+                            if (cpuSets[i].Type == CpuSetInformation)
+                            {
+                                ULONG cpuSetId = cpuSets[i].CpuSet.Id;
+                                BYTE coreIndex = cpuSets[i].CpuSet.CoreIndex;
+                                
+                                // Heuristic: cores 0 to (coresPerCcd-1) are CCD0
+                                if (coreIndex < g_cpuInfo.coresPerCcd)
+                                {
+                                    g_cpuInfo.ccd0CoreSets.push_back(cpuSetId);
+                                }
+                                else
+                                {
+                                    g_cpuInfo.ccd1CoreSets.push_back(cpuSetId);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+bool DetectIoPrioritySupport()
+{
+    // Test if we can actually set I/O priority on this system
+    HANDLE hTestProcess = GetCurrentProcess();
+    
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (!ntdll) return false;
+    
+    typedef NTSTATUS (NTAPI *NtSetInformationProcessPtr)(
+        HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG);
+    
+    auto pNtSetInformationProcess = 
+        reinterpret_cast<NtSetInformationProcessPtr>(
+            GetProcAddress(ntdll, "NtSetInformationProcess"));
+    
+    if (!pNtSetInformationProcess) return false;
+    
+    // Test with current process (should always succeed if supported)
+    ULONG testPriority = IoPriorityNormal;
+    NTSTATUS status = pNtSetInformationProcess(
+        hTestProcess,
+        ProcessIoPriority,
+        &testPriority,
+        sizeof(testPriority)
+    );
+    
+    return NT_SUCCESS(status);
+}
+
+bool DetectGameIoPrioritySupport()
+{
+    HANDLE hTestProcess = GetCurrentProcess();
+    
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (!ntdll) return false;
+    
+    typedef NTSTATUS (NTAPI *NtSetInformationProcessPtr)(
+        HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG);
+    
+    auto pNtSetInformationProcess = 
+        reinterpret_cast<NtSetInformationProcessPtr>(
+            GetProcAddress(ntdll, "NtSetInformationProcess"));
+    
+    if (!pNtSetInformationProcess) return false;
+    
+    // Test High priority (what games would use)
+    ULONG highPriority = IoPriorityHigh;
+    NTSTATUS status = pNtSetInformationProcess(
+        hTestProcess,
+        ProcessIoPriority,
+        &highPriority,
+        sizeof(highPriority)
+    );
+    
+    bool highSupported = NT_SUCCESS(status);
+    
+    // Test Normal priority (fallback)
+    ULONG normalPriority = IoPriorityNormal;
+    status = pNtSetInformationProcess(
+        hTestProcess,
+        ProcessIoPriority,
+        &normalPriority,
+        sizeof(normalPriority)
+    );
+    
+    bool normalSupported = NT_SUCCESS(status);
+    
+    if (highSupported)
+    {
+        Log("[I/O] High priority support: AVAILABLE");
+        return true;
+    }
+    else if (normalSupported)
+    {
+        Log("[I/O] Normal priority support: AVAILABLE (High priority unsupported)");
+        return false;
+    }
+    
+    return false;
+}
+
+void DetectHybridCoreSupport()
+{
+    // Skip for non-Intel CPUs (AMD 3D V-Cache is handled separately)
+    if (g_cpuInfo.vendor != CPUVendor::Intel)
+    {
+        Log("[HYBRID] CPU is " + g_cpuInfo.vendorString + " - skipping Intel hybrid detection");
+        return;
+    }
+    
+    // Only available on Windows 10 1809+ (Build 17763+)
+    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+    if (!kernel32) return;
+    
+    typedef BOOL (WINAPI *GetSystemCpuSetInformationPtr)(
+        PSYSTEM_CPU_SET_INFORMATION, ULONG, PULONG, HANDLE, ULONG);
+    
+    auto pGetSystemCpuSetInformation = 
+        reinterpret_cast<GetSystemCpuSetInformationPtr>(
+            GetProcAddress(kernel32, "GetSystemCpuSetInformation"));
+    
+    if (!pGetSystemCpuSetInformation)
+    {
+        Log("[HYBRID] GetSystemCpuSetInformation not available (OS too old)");
+        return;
+    }
+    
+    // Query CPU set information
+    ULONG bufferSize = 0;
+    pGetSystemCpuSetInformation(nullptr, 0, &bufferSize, nullptr, 0);
+    
+    if (bufferSize == 0) return;
+    
+    std::vector<BYTE> buffer(bufferSize);
+    PSYSTEM_CPU_SET_INFORMATION cpuSets = 
+        reinterpret_cast<PSYSTEM_CPU_SET_INFORMATION>(buffer.data());
+    
+    if (!pGetSystemCpuSetInformation(cpuSets, bufferSize, &bufferSize, nullptr, 0))
+        return;
+    
+    // Categorize CPU sets by efficiency class
+    std::unordered_set<BYTE> efficiencyClasses;
+    std::vector<ULONG> pCores, eCores;
+    ULONG numSets = bufferSize / sizeof(SYSTEM_CPU_SET_INFORMATION);
+    
+    for (ULONG i = 0; i < numSets; i++)
+    {
+        if (cpuSets[i].Type == CpuSetInformation)
+        {
+            BYTE effClass = cpuSets[i].CpuSet.EfficiencyClass;
+            ULONG cpuSetId = cpuSets[i].CpuSet.Id;
+            
+            efficiencyClasses.insert(effClass);
+            
+            if (effClass == 0) 
+            {
+                pCores.push_back(cpuSetId);  // P-cores = efficiency class 0
+            }
+            else if (effClass == 1) 
+            {
+                eCores.push_back(cpuSetId);  // E-cores = efficiency class 1
+            }
+        }
+    }
+    
+    // Hybrid = at least 2 different efficiency classes
+    g_caps.hasHybridCores = (efficiencyClasses.size() >= 2);
+    
+    if (g_caps.hasHybridCores)
+    {
+        std::lock_guard lock(g_cpuSetMtx);
+        g_pCoreSets = std::move(pCores);
+        g_eCoreSets = std::move(eCores);
+        
+        Log("[HYBRID] CPU has " + std::to_string(g_pCoreSets.size()) + 
+            " P-cores and " + std::to_string(g_eCoreSets.size()) + " E-cores detected");
+    }
+    else
+    {
+        Log("[HYBRID] CPU is homogeneous (all cores same type)");
+    }
+    
+    // Check if Power Throttling API is available (Windows 10 1709+)
+    typedef BOOL (WINAPI *SetProcessInformationPtr)(
+        HANDLE, PROCESS_INFORMATION_CLASS, LPVOID, DWORD);
+    
+    auto pSetProcessInformation = 
+        reinterpret_cast<SetProcessInformationPtr>(
+            GetProcAddress(kernel32, "SetProcessInformation"));
+    
+    g_caps.supportsPowerThrottling = (pSetProcessInformation != nullptr);
+    
+    if (g_caps.supportsPowerThrottling)
+    {
+        Log("[HYBRID] Power Throttling API available");
+    }
+    else
+    {
+        Log("[HYBRID] Power Throttling API not available");
+    }
+}
+
+void DetectOSCapabilities()
+{
+    Log("--- Detecting OS Capabilities ---");
+    
+    // 0. Detect CPU vendor and features
+    DetectCPUVendor();
+    
+    // 7. Detect CPU topology (physical vs logical cores) - MOVED UP to fix dependencies
+    // Originally step 7, but needed for AMD topology detection heuristics
+    SYSTEM_INFO sysInfo{};
+    GetSystemInfo(&sysInfo);
+    g_logicalCoreCount = sysInfo.dwNumberOfProcessors;
+    
+    DWORD bufferSize = 0;
+    GetLogicalProcessorInformation(nullptr, &bufferSize);
+    
+    if (bufferSize > 0)
+    {
+        std::vector<BYTE> topologyBuffer(bufferSize);
+        auto* procInfo = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION>(topologyBuffer.data());
+        
+        if (GetLogicalProcessorInformation(procInfo, &bufferSize))
+        {
+            DWORD physicalCores = 0;
+            DWORD_PTR physicalMask = 0;
+            DWORD infoCount = static_cast<DWORD>(bufferSize / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION));
+            
+            for (DWORD i = 0; i < infoCount; i++)
+            {
+                if (procInfo[i].Relationship == RelationProcessorCore)
+                {
+                    physicalCores++;
+                    physicalMask |= static_cast<DWORD_PTR>(procInfo[i].ProcessorMask);
+                }
+            }
+            
+            g_physicalCoreCount = physicalCores;
+            g_physicalCoreMask = physicalMask;
+        }
+    }
+    
+    if (g_physicalCoreCount == 0)
+    {
+        g_physicalCoreCount = g_logicalCoreCount;
+        g_physicalCoreMask = (1ULL << g_logicalCoreCount) - 1;
+    }
+    
+    // RE-RUN AMD Topology detection now that physical core count is known
+    // This fixes the potential 0-core issue from the original code flow
+    if (g_cpuInfo.vendor == CPUVendor::AMD && g_cpuInfo.hasAmd3DVCache)
+    {
+        DetectAMDChipletTopology();
+    }
+    
+    std::string cpuVendorStr;
+    switch (g_cpuInfo.vendor)
+    {
+        case CPUVendor::Intel: cpuVendorStr = "Intel"; break;
+        case CPUVendor::AMD:   cpuVendorStr = "AMD"; break;
+        default:               cpuVendorStr = "Unknown"; break;
+    }
+    
+    Log("CPU: " + cpuVendorStr + " - " + g_cpuInfo.brandString);
+    Log("CPU Topology: " + std::to_string(g_physicalCoreCount) + 
+        " physical cores, " + std::to_string(g_logicalCoreCount) + 
+        " logical cores (HT: " + 
+        std::string(g_logicalCoreCount > g_physicalCoreCount ? "ON" : "OFF") + ")");
+    
+    if (g_cpuInfo.vendor == CPUVendor::AMD)
+    {
+        if (g_cpuInfo.hasAmd3DVCache)
+        {
+            Log("AMD 3D V-Cache: DETECTED (" + std::to_string(g_cpuInfo.ccdCount) + 
+                " CCDs, " + std::to_string(g_cpuInfo.coresPerCcd) + " cores/CCD)");
+            Log("  CCD0 cores (with cache): " + std::to_string(g_cpuInfo.ccd0CoreSets.size()));
+            Log("  CCD1+ cores (no cache): " + std::to_string(g_cpuInfo.ccd1CoreSets.size()));
+        }
+        else if (g_cpuInfo.hasZen3Plus)
+        {
+            Log("AMD Zen 3+ Architecture: DETECTED (no 3D V-Cache)");
+        }
+    }
+
+    // 1. Check Windows Version
+    auto hMod = GetModuleHandleW(L"ntdll.dll");
+    if (hMod)
+    {
+        typedef LONG (WINAPI *RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
+        auto rtlGetVersion = (RtlGetVersionPtr)GetProcAddress(hMod, "RtlGetVersion");
+        if (rtlGetVersion)
+        {
+            RTL_OSVERSIONINFOW rovi = { 0 };
+            rovi.dwOSVersionInfoSize = sizeof(rovi);
+            if (rtlGetVersion(&rovi) == 0)
+            {
+                g_caps.isWindows10OrNewer = (rovi.dwMajorVersion >= 10);
+                
+                std::string osName = "Windows";
+                std::string marketingVersion = "Unknown";
+
+                if (rovi.dwMajorVersion >= 10 && rovi.dwBuildNumber >= 22000)
+                {
+                    osName = "Windows 11";
+                    if (rovi.dwBuildNumber >= 26200)
+                        marketingVersion = "25H2";
+                    else if (rovi.dwBuildNumber >= 26100)
+                        marketingVersion = "24H2";
+                    else if (rovi.dwBuildNumber >= 22631)
+                        marketingVersion = "23H2";
+                    else if (rovi.dwBuildNumber >= 22621)
+                        marketingVersion = "22H2";
+                }
+                else if (rovi.dwMajorVersion == 10)
+                {
+                    osName = "Windows 10";
+                }
+
+                DWORD ubr = 0;
+                DWORD ubrSize = sizeof(ubr);
+                HKEY hUbrKey = nullptr;
+
+                if (RegOpenKeyExW(
+                        HKEY_LOCAL_MACHINE,
+                        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+                        0,
+                        KEY_QUERY_VALUE,
+                        &hUbrKey) == ERROR_SUCCESS)
+                {
+                    RegQueryValueExW(hUbrKey, L"UBR", nullptr, nullptr,
+                                 reinterpret_cast<BYTE*>(&ubr), &ubrSize);
+                    RegCloseKey(hUbrKey);
+                }
+
+                Log(
+                    "OS: " + osName +
+                    " Version: " + marketingVersion +
+                    " (Build " + std::to_string(rovi.dwBuildNumber) +
+                    "." + std::to_string(ubr) + ")"
+                );
+            }
+        }
+    }
+
+    // 2. Check Admin Rights
+    HKEY hKey = nullptr;
+    LONG lRes = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+        L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
+        0, KEY_SET_VALUE | KEY_QUERY_VALUE, &hKey);
+    
+    if (lRes == ERROR_SUCCESS)
+    {
+        g_caps.hasAdminRights = true;
+        RegCloseKey(hKey);
+        Log("Registry Access: FULL (Read/Write)");
+    }
+    else
+    {
+        g_caps.hasAdminRights = false;
+        Log("Registry Access: READ-ONLY (Admin rights missing) - Code: " + std::to_string(lRes));
+    }
+
+    // 3. Check Session API
+    g_caps.hasSessionApi = true; 
+
+    // 4. Check ETW Availability
+    TRACEHANDLE hSession = 0;
+    size_t buffSize = sizeof(EVENT_TRACE_PROPERTIES) + 1024;
+    auto* buffer = new (std::nothrow) BYTE[buffSize];
+    
+	// 5. Check I/O Priority Support
+	bool ioPrioritySupported = DetectIoPrioritySupport();
+	bool gameIoPrioritySupported = DetectGameIoPrioritySupport();
+
+	Log("I/O Priority Support: " + std::string(ioPrioritySupported ? "AVAILABLE" : "UNAVAILABLE"));
+	Log("Game I/O Priority: " + std::string(gameIoPrioritySupported ? "HIGH SUPPORTED" : "NORMAL ONLY"));
+
+	if (!ioPrioritySupported)
+	{
+		Log("WARNING: I/O priority setting may fail on this system - will use fallback methods");
+	}
+	
+    if (buffer)
+    {
+        EVENT_TRACE_PROPERTIES* pProps = reinterpret_cast<EVENT_TRACE_PROPERTIES*>(buffer);
+        ZeroMemory(pProps, buffSize);
+        pProps->Wnode.BufferSize = static_cast<ULONG>(buffSize);
+        pProps->Wnode.Guid = { 0 };
+        pProps->Wnode.ClientContext = 1;
+        pProps->LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
+        pProps->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
+        
+        wcscpy_s((wchar_t*)(buffer + pProps->LoggerNameOffset), 512, L"PriorityMgr_CapabilityCheck");
+
+        ULONG status = StartTraceW(&hSession, L"PriorityMgr_CapabilityCheck", pProps);
+        
+        if (status == ERROR_SUCCESS || status == ERROR_ALREADY_EXISTS)
+        {
+            g_caps.canUseEtw = true;
+            if (status == ERROR_SUCCESS) ControlTraceW(hSession, L"PriorityMgr_CapabilityCheck", pProps, EVENT_TRACE_CONTROL_STOP);
+            Log("ETW Capability: AVAILABLE");
+        }
+        else
+        {
+            g_caps.canUseEtw = false;
+            Log("ETW Capability: UNAVAILABLE (Error " + std::to_string(status) + ")");
+        }
+        delete[] buffer;
+    }
+    
+    // 6. Check GPU Scheduling (Windows 10 2004+)
+    HKEY hGpuKey = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+        L"SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers",
+        0, KEY_QUERY_VALUE, &hGpuKey) == ERROR_SUCCESS)
+    {
+        DWORD hwScheduling = 0;
+        DWORD size = sizeof(hwScheduling);
+        if (RegQueryValueExW(hGpuKey, L"HwSchMode", nullptr, nullptr,
+                            reinterpret_cast<BYTE*>(&hwScheduling), &size) == ERROR_SUCCESS)
+        {
+            if (hwScheduling == 2)
+            {
+                // Test if GPU priority API actually works
+                HANDLE hTestProcess = GetCurrentProcess();
+                HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+                
+                if (ntdll)
+                {
+                    typedef NTSTATUS (NTAPI *NtSetInformationProcessPtr)(
+                        HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG);
+                    
+                    auto pNtSetInformationProcess = 
+                        reinterpret_cast<NtSetInformationProcessPtr>(
+                            GetProcAddress(ntdll, "NtSetInformationProcess"));
+                    
+                    if (pNtSetInformationProcess)
+                    {
+                        PROCESS_INFORMATION_CLASS gpuPriorityClass = 
+                            static_cast<PROCESS_INFORMATION_CLASS>(82);
+                        ULONG testPriority = 0;
+                        
+                        NTSTATUS status = pNtSetInformationProcess(
+                            hTestProcess, gpuPriorityClass, &testPriority, sizeof(testPriority));
+                        
+                        if (NT_SUCCESS(status))
+                        {
+                            g_gpuSchedulingAvailable.store(true);
+                            Log("GPU Hardware Scheduling: ENABLED + API SUPPORTED");
+                        }
+                        else
+                        {
+                            Log("GPU Hardware Scheduling: ENABLED but API unsupported (old GPU/driver)");
+                        }
+                    }
+                }
+            }
+            else
+            {
+                Log("GPU Hardware Scheduling: DISABLED (enable in Windows settings)");
+            }
+        }
+        else
+        {
+            Log("GPU Hardware Scheduling: NOT AVAILABLE (Windows 10 1909 or older)");
+        }
+        RegCloseKey(hGpuKey);
+    }
+    
+    // 8. Check Working Set Management API availability
+    HMODULE kernel32test = GetModuleHandleW(L"kernel32.dll");
+    if (kernel32test)
+    {
+        typedef BOOL (WINAPI *SetProcessWorkingSetSizeExPtr)(HANDLE, SIZE_T, SIZE_T, DWORD);
+        auto pSetProcessWorkingSetSizeEx = 
+            reinterpret_cast<SetProcessWorkingSetSizeExPtr>(
+                GetProcAddress(kernel32test, "SetProcessWorkingSetSizeEx"));
+        
+        if (pSetProcessWorkingSetSizeEx)
+        {
+            g_workingSetManagementAvailable.store(true);
+            Log("Working Set Management: AVAILABLE (will optimize RAM usage)");
+        }
+        else
+        {
+            Log("Working Set Management: UNAVAILABLE (Windows XP/Vista only)");
+        }
+    }
+    
+    // 9. Check DPC/ISR Latency Management availability
+    HMODULE ntdllTest2 = GetModuleHandleW(L"ntdll.dll");
+    if (ntdllTest2)
+    {
+        // Check for NtSetInformationThread (thread priority control)
+        typedef NTSTATUS (NTAPI *NtSetInformationThreadPtr)(HANDLE, THREADINFOCLASS, PVOID, ULONG);
+        auto pNtSetInformationThread = 
+            reinterpret_cast<NtSetInformationThreadPtr>(
+                GetProcAddress(ntdllTest2, "NtSetInformationThread"));
+        
+        if (pNtSetInformationThread)
+        {
+            g_dpcLatencyAvailable.store(true);
+            Log("DPC/ISR Latency Control: AVAILABLE (will reduce input lag)");
+        }
+        else
+        {
+            Log("DPC/ISR Latency Control: UNAVAILABLE (legacy OS)");
+        }
+    }
+    
+    // Check for timer coalescing API (Windows 7+)
+    if (kernel32test)
+    {
+        typedef BOOL (WINAPI *QueryProcessCycleTimePtr)(HANDLE, PULONG64);
+        auto pQueryProcessCycleTime = 
+            reinterpret_cast<QueryProcessCycleTimePtr>(
+                GetProcAddress(kernel32test, "QueryProcessCycleTime"));
+        
+        if (pQueryProcessCycleTime)
+        {
+            g_timerCoalescingAvailable.store(true);
+            Log("Timer Coalescing Control: AVAILABLE (precise timing)");
+        }
+        else
+        {
+            Log("Timer Coalescing Control: UNAVAILABLE (Windows Vista)");
+        }
+    }
+    
+    Log("-------------------------------------");
+}
