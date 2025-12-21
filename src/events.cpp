@@ -14,14 +14,16 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
 {
     if (!g_hIocp) return false;
     
-    auto* job = new(std::nothrow) IocpJob{ t, pid, hwnd };
-    if (!job) return false;
+    // Use unique_ptr to manage memory automatically until successful post
+    auto job = std::make_unique<IocpJob>(IocpJob{ t, pid, hwnd });
     
-    if (!PostQueuedCompletionStatus(g_hIocp, 0, 0, reinterpret_cast<LPOVERLAPPED>(job)))
+    if (!PostQueuedCompletionStatus(g_hIocp, 0, 0, reinterpret_cast<LPOVERLAPPED>(job.get())))
     {
-        delete job;
-        return false;
+        return false; // job is automatically deleted here
     }
+    
+    // Success: release ownership to the IOCP queue
+    job.release();
     return true;
 }
 
