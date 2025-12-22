@@ -741,10 +741,14 @@ void SetProcessAffinity(DWORD pid, int mode)
                 " physical cores (HT disabled for game)");
         }
     }
-    else if (mode == 2)
+	else if (mode == 2)
     {
-        affinityMask = (1ULL << g_logicalCoreCount) - 1;
-        
+        // Fix Safe affinity mask calculation for 64+ cores or error states
+        if (g_logicalCoreCount > 0 && g_logicalCoreCount < 64)
+            affinityMask = (1ULL << g_logicalCoreCount) - 1;
+        else
+            affinityMask = (DWORD_PTR)-1; // Use all available cores
+
         if (SetProcessAffinityMask(hProcess, affinityMask))
         {
             Log("[AFFINITY] Browser using all " + std::to_string(g_logicalCoreCount) + 
