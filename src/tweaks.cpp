@@ -724,6 +724,7 @@ void SetTimerResolution(int mode)
 void SetProcessAffinity(DWORD pid, int mode)
 {
     if (g_physicalCoreCount == 0) return;
+	if (g_isLowCoreCount) return; // Fix Skip affinity on single-core systems
     
     HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, 
                                    FALSE, pid);
@@ -803,6 +804,7 @@ static void TrimBrowserWorkingSet(DWORD pid)
 void SetWorkingSetLimits(DWORD pid, int mode)
 {
     if (!g_workingSetManagementAvailable.load()) return;
+	if (g_isLowMemory) return; // Fix Skip working set limits on low RAM systems
     
     MEMORYSTATUSEX ms{};
     ms.dwLength = sizeof(ms);
