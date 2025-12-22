@@ -1,6 +1,8 @@
 #include "logger.h"
 #include "types.h" // For Windows definitions if needed
 #include <windows.h>
+#include <sddl.h>   // Required for security descriptor string conversion
+#include <aclapi.h> // Required for security functions
 #include <fstream>
 #include <iostream>
 #include <mutex>
@@ -25,10 +27,30 @@ std::filesystem::path GetLogPath()
 void Log(const std::string& msg)
 {
     std::lock_guard lg(g_logMtx);
-    try
+try
     {
         std::filesystem::path dir = GetLogPath();
-        std::filesystem::create_directories(dir);
+        
+        // Fix 4.1: Secure Directory Creation (Admins: Full, Users: Read-Only)
+        if (!std::filesystem::exists(dir))
+        {
+            PSECURITY_DESCRIPTOR pSD = nullptr;
+            // D:DACL, A:Allow, GA:GenericAll (Admins), GR:GenericRead (Users)
+            if (ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    L"D:(A;OICI;GA;;;BA)(A;OICI;GR;;;BU)", 
+                    SDDL_REVISION_1, &pSD, nullptr))
+            {
+                SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), pSD, FALSE };
+                CreateDirectoryW(dir.c_str(), &sa);
+                LocalFree(pSD);
+            }
+            else
+            {
+                // Fallback if security descriptor fails
+                std::filesystem::create_directories(dir);
+            }
+        }
+
         std::ofstream log(dir / L"log.txt", std::ios::app);
         if (log)
         {
