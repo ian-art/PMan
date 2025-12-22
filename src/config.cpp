@@ -131,10 +131,13 @@ void LoadConfig()
                 else if (secNameAscii == "browsers") sect = B;
                 else if (secNameAscii == "game_windows") sect = GW;
                 else if (secNameAscii == "browser_windows") sect = BW;
-                else sect = NONE;
+				else sect = NONE;
                 continue;
             }
             
+            // Define item here so it's available for all sections
+            std::string item = WideToUtf8(s.c_str());
+
             // Handle Meta Section
             if (sect == META)
             {
@@ -148,12 +151,10 @@ void LoadConfig()
                     if (key.find("version") != std::string::npos) {
                         try { configVersion = std::stoi(value); } catch(...) { configVersion = 0; }
                     }
-                }
+				}
                 continue;
             }
-            
-            std::string item = WideToUtf8(s.c_str());
-            
+
             if (sect == GLOBAL)
             {
                 size_t eqPos = item.find('=');
