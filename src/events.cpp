@@ -373,8 +373,27 @@ void AntiInterferenceWatchdog()
     int gcCycles = 0; // Track cycles for garbage collection
     HKEY hRegKey = nullptr; // Fix Cache registry handle
 	
-    while (g_running)
+	while (g_running)
     {
+        // Fix 6.1: Health Checks
+        if (!g_hIocp || g_hIocp == INVALID_HANDLE_VALUE)
+        {
+            Log("[HEALTH] CRITICAL: IOCP handle is invalid. Initiating shutdown.");
+            g_running = false;
+            break;
+        }
+
+        // Verify ETW session if it was supposed to be running
+        if (g_caps.canUseEtw && g_etwSession.load() == 0 && g_running)
+        {
+             // Try to restart ETW thread? For now, just warn.
+             static bool etwWarned = false;
+             if (!etwWarned) {
+                 Log("[HEALTH] WARNING: ETW Session is not active (did it crash?)");
+                 etwWarned = true;
+             }
+        }
+
         // Check more frequently if policy locking is enabled (10s vs 30s)
         int checkInterval = g_lockPolicy.load() ? 10 : 30;
         for (int i = 0; i < checkInterval && g_running; ++i) Sleep(1000);
