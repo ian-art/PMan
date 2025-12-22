@@ -1,4 +1,6 @@
 #include "utils.h"
+#include <algorithm>
+#include <cctype>
 
 std::string WideToUtf8(const wchar_t* wstr)
 {
@@ -58,10 +60,15 @@ bool ContainsIgnoreCase(const std::string& haystack, const std::string& needle)
 {
     if (needle.empty() || haystack.empty()) return false;
     
-    std::string haystackLower = haystack;
-    std::string needleLower = needle;
-    asciiLower(haystackLower);
-    asciiLower(needleLower);
+    // Fix Avoid string copies by using iterator-based search
+    auto it = std::search(
+        haystack.begin(), haystack.end(),
+        needle.begin(), needle.end(),
+        [](char ch1, char ch2) { 
+            return std::tolower(static_cast<unsigned char>(ch1)) == 
+                   std::tolower(static_cast<unsigned char>(ch2)); 
+        }
+    );
     
-    return haystackLower.find(needleLower) != std::string::npos;
+    return it != haystack.end();
 }
