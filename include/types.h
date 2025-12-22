@@ -191,6 +191,10 @@ struct alignas(64) MemoryTelemetry
     std::atomic<uint64_t> lastStandbyMB;
     std::atomic<uint64_t> lastAvailableMB;
     std::atomic<uint64_t> lastUpdateQpc;
+	
+	// Fix Initialize struct to prevent garbage telemetry data
+    MemoryTelemetry() 
+        : lastCommitMB(0), lastStandbyMB(0), lastAvailableMB(0), lastUpdateQpc(0) {}
 };
 #pragma warning(pop)
 
