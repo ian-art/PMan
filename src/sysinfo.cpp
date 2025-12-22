@@ -460,6 +460,23 @@ void DetectOSCapabilities()
         g_physicalCoreMask = (1ULL << g_logicalCoreCount) - 1;
     }
     
+	// Fix Low resource detection (Single core or <4GB RAM)
+    if (g_physicalCoreCount < 2)
+    {
+        g_isLowCoreCount = true;
+        Log("[COMPAT] Single-core CPU detected - Disabling CPU pinning optimizations");
+    }
+
+    MEMORYSTATUSEX ms = {sizeof(ms)};
+    if (GlobalMemoryStatusEx(&ms))
+    {
+        if (ms.ullTotalPhys < 4ULL * 1024 * 1024 * 1024)
+        {
+            g_isLowMemory = true;
+            Log("[COMPAT] Low memory (<4GB) detected - Disabling aggressive working set limits");
+        }
+    }
+	
     // RE-RUN AMD Topology detection now that physical core count is known
     // This fixes the potential 0-core issue from the original code flow
     if (g_cpuInfo.vendor == CPUVendor::AMD && g_cpuInfo.hasAmd3DVCache)

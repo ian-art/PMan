@@ -54,6 +54,10 @@ HANDLE g_hMutex = nullptr;
 OSCapabilities g_caps;
 CPUInfo g_cpuInfo;
 
+// Fix Compatibility Flags
+std::atomic<bool> g_isLowCoreCount{false};
+std::atomic<bool> g_isLowMemory{false};
+
 // Hybrid Core Management
 std::vector<ULONG> g_pCoreSets;
 std::vector<ULONG> g_eCoreSets;
