@@ -726,9 +726,19 @@ void SetProcessAffinity(DWORD pid, int mode)
     if (g_physicalCoreCount == 0) return;
 	if (g_isLowCoreCount) return; // Fix Skip affinity on single-core systems
     
+	// Fix Better error handling/recovery
     HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, 
                                    FALSE, pid);
-    if (!hProcess) return;
+    if (!hProcess) 
+    {
+        DWORD err = GetLastError();
+        // Silent fail for Access Denied (system processes), log others
+        if (err != ERROR_ACCESS_DENIED)
+        {
+            Log("[AFFINITY] OpenProcess failed for PID " + std::to_string(pid) + ": " + std::to_string(err));
+        }
+        return;
+    }
     
     DWORD_PTR affinityMask = 0;
     
