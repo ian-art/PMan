@@ -418,8 +418,7 @@ void DetectOSCapabilities()
 {
     Log("--- Detecting OS Capabilities ---");
     
-    // 0. Detect CPU vendor and features
-    DetectCPUVendor();
+	// (Moved DetectCPUVendor to after physical core detection to fix division by zero)
     
     // 7. Detect CPU topology (physical vs logical cores) - MOVED UP to fix dependencies
     // Originally step 7, but needed for AMD topology detection heuristics
@@ -480,7 +479,10 @@ void DetectOSCapabilities()
     Log("CPU Topology: " + std::to_string(g_physicalCoreCount) + 
         " physical cores, " + std::to_string(g_logicalCoreCount) + 
         " logical cores (HT: " + 
-        std::string(g_logicalCoreCount > g_physicalCoreCount ? "ON" : "OFF") + ")");
+		std::string(g_logicalCoreCount > g_physicalCoreCount ? "ON" : "OFF") + ")");
+
+    // 0. Detect CPU vendor and features (Moved here so g_physicalCoreCount is valid)
+    DetectCPUVendor();
     
     if (g_cpuInfo.vendor == CPUVendor::AMD)
     {
