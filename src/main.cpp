@@ -9,6 +9,7 @@
 #include "events.h"
 #include "tweaks.h"
 #include "services.h"
+#include "restore.h"
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -220,6 +221,9 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     Log("All Levels Implemented: Session-Scoped | Cooldown | Registry Guard | Graceful Shutdown | OS Detection | Anti-Interference");
     
     DetectOSCapabilities();
+	// Create restore point before we do anything drastic, 
+    // but only if we have Admin rights (checked in DetectOSCapabilities)
+    EnsureStartupRestorePoint();
     DetectHybridCoreSupport();
 
     // Safety check: Restore services if they were left suspended from a crash
