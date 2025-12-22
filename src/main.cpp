@@ -93,9 +93,10 @@ static bool IsTaskInstalled(const std::wstring& taskName)
         return false;
     }
 
-    DWORD exitCode = STILL_ACTIVE;
-    while (GetExitCodeProcess(pi.hProcess, &exitCode) && exitCode == STILL_ACTIVE)
-        Sleep(10);
+	// Fix Use async wait with timeout to prevent startup hangs
+    WaitForSingleObject(pi.hProcess, 3000); 
+    DWORD exitCode = 0;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
         
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
