@@ -71,14 +71,6 @@ static DWORD ReadCurrentPrioritySeparation()
     return (rc == ERROR_SUCCESS) ? val : 0xFFFFFFFF;
 }
 
-static std::string GetModeDescription(DWORD val)
-{
-    if (val == VAL_GAME) return "GAME MODE (0x28) - Optimized for consistent frame times";
-    else if (val == VAL_BROWSER) return "BROWSER MODE (0x26) - Optimized for multitasking responsiveness";
-    else if (val == 0xFFFFFFFF) return "ERROR - Unable to read registry";
-    else return "CUSTOM/UNKNOWN (0x" + std::to_string(val) + ")";
-}
-
 static bool IsTaskInstalled(const std::wstring& taskName)
 {
     std::wstring cmd = L"schtasks /query /tn \"" + taskName + L"\"";

@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "constants.h"
 #include <algorithm>
 #include <cctype>
 
@@ -70,5 +71,13 @@ bool ContainsIgnoreCase(const std::string& haystack, const std::string& needle)
         }
     );
     
-    return it != haystack.end();
+return it != haystack.end();
+}
+
+std::string GetModeDescription(DWORD val)
+{
+    if (val == VAL_GAME) return "GAME MODE (0x28) - Optimized for consistent frame times";
+    else if (val == VAL_BROWSER) return "BROWSER MODE (0x26) - Optimized for multitasking responsiveness";
+    else if (val == 0xFFFFFFFF) return "ERROR - Unable to read registry";
+    else return "CUSTOM/UNKNOWN (0x" + std::to_string(val) + ")";
 }

@@ -23,6 +23,9 @@ bool IsProcessIdentityValid(const ProcessIdentity& identity);
 // Case-insensitive containment check
 bool ContainsIgnoreCase(const std::string& haystack, const std::string& needle);
 
+// Get friendly description for registry mode value
+std::string GetModeDescription(DWORD val);
+
 // RAII Wrapper for Windows HANDLEs
 struct HandleDeleter {
     void operator()(HANDLE h) const {
