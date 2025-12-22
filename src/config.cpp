@@ -13,6 +13,29 @@ static std::filesystem::path GetConfigPath()
     return GetLogPath() / CONFIG_FILENAME;
 }
 
+// Fix 4.3: Input Validation Helper
+static bool IsValidExecutableName(const std::string& name)
+{
+    if (name.empty() || name.length() > 64) return false;
+    
+    // Must end in .exe
+    if (name.length() < 4 || name.substr(name.length() - 4) != ".exe") return false;
+    
+    // No path separators allowed (filename only)
+    if (name.find_first_of("/\\") != std::string::npos) return false;
+
+    // Critical System Processes Blacklist
+    static const std::unordered_set<std::string> BLACKLIST = {
+        "svchost.exe", "csrss.exe", "wininit.exe", "services.exe", 
+        "lsass.exe", "winlogon.exe", "smss.exe", "system", "registry",
+        "audiodg.exe", "dwm.exe", "spoolsv.exe"
+    };
+    
+    if (BLACKLIST.count(name)) return false;
+    
+    return true;
+}
+
 bool CreateDefaultConfig(const std::filesystem::path& configPath)
 {
     try
@@ -148,8 +171,17 @@ void LoadConfig()
                 continue;
             }
             
-            asciiLower(item);
+			asciiLower(item);
             
+            // Validate inputs before insertion
+            if (!IsValidExecutableName(item) && (sect == G || sect == B))
+            {
+                // Only log if it's not a comment or empty (already filtered above, but safety first)
+                if (!item.empty())
+                    Log("[CFG] Skipped unsafe/invalid entry: " + item);
+                continue;
+            }
+
             if (sect == G && !item.empty()) games.insert(item);
             if (sect == B && !item.empty()) browsers.insert(item);
             if (sect == GW && !item.empty()) gameWindows.insert(item);
