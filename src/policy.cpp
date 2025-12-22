@@ -64,21 +64,23 @@ void CheckAndReleaseSessionLock()
         lockedIdentity = g_lockedProcessIdentity;
     }
 
-    if (!IsProcessIdentityValid(lockedIdentity))
+	if (!IsProcessIdentityValid(lockedIdentity))
     {
-        DWORD lockedPid = lockedIdentity.pid;
-        Log("Session lock RELEASED - process " + std::to_string(lockedPid) + " no longer exists");
-        
-        g_sessionLocked.store(false);
-        g_lockedGamePid.store(0);
-        
+        // Fix 1.5: Verify identity matches what we checked to prevent race (TOCTOU)
+        std::lock_guard lock(g_processIdentityMtx);
+        if (g_lockedProcessIdentity == lockedIdentity)
         {
-            std::lock_guard lock(g_processIdentityMtx);
+            DWORD lockedPid = lockedIdentity.pid;
+            Log("Session lock RELEASED - process " + std::to_string(lockedPid) + " no longer exists");
+            
+            g_sessionLocked.store(false);
+            g_lockedGamePid.store(0);
+            
             g_lastProcessIdentity = {0, {0, 0}};
             g_lockedProcessIdentity = {0, {0, 0}};
+            
+            ResumeBackgroundServices();
         }
-        
-        ResumeBackgroundServices();
     }
 }
 
