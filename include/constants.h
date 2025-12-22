@@ -5,6 +5,7 @@
 
 // Config
 static constexpr wchar_t CONFIG_FILENAME[] = L"config.ini";
+static constexpr int CONFIG_VERSION = 1; // Increment when config structure changes
 
 // Registry Values
 static constexpr DWORD   VAL_GAME   = 0x28;
@@ -34,6 +35,9 @@ static constexpr const char* DEFAULT_CONFIG = R"(; Priority Manager Configuratio
 ; Registry values:
 ;   Games:    0x28 - Optimized for consistent frame times
 ;   Browsers: 0x26 - Optimized for multitasking responsiveness
+
+[meta]
+version=1
 
 [global]
 ; Ignore non-interactive processes (services, scheduled tasks, SYSTEM processes)
