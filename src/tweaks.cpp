@@ -689,11 +689,21 @@ void SetTimerResolution(int mode)
         reinterpret_cast<NtSetTimerResolutionPtr>(
             GetProcAddress(ntdll, "NtSetTimerResolution"));
     
-    auto pNtQueryTimerResolution = 
+	auto pNtQueryTimerResolution = 
         reinterpret_cast<NtQueryTimerResolutionPtr>(
             GetProcAddress(ntdll, "NtQueryTimerResolution"));
     
     if (!pNtSetTimerResolution || !pNtQueryTimerResolution) return;
+
+    // Fix: Capture original resolution once
+    if (g_originalTimerResolution.load() == 0)
+    {
+        ULONG min = 0, max = 0, current = 0;
+        if (NT_SUCCESS(pNtQueryTimerResolution(&min, &max, &current)))
+        {
+            g_originalTimerResolution.store(current);
+        }
+    }
     
     if (mode == 1)
     {
