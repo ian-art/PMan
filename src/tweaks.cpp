@@ -59,32 +59,6 @@ void IntelligentRamClean()
     }
 }
 
-// Helper for SetPrioritySeparation verification
-static DWORD GetCurrentPrioritySeparation()
-{
-    HKEY key = nullptr;
-    LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-                            L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
-                            0, KEY_QUERY_VALUE, &key);
-    if (rc != ERROR_SUCCESS) 
-    {
-        return 0xFFFFFFFF;
-    }
-    
-    DWORD val = 0;
-    DWORD size = sizeof(val);
-    DWORD type = REG_DWORD;
-    
-    rc = RegQueryValueExW(key, L"Win32PrioritySeparation", nullptr, &type, 
-                         reinterpret_cast<BYTE*>(&val), &size);
-    RegCloseKey(key);
-    
-    if (rc == ERROR_SUCCESS)
-        return val;
-    
-    return 0xFFFFFFFF;
-}
-
 static bool VerifyPrioritySeparation(DWORD expectedVal)
 {
     DWORD currentVal = GetCurrentPrioritySeparation();

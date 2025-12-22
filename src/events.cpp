@@ -371,8 +371,7 @@ void AntiInterferenceWatchdog()
     Log("Anti-Interference Watchdog started");
 
     int gcCycles = 0; // Track cycles for garbage collection
-    HKEY hRegKey = nullptr; // Fix Cache registry handle
-	
+
 	while (g_running)
     {
         // Fix 6.1: Health Checks
@@ -413,25 +412,8 @@ void AntiInterferenceWatchdog()
         // We will move GetCurrentPrioritySeparation to a shared header or rely on simple reg read here.
         
 		DWORD actualVal = 0xFFFFFFFF;
-        
-        // Only open if not already cached
-        if (!hRegKey) {
-            RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl", 
-                         0, KEY_QUERY_VALUE, &hRegKey);
-        }
 
-        if (hRegKey) {
-            DWORD val = 0;
-            DWORD size = sizeof(val);
-            if (RegQueryValueExW(hRegKey, L"Win32PrioritySeparation", nullptr, nullptr, 
-                                reinterpret_cast<BYTE*>(&val), &size) == ERROR_SUCCESS) {
-                actualVal = val;
-            } else {
-                // If read fails, close handle to force re-open next time
-                RegCloseKey(hRegKey);
-                hRegKey = nullptr;
-            }
-        }
+		actualVal = GetCurrentPrioritySeparation();
 
         if (actualVal != 0xFFFFFFFF && actualVal != expectedVal)
         {
@@ -523,8 +505,7 @@ void AntiInterferenceWatchdog()
                 }
             }
         }
-    }
-	if (hRegKey) RegCloseKey(hRegKey);    
+    } 
     g_threadCount--;
     g_shutdownCv.notify_one();
 }

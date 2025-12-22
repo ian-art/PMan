@@ -81,3 +81,19 @@ std::string GetModeDescription(DWORD val)
     else if (val == 0xFFFFFFFF) return "ERROR - Unable to read registry";
     else return "CUSTOM/UNKNOWN (0x" + std::to_string(val) + ")";
 }
+
+DWORD GetCurrentPrioritySeparation()
+{
+    HKEY key = nullptr;
+    LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                            L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
+                            0, KEY_QUERY_VALUE, &key);
+    if (rc != ERROR_SUCCESS) return 0xFFFFFFFF;
+    
+    DWORD val = 0;
+    DWORD size = sizeof(val);
+    rc = RegQueryValueExW(key, L"Win32PrioritySeparation", nullptr, nullptr, reinterpret_cast<BYTE*>(&val), &size);
+    RegCloseKey(key);
+    
+    return (rc == ERROR_SUCCESS) ? val : 0xFFFFFFFF;
+}
