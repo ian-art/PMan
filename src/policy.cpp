@@ -31,11 +31,11 @@ int DetectWindowType(HWND hwnd)
     
     std::shared_lock lg(g_setMtx);
     
-    // Check game windows (patterns are already lowercase from config)
+	// Fix Use direct find() since strings are already lowercased (avoids allocs)
     for (const auto& pattern : g_gameWindows)
     {
-        if (ContainsIgnoreCase(titleStr, pattern) || 
-            ContainsIgnoreCase(classStr, pattern))
+        if (titleStr.find(pattern) != std::string::npos || 
+            classStr.find(pattern) != std::string::npos)
         {
             return 1;
         }
@@ -44,8 +44,8 @@ int DetectWindowType(HWND hwnd)
     // Check browser windows
     for (const auto& pattern : g_browserWindows)
     {
-        if (ContainsIgnoreCase(titleStr, pattern) || 
-            ContainsIgnoreCase(classStr, pattern))
+        if (titleStr.find(pattern) != std::string::npos || 
+            classStr.find(pattern) != std::string::npos)
         {
             return 2;
         }
@@ -66,7 +66,7 @@ void CheckAndReleaseSessionLock()
 
 	if (!IsProcessIdentityValid(lockedIdentity))
     {
-        // Fix 1.5: Verify identity matches what we checked to prevent race (TOCTOU)
+        // Fix Verify identity matches what we checked to prevent race (TOCTOU)
         std::lock_guard lock(g_processIdentityMtx);
         if (g_lockedProcessIdentity == lockedIdentity)
         {
