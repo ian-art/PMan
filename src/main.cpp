@@ -106,10 +106,15 @@ static bool IsTaskInstalled(const std::wstring& taskName)
 
 int wmain(int argc, wchar_t** argv)
 {
+    // Fix Silent Install/Uninstall Support
     bool uninstall = false;
-    if (argc > 1 && std::wstring(argv[1]) == L"--uninstall")
+    bool silent = false;
+
+    for (int i = 1; i < argc; i++)
     {
-        uninstall = true;
+        std::wstring arg = argv[i];
+        if (arg == L"--uninstall" || arg == L"/uninstall") uninstall = true;
+        else if (arg == L"/S" || arg == L"/s" || arg == L"/silent" || arg == L"-silent" || arg == L"/quiet") silent = true;
     }
 
     if (!uninstall)
@@ -117,9 +122,12 @@ int wmain(int argc, wchar_t** argv)
         g_hMutex = CreateMutexW(nullptr, TRUE, MUTEX_NAME);
         if (GetLastError() == ERROR_ALREADY_EXISTS)
         {
-            MessageBoxW(nullptr, 
-                L"Priority Manager is already running.", 
-                L"Priority Manager", MB_OK | MB_ICONINFORMATION);
+            if (!silent)
+            {
+                MessageBoxW(nullptr, 
+                    L"Priority Manager is already running.", 
+                    L"Priority Manager", MB_OK | MB_ICONINFORMATION);
+            }
             return 0;
         }
     }
@@ -137,11 +145,14 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     {
         TerminateExistingInstances();
 
-        if (!IsTaskInstalled(taskName))
+		if (!IsTaskInstalled(taskName))
         {
-            MessageBoxW(nullptr, 
-                L"Priority Manager is not currently installed.\nAny running instances have been stopped.", 
-                L"Priority Manager", MB_OK | MB_ICONWARNING);
+            if (!silent)
+            {
+                MessageBoxW(nullptr, 
+                    L"Priority Manager is not currently installed.\nAny running instances have been stopped.", 
+                    L"Priority Manager", MB_OK | MB_ICONWARNING);
+            }
             if (g_hMutex) { CloseHandle(g_hMutex); g_hMutex = nullptr; }
             return 0;
         }
@@ -158,9 +169,12 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
             CloseHandle(pi.hProcess);
         }
 
-        MessageBoxW(nullptr, 
-            L"Priority Manager has been successfully uninstalled.\nAny running instance has been stopped and the startup task removed.", 
-            L"Priority Manager", MB_OK | MB_ICONINFORMATION);
+        if (!silent)
+        {
+            MessageBoxW(nullptr, 
+                L"Priority Manager has been successfully uninstalled.\nAny running instance has been stopped and the startup task removed.", 
+                L"Priority Manager", MB_OK | MB_ICONINFORMATION);
+        }
 
         if (g_hMutex) { CloseHandle(g_hMutex); g_hMutex = nullptr; }
         return 0;
@@ -184,19 +198,22 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
             CloseHandle(pi.hThread);
             CloseHandle(pi.hProcess);
 
-            if (exitCode == 0)
+		if (exitCode == 0)
             {
-                MessageBoxW(nullptr, L"Priority Manager installed successfully!\nIt will now run automatically at logon and is currently active.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
+                if (!silent)
+                    MessageBoxW(nullptr, L"Priority Manager installed successfully!\nIt will now run automatically at logon and is currently active.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
             }
             else
             {
-                MessageBoxW(nullptr, L"Failed to create startup task. Please run as Administrator.", L"Priority Manager - Error", MB_OK | MB_ICONWARNING);
+                if (!silent)
+                    MessageBoxW(nullptr, L"Failed to create startup task. Please run as Administrator.", L"Priority Manager - Error", MB_OK | MB_ICONWARNING);
                 return 1;
             }
         }
         else
         {
-            MessageBoxW(nullptr, L"Failed to launch schtasks. Please run as Administrator.", L"Priority Manager - Error", MB_OK | MB_ICONWARNING);
+            if (!silent)
+                MessageBoxW(nullptr, L"Failed to launch schtasks. Please run as Administrator.", L"Priority Manager - Error", MB_OK | MB_ICONWARNING);
             return 1;
         }
     }
