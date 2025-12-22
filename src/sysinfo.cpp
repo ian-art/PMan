@@ -477,13 +477,16 @@ void DetectOSCapabilities()
         }
     }
 	
-    // RE-RUN AMD Topology detection now that physical core count is known
-    // This fixes the potential 0-core issue from the original code flow
-    if (g_cpuInfo.vendor == CPUVendor::AMD && g_cpuInfo.hasAmd3DVCache)
-    {
-        DetectAMDChipletTopology();
-    }
-    
+	// 1. Log Topology first
+    Log("CPU Topology: " + std::to_string(g_physicalCoreCount) + 
+        " physical cores, " + std::to_string(g_logicalCoreCount) + 
+        " logical cores (HT: " + 
+		std::string(g_logicalCoreCount > g_physicalCoreCount ? "ON" : "OFF") + ")");
+
+    // 2. Detect CPU vendor (Now that g_physicalCoreCount is valid)
+    DetectCPUVendor();
+
+    // 3. Log CPU details (Now that detection is complete)
     std::string cpuVendorStr;
     switch (g_cpuInfo.vendor)
     {
@@ -493,13 +496,6 @@ void DetectOSCapabilities()
     }
     
     Log("CPU: " + cpuVendorStr + " - " + g_cpuInfo.brandString);
-    Log("CPU Topology: " + std::to_string(g_physicalCoreCount) + 
-        " physical cores, " + std::to_string(g_logicalCoreCount) + 
-        " logical cores (HT: " + 
-		std::string(g_logicalCoreCount > g_physicalCoreCount ? "ON" : "OFF") + ")");
-
-    // 0. Detect CPU vendor and features (Moved here so g_physicalCoreCount is valid)
-    DetectCPUVendor();
     
     if (g_cpuInfo.vendor == CPUVendor::AMD)
     {
