@@ -101,9 +101,10 @@ void LoadConfig()
             return; 
         }
         
-        std::wstring line;
-        enum Sect { NONE, GLOBAL, G, B, GW, BW } sect = NONE;
+		std::wstring line;
+        enum Sect { NONE, META, GLOBAL, G, B, GW, BW } sect = NONE;
         int lineNum = 0;
+        int configVersion = 0; // Default to 0 (legacy/unknown)
         
         while (std::getline(f, line))
         {
@@ -124,12 +125,30 @@ void LoadConfig()
                 std::string secNameAscii = WideToUtf8(secName.c_str());
                 asciiLower(secNameAscii);
                 
-                if (secNameAscii == "global") sect = GLOBAL;
+				if (secNameAscii == "global") sect = GLOBAL;
+                else if (secNameAscii == "meta") sect = META;
                 else if (secNameAscii == "games") sect = G;
                 else if (secNameAscii == "browsers") sect = B;
                 else if (secNameAscii == "game_windows") sect = GW;
                 else if (secNameAscii == "browser_windows") sect = BW;
                 else sect = NONE;
+                continue;
+            }
+            
+            // Handle Meta Section
+            if (sect == META)
+            {
+                size_t eqPos = item.find('=');
+                if (eqPos != std::string::npos)
+                {
+                    std::string key = item.substr(0, eqPos);
+                    std::string value = item.substr(eqPos + 1);
+                    // Simple trim/lower
+                    asciiLower(key);
+                    if (key.find("version") != std::string::npos) {
+                        try { configVersion = std::stoi(value); } catch(...) { configVersion = 0; }
+                    }
+                }
                 continue;
             }
             
@@ -206,10 +225,28 @@ void LoadConfig()
             std::to_string(g_browserWindows.size()) + " browser windows | " +
             "ignore_non_interactive=" + (ignoreNonInteractive ? "true" : "false") + " | " +
             "restore_on_exit=" + (restoreOnExit ? "true" : "false") + " | " +
-            "lock_policy=" + (lockPolicy ? "true" : "false") + " | " +
+			"lock_policy=" + (lockPolicy ? "true" : "false") + " | " +
             "suspend_updates=" + (g_suspendUpdatesDuringGames.load() ? "true" : "false"));
+
+        // Fix Migration/Reset Logic
+        if (configVersion < CONFIG_VERSION)
+        {
+            f.close(); // Close reader before moving
+            Log("[CONFIG] Version mismatch (File: " + std::to_string(configVersion) + 
+                ", App: " + std::to_string(CONFIG_VERSION) + "). backing up and resetting...");
+            
+            std::filesystem::path backupPath = configPath;
+            backupPath += L".old";
+            std::filesystem::copy_file(configPath, backupPath, std::filesystem::copy_options::overwrite_existing);
+            std::filesystem::remove(configPath);
+            CreateDefaultConfig(configPath);
+            
+            // Recursively load the new config
+            LoadConfig(); 
+            return;
+        }
     }
-    catch (const std::exception& e) 
+    catch (const std::exception& e)
     { 
         Log(std::string("LoadConfig exception: ") + e.what()); 
     }
