@@ -4,6 +4,8 @@
 #include "utils.h"
 #include <vector>
 #include <string>
+#include <unordered_set>
+#include <algorithm>
 
 WindowsServiceManager::~WindowsServiceManager()
 {
@@ -89,6 +91,25 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
 
 bool WindowsServiceManager::SuspendService(const std::wstring& serviceName)
 {
+    // Fix 4.2: Service Whitelist Check
+    static const std::unordered_set<std::wstring> SAFE_SERVICES = {
+        L"wuauserv",      // Windows Update
+        L"bits",          // Background Intelligent Transfer
+        L"dosvc",         // Delivery Optimization
+        L"sysmain",       // Superfetch/SysMain
+        L"clicktorunsvc", // Office Updates
+        L"windefend"      // Just kidding - blocked by Admin logic anyway, but good practice
+    };
+
+    std::wstring checkName = serviceName;
+    std::transform(checkName.begin(), checkName.end(), checkName.begin(), ::towlower);
+
+    if (SAFE_SERVICES.find(checkName) == SAFE_SERVICES.end())
+    {
+        Log("[SEC] Blocked attempt to suspend non-whitelisted service: " + WideToUtf8(serviceName.c_str()));
+        return false;
+    }
+
     std::lock_guard lock(m_mutex);
     
     auto it = m_services.find(serviceName);
