@@ -313,9 +313,10 @@ void IocpConfigWatcher()
         
         if (pov)
         {
-            if (pov == &ov)
+				if (pov == &ov)
             {
-                PostIocp(JobType::Config);
+                // Fix 1.1: Avoid race condition by setting flag directly instead of posting new job
+                g_reloadNow.store(true);
                 read();
             }
             else
