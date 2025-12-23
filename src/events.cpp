@@ -10,7 +10,6 @@
 #include <iostream>
 #include <vector>
 
-// Add static queue limit counter
 static std::atomic<int> g_iocpQueueSize{0};
 static constexpr int MAX_IOCP_QUEUE_SIZE = 1000;
 
@@ -338,9 +337,10 @@ void IocpConfigWatcher()
         
         if (pov)
         {
-            if (pov == &ov)
+				if (pov == &ov)
             {
-                g_reloadNow.store(true, std::memory_order_release);
+                // Fix 1.1: Avoid race condition by setting flag directly instead of posting new job
+                g_reloadNow.store(true);
                 read();
             }
                 else
