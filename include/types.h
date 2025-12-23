@@ -146,6 +146,7 @@ enum class CPUVendor
     Unknown,
     Intel,
     AMD,
+	ARM64,
     Other
 };
 

@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <iostream>
 #include <intrin.h>
+#include <bit> // For std::popcount
 
 // Forward declarations
 static void DetectAMDChipletTopology();
@@ -17,6 +18,17 @@ static void DetectAMDFeatures();
 
 static void DetectCPUVendor()
 {
+#if defined(_M_ARM64)
+    g_cpuInfo.vendor = CPUVendor::ARM64;
+    g_cpuInfo.vendorString = "ARM64";
+    g_cpuInfo.brandString = "Windows on ARM64";
+    
+    // Basic feature detection for ARM64
+    if (IsProcessorFeaturePresent(PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE))
+    {
+        g_cpuInfo.brandString += " (Crypto Extensions)";
+    }
+#elif defined(_M_AMD64) || defined(_M_IX86)
     int cpuInfo[4] = {0};
     
     // CPUID leaf 0: Vendor string
@@ -69,6 +81,11 @@ static void DetectCPUVendor()
     {
         DetectAMDFeatures();
     }
+#else
+    g_cpuInfo.vendor = CPUVendor::Other;
+    g_cpuInfo.vendorString = "Unknown";
+    g_cpuInfo.brandString = "Unknown Architecture";
+#endif
 }
 
 static void DetectAMDFeatures()
@@ -141,11 +158,11 @@ static void DetectAMDChipletTopology()
             // Each L3 cache represents a CCD
            DWORD ccdId = static_cast<DWORD>(l3CacheGroups.size());
             
-            // Count cores in this L3 group
+			// Count cores in this L3 group
             DWORD coreCount = 0;
             for (WORD i = 0; i < current->Cache.GroupMask.Group; i++)
             {
-                coreCount += static_cast<DWORD>(__popcnt64(current->Cache.GroupMask.Mask));
+                coreCount += static_cast<DWORD>(std::popcount(current->Cache.GroupMask.Mask));
             }
             
             l3CacheGroups[ccdId] = std::vector<DWORD>();
@@ -489,10 +506,11 @@ void DetectOSCapabilities()
 
     // 3. Log CPU details (Now that detection is complete)
     std::string cpuVendorStr;
-    switch (g_cpuInfo.vendor)
+	switch (g_cpuInfo.vendor)
     {
         case CPUVendor::Intel: cpuVendorStr = "Intel"; break;
         case CPUVendor::AMD:   cpuVendorStr = "AMD"; break;
+        case CPUVendor::ARM64: cpuVendorStr = "ARM64"; break;
         default:               cpuVendorStr = "Unknown"; break;
     }
     
