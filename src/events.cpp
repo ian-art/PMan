@@ -107,8 +107,11 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
                 
                 if (TdhGetProperty(rec, 0, nullptr, 1, &desc, pidSize, reinterpret_cast<BYTE*>(&pid)) == ERROR_SUCCESS)
                 {
-                    if (pid != 0)
+					if (pid != 0)
                     {
+                        // Phase 3: Update Heartbeat
+                        g_lastEtwHeartbeat.store(GetTickCount64(), std::memory_order_relaxed);
+
                         if (opcode == 1)
                         {
                             // Process started - evaluate for policy
@@ -516,7 +519,7 @@ void AntiInterferenceWatchdog()
         }
         else if (waitResult == WAIT_TIMEOUT) // Heartbeat
         {
-            // 1. Health Checks
+			// 1. Health Checks
             if (!g_hIocp || g_hIocp == INVALID_HANDLE_VALUE)
             {
                 Log("[HEALTH] CRITICAL: IOCP handle is invalid. Initiating shutdown.");
@@ -524,13 +527,34 @@ void AntiInterferenceWatchdog()
                 break;
             }
 
-            if (g_caps.canUseEtw && g_etwSession.load() == 0 && g_running)
+            // ETW Heartbeat & Auto-Recovery
+            if (g_caps.canUseEtw && g_running)
             {
-                 static bool etwWarned = false;
-                 if (!etwWarned) {
-                     Log("[HEALTH] WARNING: ETW Session is not active (did it crash?)");
-                     etwWarned = true;
-                 }
+                uint64_t lastHeartbeat = g_lastEtwHeartbeat.load(std::memory_order_relaxed);
+                uint64_t now = GetTickCount64();
+                
+                // If 0, initialize (first run grace period)
+                if (lastHeartbeat == 0)
+                {
+                     g_lastEtwHeartbeat.compare_exchange_strong(lastHeartbeat, now);
+                }
+                else if ((now - lastHeartbeat) > 60000) // 60s silence timeout
+                {
+                    Log("[HEALTH] ETW Heartbeat lost (>60s). Restarting session...");
+                    
+                    // Force stop existing session (unblocks stuck threads)
+                    ForceStopEtwSession();
+                    
+                    // Spawn replacement thread
+                    std::thread restartThread([]() {
+                        Log("[HEALTH] Spawning new ETW thread...");
+                        EtwThread(); 
+                    });
+                    restartThread.detach();
+                    
+                    // Reset heartbeat to prevent loop while starting
+                    g_lastEtwHeartbeat.store(now);
+                }
             }
 
             // 2. Garbage Collection (Every ~2 mins -> 12 * 10s)

@@ -95,3 +95,4 @@ std::atomic<DWORD> g_cachedRegistryValue{0xFFFFFFFF};
 HANDLE g_hShutdownEvent = nullptr;
 DWORD g_originalRegistryValue = 0xFFFFFFFF;
 std::atomic<TRACEHANDLE> g_etwSession{0};
+std::atomic<uint64_t> g_lastEtwHeartbeat{0};

@@ -109,5 +109,6 @@ extern std::atomic<DWORD> g_cachedRegistryValue;
 extern HANDLE g_hShutdownEvent;
 extern DWORD g_originalRegistryValue;
 extern std::atomic<TRACEHANDLE> g_etwSession;
+extern std::atomic<uint64_t> g_lastEtwHeartbeat; // ETW Liveness
 
 #endif // PMAN_GLOBALS_H
