@@ -33,10 +33,10 @@ std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime{0};
 
 // Config Storage
 std::shared_mutex g_setMtx;
-std::unordered_set<std::string> g_games;
-std::unordered_set<std::string> g_browsers;
-std::unordered_set<std::string> g_gameWindows;
-std::unordered_set<std::string> g_browserWindows;
+std::unordered_set<std::wstring> g_games;
+std::unordered_set<std::wstring> g_browsers;
+std::unordered_set<std::wstring> g_gameWindows;
+std::unordered_set<std::wstring> g_browserWindows;
 
 // Event Handles & Synchronization
 HANDLE  g_hIocp = nullptr;

@@ -13,35 +13,35 @@ static std::filesystem::path GetConfigPath()
     return GetLogPath() / CONFIG_FILENAME;
 }
 
-// Fix 4.3: Input Validation Helper
-static bool IsValidExecutableName(const std::string& name)
+// Fix Input Validation Helper
+static bool IsValidExecutableName(const std::wstring& name)
 {
     if (name.empty() || name.length() > 64) return false;
     
     // Must end in .exe
-    if (name.length() < 4 || name.substr(name.length() - 4) != ".exe") return false;
+    if (name.length() < 4 || name.substr(name.length() - 4) != L".exe") return false;
     
 	// No path separators allowed (filename only)
-    if (name.find_first_of("/\\") != std::string::npos) return false;
+    if (name.find_first_of(L"/\\") != std::wstring::npos) return false;
 
     // Validation: Ensure strict filename (rejects ".." and relative paths)
-    if (std::filesystem::path(name).filename().string() != name) return false;
+    if (std::filesystem::path(name).filename().wstring() != name) return false;
 
     // Check for reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
     // Name is already lowercased and confirmed to end in .exe by previous checks
-    std::string stem = name.substr(0, name.length() - 4);
-    static const std::unordered_set<std::string> RESERVED_NAMES = {
-        "con", "prn", "aux", "nul", 
-        "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
-        "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"
+    std::wstring stem = name.substr(0, name.length() - 4);
+    static const std::unordered_set<std::wstring> RESERVED_NAMES = {
+        L"con", L"prn", L"aux", L"nul", 
+        L"com1", L"com2", L"com3", L"com4", L"com5", L"com6", L"com7", L"com8", L"com9",
+        L"lpt1", L"lpt2", L"lpt3", L"lpt4", L"lpt5", L"lpt6", L"lpt7", L"lpt8", L"lpt9"
     };
     if (RESERVED_NAMES.count(stem)) return false;
 
     // Critical System Processes Blacklist
-    static const std::unordered_set<std::string> BLACKLIST = {
-        "svchost.exe", "csrss.exe", "wininit.exe", "services.exe", 
-        "lsass.exe", "winlogon.exe", "smss.exe", "system", "registry",
-        "audiodg.exe", "dwm.exe", "spoolsv.exe"
+    static const std::unordered_set<std::wstring> BLACKLIST = {
+        L"svchost.exe", L"csrss.exe", L"wininit.exe", L"services.exe", 
+        L"lsass.exe", L"winlogon.exe", L"smss.exe", L"system", L"registry",
+        L"audiodg.exe", L"dwm.exe", L"spoolsv.exe"
     };
     
     if (BLACKLIST.count(name)) return false;
@@ -93,10 +93,10 @@ void LoadConfig()
     
     g_lastConfigReload.store(now);
     
-    try
+try
     {
         std::filesystem::path configPath = GetConfigPath();
-        std::unordered_set<std::string> games, browsers, gameWindows, browserWindows;
+        std::unordered_set<std::wstring> games, browsers, gameWindows, browserWindows;
         bool ignoreNonInteractive = true;
         bool restoreOnExit = true;
         bool lockPolicy = false;
@@ -135,33 +135,32 @@ void LoadConfig()
             if (s.front() == L'[' && s.back() == L']')
             {
                 std::wstring secName = s.substr(1, s.size() - 2);
-                std::string secNameAscii = WideToUtf8(secName.c_str());
-                asciiLower(secNameAscii);
+                asciiLower(secName);
                 
-				if (secNameAscii == "global") sect = GLOBAL;
-                else if (secNameAscii == "meta") sect = META;
-                else if (secNameAscii == "games") sect = G;
-                else if (secNameAscii == "browsers") sect = B;
-                else if (secNameAscii == "game_windows") sect = GW;
-                else if (secNameAscii == "browser_windows") sect = BW;
+				if (secName == L"global") sect = GLOBAL;
+                else if (secName == L"meta") sect = META;
+                else if (secName == L"games") sect = G;
+                else if (secName == L"browsers") sect = B;
+                else if (secName == L"game_windows") sect = GW;
+                else if (secName == L"browser_windows") sect = BW;
 				else sect = NONE;
                 continue;
             }
             
             // Define item here so it's available for all sections
-            std::string item = WideToUtf8(s.c_str());
+            std::wstring item = s;
 
             // Handle Meta Section
             if (sect == META)
             {
-                size_t eqPos = item.find('=');
-                if (eqPos != std::string::npos)
+                size_t eqPos = item.find(L'=');
+                if (eqPos != std::wstring::npos)
                 {
-                    std::string key = item.substr(0, eqPos);
-                    std::string value = item.substr(eqPos + 1);
+                    std::wstring key = item.substr(0, eqPos);
+                    std::wstring value = item.substr(eqPos + 1);
                     // Simple trim/lower
                     asciiLower(key);
-                    if (key.find("version") != std::string::npos) {
+                    if (key.find(L"version") != std::wstring::npos) {
                         try { configVersion = std::stoi(value); } catch(...) { configVersion = 0; }
                     }
 				}
@@ -170,35 +169,35 @@ void LoadConfig()
 
             if (sect == GLOBAL)
             {
-                size_t eqPos = item.find('=');
-                if (eqPos != std::string::npos)
+                size_t eqPos = item.find(L'=');
+                if (eqPos != std::wstring::npos)
                 {
-                    std::string key = item.substr(0, eqPos);
-                    std::string value = item.substr(eqPos + 1);
+                    std::wstring key = item.substr(0, eqPos);
+                    std::wstring value = item.substr(eqPos + 1);
                     
-                    key.erase(0, key.find_first_not_of(" \t"));
-                    key.erase(key.find_last_not_of(" \t") + 1);
-                    value.erase(0, value.find_first_not_of(" \t"));
-                    value.erase(value.find_last_not_of(" \t") + 1);
+                    key.erase(0, key.find_first_not_of(L" \t"));
+                    key.erase(key.find_last_not_of(L" \t") + 1);
+                    value.erase(0, value.find_first_not_of(L" \t"));
+                    value.erase(value.find_last_not_of(L" \t") + 1);
                     
                     asciiLower(key);
                     asciiLower(value);
                     
-                    if (key == "ignore_non_interactive")
+                    if (key == L"ignore_non_interactive")
                     {
-                        ignoreNonInteractive = (value == "true" || value == "1" || value == "yes");
+                        ignoreNonInteractive = (value == L"true" || value == L"1" || value == L"yes");
                     }
-                    else if (key == "restore_on_exit")
+                    else if (key == L"restore_on_exit")
                     {
-                        restoreOnExit = (value == "true" || value == "1" || value == "yes");
+                        restoreOnExit = (value == L"true" || value == L"1" || value == L"yes");
                     }
-                    else if (key == "suspend_updates_during_games")
+                    else if (key == L"suspend_updates_during_games")
                     {
-                        g_suspendUpdatesDuringGames.store(value == "true" || value == "1" || value == "yes");
+                        g_suspendUpdatesDuringGames.store(value == L"true" || value == L"1" || value == L"yes");
                     }
-                    else if (key == "lock_policy")
+                    else if (key == L"lock_policy")
                     {
-                        lockPolicy = (value == "true" || value == "1" || value == "yes");
+                        lockPolicy = (value == L"true" || value == L"1" || value == L"yes");
                     }
                 }
                 continue;
@@ -211,7 +210,7 @@ void LoadConfig()
             {
                 // Only log if it's not a comment or empty (already filtered above, but safety first)
                 if (!item.empty())
-                    Log("[CFG] Skipped unsafe/invalid entry: " + item);
+                    Log("[CFG] Skipped unsafe/invalid entry: " + WideToUtf8(item.c_str()));
                 continue;
             }
 

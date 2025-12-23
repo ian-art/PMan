@@ -9,10 +9,11 @@
 std::string WideToUtf8(const wchar_t* wstr);
 
 // Extract executable name from a full path
-std::string ExeFromPath(const wchar_t* path);
+std::wstring ExeFromPath(const wchar_t* path);
 
 // Convert ASCII string to lowercase in-place
 void asciiLower(std::string& s);
+void asciiLower(std::wstring& s);
 
 // Get process identity (PID + creation time)
 bool GetProcessIdentity(DWORD pid, ProcessIdentity& identity);
@@ -22,9 +23,12 @@ bool IsProcessIdentityValid(const ProcessIdentity& identity);
 
 // Case-insensitive containment check
 bool ContainsIgnoreCase(const std::string& haystack, const std::string& needle);
+bool ContainsIgnoreCase(const std::wstring& haystack, const std::wstring& needle);
 
 // Get friendly description for registry mode value
 std::string GetModeDescription(DWORD val);
+
+DWORD GetCurrentPrioritySeparation();
 
 // RAII Wrapper for Windows HANDLEs
 struct HandleDeleter {

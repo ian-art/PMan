@@ -22,8 +22,8 @@ int DetectWindowType(HWND hwnd)
     GetWindowTextW(hwnd, title, 512);
     GetClassNameW(hwnd, className, 256);
     
-    std::string titleStr = WideToUtf8(title);
-    std::string classStr = WideToUtf8(className);
+    std::wstring titleStr = title;
+    std::wstring classStr = className;
     
     // Convert to lowercase once (optimization)
     asciiLower(titleStr);
@@ -34,8 +34,8 @@ int DetectWindowType(HWND hwnd)
 	// Fix Use direct find() since strings are already lowercased (avoids allocs)
     for (const auto& pattern : g_gameWindows)
     {
-        if (titleStr.find(pattern) != std::string::npos || 
-            classStr.find(pattern) != std::string::npos)
+        if (titleStr.find(pattern) != std::wstring::npos || 
+            classStr.find(pattern) != std::wstring::npos)
         {
             return 1;
         }
@@ -44,8 +44,8 @@ int DetectWindowType(HWND hwnd)
     // Check browser windows
     for (const auto& pattern : g_browserWindows)
     {
-        if (titleStr.find(pattern) != std::string::npos || 
-            classStr.find(pattern) != std::string::npos)
+        if (titleStr.find(pattern) != std::wstring::npos || 
+            classStr.find(pattern) != std::wstring::npos)
         {
             return 2;
         }
@@ -215,14 +215,14 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         return;
     }
     
-    wchar_t path[MAX_PATH];
+	wchar_t path[MAX_PATH];
     DWORD sz = MAX_PATH;
     BOOL success = QueryFullProcessImageNameW(h, 0, path, &sz);
     CloseHandle(h);
     
     if (!success) return;
     
-    std::string exe = ExeFromPath(path);
+    std::wstring exe = ExeFromPath(path);
     if (exe.empty()) return;
 
     int mode = 0;
@@ -232,7 +232,7 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         mode = DetectWindowType(hwnd);
         if (mode != 0)
         {
-            Log("Window detection: " + exe + " detected via window " + 
+            Log("Window detection: " + WideToUtf8(exe.c_str()) + " detected via window " + 
                 (mode == 1 ? "(GAME)" : "(BROWSER)"));
         }
     }
@@ -341,9 +341,9 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         SetTimerResolution(mode);
         SetTimerCoalescingControl(mode);
     }
-    else if (modeChanged)
+	else if (modeChanged)
     {
-        Log("[READ-ONLY] Detected " + exe + " -> Would set " + 
+        Log("[READ-ONLY] Detected " + WideToUtf8(exe.c_str()) + " -> Would set " + 
             (mode == 1 ? "GAME" : "BROWSER") + " mode, but missing Admin rights.");
         changeSuccess = true; 
     }
@@ -356,7 +356,7 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     if (changeSuccess)
     {
         // Update tracking (always)
-        if (modeChanged)
+		if (modeChanged)
         {
             g_lastMode.store(mode);
         }
@@ -371,7 +371,7 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         
         if (modeChanged)
         {
-            Log((mode == 1 ? "[GAME] "s : "[BROWSER] "s) + exe);
+            Log((mode == 1 ? "[GAME] "s : "[BROWSER] "s) + WideToUtf8(exe.c_str()));
         }
         
         // Apply PROCESS-SPECIFIC optimizations (ALWAYS for new PID)
