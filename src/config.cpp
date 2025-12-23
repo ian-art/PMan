@@ -27,6 +27,16 @@ static bool IsValidExecutableName(const std::string& name)
     // Validation: Ensure strict filename (rejects ".." and relative paths)
     if (std::filesystem::path(name).filename().string() != name) return false;
 
+    // Check for reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    // Name is already lowercased and confirmed to end in .exe by previous checks
+    std::string stem = name.substr(0, name.length() - 4);
+    static const std::unordered_set<std::string> RESERVED_NAMES = {
+        "con", "prn", "aux", "nul", 
+        "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+        "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"
+    };
+    if (RESERVED_NAMES.count(stem)) return false;
+
     // Critical System Processes Blacklist
     static const std::unordered_set<std::string> BLACKLIST = {
         "svchost.exe", "csrss.exe", "wininit.exe", "services.exe", 
