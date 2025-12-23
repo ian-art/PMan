@@ -617,11 +617,10 @@ void SetGpuPriority(DWORD pid, int mode)
         auto pNtSetInformationProcess = 
             reinterpret_cast<NtSetInformationProcessPtr>(
                 GetProcAddress(ntdll, "NtSetInformationProcess"));
-        
-        if (pNtSetInformationProcess)
+		if (pNtSetInformationProcess)
         {
             PROCESS_INFORMATION_CLASS gpuPriorityClass = 
-                static_cast<PROCESS_INFORMATION_CLASS>(82);
+                static_cast<PROCESS_INFORMATION_CLASS>(UndocumentedApi::ProcessGpuPriority);
             
             ULONG gpuPriority = (mode == 1) ? 1 : 0;
             
@@ -701,14 +700,19 @@ void SetProcessAffinity(DWORD pid, int mode)
 	// Fix Better error handling/recovery
     HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, 
                                    FALSE, pid);
-    if (!hProcess) 
+if (!hProcess) 
     {
         DWORD err = GetLastError();
-        // Silent fail for Access Denied (system processes), log others
         if (err != ERROR_ACCESS_DENIED)
         {
             Log("[AFFINITY] OpenProcess failed for PID " + std::to_string(pid) + ": " + std::to_string(err));
         }
+#ifdef _DEBUG
+        else
+        {
+            Log("[DEBUG] [AFFINITY] OpenProcess Access Denied for PID " + std::to_string(pid));
+        }
+#endif
         return;
     }
     
@@ -1028,12 +1032,12 @@ void OptimizeThreadScheduling(DWORD pid, int mode)
                 
                 if (hThread)
                 {
-                    if (mode == 1) // GAME MODE
+					if (mode == 1) // GAME MODE
                     {
                         LONG basePriority = THREAD_PRIORITY_HIGHEST;
                         NTSTATUS status = pNtSetInformationThread(
                             hThread, 
-                            static_cast<THREADINFOCLASS>(3), 
+                            static_cast<THREADINFOCLASS>(UndocumentedApi::ThreadBasePriority), 
                             &basePriority, 
                             sizeof(basePriority));
                         
@@ -1056,10 +1060,10 @@ void OptimizeThreadScheduling(DWORD pid, int mode)
                     }
                     else if (mode == 2) // BROWSER MODE
                     {
-                        LONG basePriority = THREAD_PRIORITY_NORMAL;
+						LONG basePriority = THREAD_PRIORITY_NORMAL;
                         pNtSetInformationThread(
                             hThread, 
-                            static_cast<THREADINFOCLASS>(3), 
+                            static_cast<THREADINFOCLASS>(UndocumentedApi::ThreadBasePriority), 
                             &basePriority, 
                             sizeof(basePriority));
                         

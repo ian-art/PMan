@@ -25,6 +25,12 @@ static constexpr wchar_t MMCSS_TASK_DISPLAY[] = L"DisplayPostProcessing";
 static const GUID KernelProcessGuid = 
     { 0x22fb2cd6, 0x0e7b, 0x422b, { 0xa0, 0xc7, 0x2f, 0xad, 0x1f, 0xd0, 0xe7, 0x16 } };
 
+// Undocumented API Constants
+enum class UndocumentedApi : DWORD {
+    ProcessGpuPriority = 82,
+    ThreadBasePriority = 3
+};
+
 // Default config template
 static constexpr const char* DEFAULT_CONFIG = R"(; Priority Manager Configuration by Ian Anthony Tancinco
 ; Auto-generated config file

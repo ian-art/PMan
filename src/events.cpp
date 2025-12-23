@@ -10,6 +10,7 @@
 #include <iostream>
 #include <vector>
 
+// Add static queue limit counter
 static std::atomic<int> g_iocpQueueSize{0};
 static constexpr int MAX_IOCP_QUEUE_SIZE = 1000;
 
@@ -126,6 +127,31 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
     }
 }
 
+// RAII Wrapper for ETW Session
+struct TraceSessionGuard {
+    TRACEHANDLE handle;
+    const wchar_t* name;
+    
+    TraceSessionGuard(TRACEHANDLE h, const wchar_t* n) : handle(h), name(n) {}
+    
+    ~TraceSessionGuard() {
+        if (handle) {
+            // Helper to stop trace without external buffer dependency if possible, 
+            // but ControlTraceW requires properties structure.
+            size_t propsSize = sizeof(EVENT_TRACE_PROPERTIES) + ((wcslen(name) + 1) * sizeof(wchar_t));
+            std::vector<BYTE> buffer(propsSize);
+            ZeroMemory(buffer.data(), buffer.size());
+            PEVENT_TRACE_PROPERTIES props = reinterpret_cast<PEVENT_TRACE_PROPERTIES>(buffer.data());
+            props->Wnode.BufferSize = static_cast<ULONG>(propsSize);
+            props->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
+            
+            ControlTraceW(handle, name, props, EVENT_TRACE_CONTROL_STOP);
+        }
+    }
+    
+    void Release() { handle = 0; }
+};
+
 static void ForceStopEtwSession()
 {
     TRACEHANDLE session = g_etwSession.load();
@@ -218,16 +244,19 @@ void EtwThread()
 
     Log("ETW: Modern Private Session started successfully.");
 
-    EVENT_TRACE_LOGFILEW t{};
+EVENT_TRACE_LOGFILEW t{};
     t.LoggerName = const_cast<LPWSTR>(SESSION_NAME);
     t.ProcessTraceMode = PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_REAL_TIME;
     t.EventRecordCallback = EtwCallback;
+
+    // Wrap session handle for automatic cleanup
+    TraceSessionGuard sessionGuard(hSession, SESSION_NAME);
 
     TRACEHANDLE hTrace = OpenTraceW(&t);
     if (hTrace == INVALID_PROCESSTRACE_HANDLE)
     {
         Log("ETW: OpenTrace failed: " + std::to_string(GetLastError()));
-        ControlTraceW(hSession, SESSION_NAME, props, EVENT_TRACE_CONTROL_STOP);
+        // sessionGuard destructor will stop the trace
         CoUninitialize();
         g_threadCount--;
         g_shutdownCv.notify_one();
@@ -244,7 +273,9 @@ void EtwThread()
 
     CloseTrace(hTrace);
     g_etwSession.store(0);
-    ControlTraceW(hSession, SESSION_NAME, props, EVENT_TRACE_CONTROL_STOP);
+    
+    // Explicitly release if we want to control timing, or let destructor handle it
+    // Using destructor ensures cleanup even if exceptions occurred
     
     CoUninitialize();
 
@@ -337,10 +368,9 @@ void IocpConfigWatcher()
         
         if (pov)
         {
-				if (pov == &ov)
+            if (pov == &ov)
             {
-                // Fix 1.1: Avoid race condition by setting flag directly instead of posting new job
-                g_reloadNow.store(true);
+                g_reloadNow.store(true, std::memory_order_release);
                 read();
             }
                 else

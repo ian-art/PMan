@@ -2,6 +2,7 @@
 #include "globals.h"
 #include "logger.h"
 #include "utils.h"
+#include "constants.h"
 #include <windows.h>
 #include <vector>
 #include <string>
@@ -155,12 +156,8 @@ static void DetectAMDChipletTopology()
     
     g_cpuInfo.ccdCount = static_cast<DWORD>(l3CacheGroups.size());
     
-    // Need physical core count before calculating cores per CCD, which is done later in DetectOSCapabilities
-    // But we are called from there, so g_physicalCoreCount isn't set yet? 
-    // Actually in original code, DetectCPUVendor is called first, then physical core detection happens later.
-    // However, DetectAMDChipletTopology relies on g_physicalCoreCount for coresPerCcd calculation.
-    // We will fix the order in DetectOSCapabilities or handle the dependency.
-    // For now, let's defer coresPerCcd calculation or rely on it being 0 until set.
+	// TODO(#104): Refactor dependency on g_physicalCoreCount which is set in DetectOSCapabilities.
+    // Currently relying on order of operations in DetectOSCapabilities.
     
     // For 3D V-Cache CPUs: CCD0 has the cache, CCD1+ don't
     if (g_cpuInfo.hasAmd3DVCache && g_cpuInfo.ccdCount >= 2)
@@ -187,17 +184,7 @@ static void DetectAMDChipletTopology()
                 {
                     ULONG numSets = cpuSetBufferSize / sizeof(SYSTEM_CPU_SET_INFORMATION);
                     
-                    // We need coresPerCcd to split them properly. 
-                    // Since g_physicalCoreCount might be 0 here, we can't do the heuristic yet?
-                    // Original code called DetectCPUVendor -> DetectAMDFeatures -> DetectAMDChipletTopology.
-                    // Then later calculated physicalCoreCount.
-                    // WAIT: The original code used g_physicalCoreCount in DetectAMDChipletTopology!
-                    // This implies g_physicalCoreCount MUST be set before calling this.
-                    // In DetectOSCapabilities, DetectCPUVendor is called FIRST (step 0).
-                    // And physical core counting is step 7.
-                    // This was a latent bug or order issue in the original code, OR g_physicalCoreCount 
-                    // was initialized to 0 and thus coresPerCcd was 0.
-                    // Let's keep the logic exact, but note that coresPerCcd might be 0 here.
+					// TODO(#105): Address initialization order. g_physicalCoreCount must be set before this.
                     
 					// Fix race condition: g_physicalCoreCount should be initialized before this function is called
 					// But add defensive check and log if still zero
@@ -681,10 +668,10 @@ void DetectOSCapabilities()
                         reinterpret_cast<NtSetInformationProcessPtr>(
                             GetProcAddress(ntdll, "NtSetInformationProcess"));
                     
-                    if (pNtSetInformationProcess)
+					if (pNtSetInformationProcess)
                     {
                         PROCESS_INFORMATION_CLASS gpuPriorityClass = 
-                            static_cast<PROCESS_INFORMATION_CLASS>(82);
+                            static_cast<PROCESS_INFORMATION_CLASS>(UndocumentedApi::ProcessGpuPriority);
                         ULONG testPriority = 0;
                         
                         NTSTATUS status = pNtSetInformationProcess(

@@ -202,10 +202,18 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         }
     }
     
-    CheckAndReleaseSessionLock();
+	CheckAndReleaseSessionLock();
     
     HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!h) return;
+    if (!h)
+    {
+#ifdef _DEBUG
+        DWORD err = GetLastError();
+        if (err == ERROR_ACCESS_DENIED)
+            Log("[DEBUG] [POLICY] OpenProcess Access Denied for PID " + std::to_string(pid));
+#endif
+        return;
+    }
     
     wchar_t path[MAX_PATH];
     DWORD sz = MAX_PATH;

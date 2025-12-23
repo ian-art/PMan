@@ -21,8 +21,11 @@ static bool IsValidExecutableName(const std::string& name)
     // Must end in .exe
     if (name.length() < 4 || name.substr(name.length() - 4) != ".exe") return false;
     
-    // No path separators allowed (filename only)
+	// No path separators allowed (filename only)
     if (name.find_first_of("/\\") != std::string::npos) return false;
+
+    // Validation: Ensure strict filename (rejects ".." and relative paths)
+    if (std::filesystem::path(name).filename().string() != name) return false;
 
     // Critical System Processes Blacklist
     static const std::unordered_set<std::string> BLACKLIST = {
