@@ -97,8 +97,85 @@ static bool IsTaskInstalled(const std::wstring& taskName)
     return (exitCode == 0);
 }
 
+// Phase 4: Crash-Proof Registry Guard
+static void RunRegistryGuard(DWORD targetPid, DWORD originalVal)
+{
+    // 1. Wait for the main process to exit (crash, kill, or close)
+    HANDLE hProcess = OpenProcess(SYNCHRONIZE, FALSE, targetPid);
+    if (hProcess)
+    {
+        WaitForSingleObject(hProcess, INFINITE);
+        CloseHandle(hProcess);
+    }
+    // If OpenProcess failed, process is already gone, proceed to check.
+
+    // 2. Check if registry was left in a modified state
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+        L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
+        0, KEY_QUERY_VALUE | KEY_SET_VALUE, &key) == ERROR_SUCCESS)
+    {
+        DWORD currentVal = 0;
+        DWORD size = sizeof(currentVal);
+        if (RegQueryValueExW(key, L"Win32PrioritySeparation", nullptr, nullptr, 
+            reinterpret_cast<BYTE*>(&currentVal), &size) == ERROR_SUCCESS)
+        {
+            // If the value is different from the original default, restore it.
+            if (currentVal != originalVal)
+            {
+                RegSetValueExW(key, L"Win32PrioritySeparation", 0, REG_DWORD,
+                    reinterpret_cast<const BYTE*>(&originalVal), sizeof(originalVal));
+                
+                // Safe to log here as main process is dead
+                Log("[GUARD] Main process crash detected. Registry Restored to 0x" + 
+                    std::to_string(originalVal));
+            }
+        }
+        RegCloseKey(key);
+    }
+}
+
+static void LaunchRegistryGuard(DWORD originalVal)
+{
+    wchar_t selfPath[MAX_PATH];
+    GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
+
+    // Pass PID and Original Value to the guard instance
+    std::wstring cmd = L"\"" + std::wstring(selfPath) + L"\" --guard " + 
+                       std::to_wstring(GetCurrentProcessId()) + L" " + 
+                       std::to_wstring(originalVal);
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+
+    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 
+                       CREATE_NO_WINDOW | DETACHED_PROCESS, 
+                       nullptr, nullptr, &si, &pi))
+    {
+        // Guard process needs minimal resources (just waits in kernel)
+        SetPriorityClass(pi.hProcess, IDLE_PRIORITY_CLASS);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        Log("[GUARD] Registry safety guard launched");
+    }
+    else
+    {
+        Log("[GUARD] Failed to launch safety guard: " + std::to_string(GetLastError()));
+    }
+}
+
 int wmain(int argc, wchar_t** argv)
 {
+    // Check for Guard Mode (Must be before Mutex check)
+    if (argc >= 4 && (std::wstring(argv[1]) == L"--guard"))
+    {
+        DWORD pid = std::wcstoul(argv[2], nullptr, 10);
+        DWORD val = std::wcstoul(argv[3], nullptr, 10);
+        RunRegistryGuard(pid, val);
+        return 0;
+    }
+
     // Fix Silent Install/Uninstall Support
     bool uninstall = false;
     bool silent = false;
@@ -321,12 +398,18 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     
     Log("Background mode ready - monitoring foreground applications");
     
-    DWORD currentSetting = ReadCurrentPrioritySeparation();
+	DWORD currentSetting = ReadCurrentPrioritySeparation();
     if (currentSetting != 0xFFFFFFFF)
     {
         Log("Current system setting: " + GetModeDescription(currentSetting));
         g_originalRegistryValue = currentSetting;
         g_cachedRegistryValue.store(currentSetting);
+        
+        // Launch Crash-Proof Guard
+        if (g_restoreOnExit.load())
+        {
+            LaunchRegistryGuard(currentSetting);
+        }
     }
     else
     {
