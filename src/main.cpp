@@ -167,9 +167,17 @@ static void LaunchRegistryGuard(DWORD originalVal)
 
 int wmain(int argc, wchar_t** argv)
 {
+    // Check for AVX2 Bypass Flag
+    bool bypassAvx2 = false;
+    for (int i = 1; i < argc; i++)
+    {
+        std::wstring arg = argv[i];
+        if (arg == L"--bypassAVX2" || arg == L"--bpavx2") bypassAvx2 = true;
+    }
+
     // Hardware & OS Safety Check
     // Must run before any other logic to prevent illegal instruction crashes
-    PreFlightCheck();
+    PreFlightCheck(bypassAvx2);
 
     // Check for Guard Mode (Must be before Mutex check)
     if (argc >= 4 && (std::wstring(argv[1]) == L"--guard"))
@@ -184,10 +192,26 @@ int wmain(int argc, wchar_t** argv)
     bool uninstall = false;
     bool silent = false;
 
-    for (int i = 1; i < argc; i++)
+	for (int i = 1; i < argc; i++)
     {
         std::wstring arg = argv[i];
-        if (arg == L"--uninstall" || arg == L"/uninstall") uninstall = true;
+        if (arg == L"--help" || arg == L"-h" || arg == L"/?")
+        {
+            MessageBoxW(nullptr, 
+                L"Priority Manager (pman) v2.0.9.2025\n"
+				L"by Ian Anthony R. Tancinco\n\n"
+                L"Usage: pman.exe [OPTIONS]\n\n"
+				L"Options:\n"
+                L"  --help, -h, /?      Show this help message\n"
+                L"  --uninstall         Stop instances and remove startup task\n"
+                L"  --silent, /S         Run operations without message boxes\n"
+                L"  --bypassAVX2    Skip CPU compatibility check\n"
+                L"  --guard             (Internal) Registry safety guard\n\n"
+                L"Automated Windows Priority & Affinity Manager",
+                L"Priority Manager - Help", MB_OK | MB_ICONINFORMATION);
+            return 0;
+        }
+        else if (arg == L"--uninstall" || arg == L"/uninstall") uninstall = true;
         else if (arg == L"/S" || arg == L"/s" || arg == L"/silent" || arg == L"-silent" || arg == L"/quiet") silent = true;
     }
 

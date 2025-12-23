@@ -17,30 +17,33 @@ static void DetectAMDChipletTopology();
 static void DetectAMDFeatures();
 
 // Pre-Flight Safety Checks
-void PreFlightCheck()
+void PreFlightCheck(bool bypassAvx2)
 {
     // 1. AVX2 Instruction Set Check
-    // Prevents "Illegal Instruction" crashes on pre-2013 hardware (e.g., Sandy Bridge, Phenom II)
-    int cpuInfo[4] = {0};
-    __cpuid(cpuInfo, 0);
-    int nIds = cpuInfo[0];
-
-    bool hasAvx2 = false;
-    if (nIds >= 7)
+    if (!bypassAvx2)
     {
-        __cpuidex(cpuInfo, 7, 0);
-        hasAvx2 = (cpuInfo[1] & (1 << 5)) != 0;
-    }
+        int cpuInfo[4] = {0};
+        __cpuid(cpuInfo, 0);
+        int nIds = cpuInfo[0];
 
-    if (!hasAvx2)
-    {
-        MessageBoxW(nullptr, 
-            L"Critical Error: Your CPU does not support AVX2 instructions.\n\n"
-            L"Priority Manager requires a modern processor (Intel Haswell 2013+ / AMD Excavator 2015+).\n"
-            L"The application cannot start.", 
-            L"Priority Manager - Hardware Incompatible", 
-            MB_OK | MB_ICONERROR);
-        ExitProcess(1);
+        bool hasAvx2 = false;
+        if (nIds >= 7)
+        {
+            __cpuidex(cpuInfo, 7, 0);
+            hasAvx2 = (cpuInfo[1] & (1 << 5)) != 0;
+        }
+
+        if (!hasAvx2)
+        {
+            MessageBoxW(nullptr, 
+                L"Critical Error: Your CPU does not support AVX2 instructions.\n\n"
+                L"Priority Manager requires a modern processor (Intel Haswell 2013+ / AMD Excavator 2015+).\n"
+                L"The application cannot start.\n\n"
+                L"Advanced: Use --bypassAVX2 to force start (may crash).", 
+                L"Priority Manager - Hardware Incompatible", 
+                MB_OK | MB_ICONERROR);
+            ExitProcess(1);
+        }
     }
 
     // 2. OS Version Check (Windows 10 Version 2004 / Build 19041+)
