@@ -890,9 +890,9 @@ void SetWorkingSetLimits(DWORD pid, int mode)
         
         CloseHandle(hProcess);
         
-        // Trim browsers
+		// Trim browsers
         std::shared_lock lg(g_setMtx);
-        std::unordered_set<std::string> browsersCopy = g_browsers;
+        std::unordered_set<std::wstring> browsersCopy = g_browsers;
         lg.unlock();
         
         HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -905,7 +905,7 @@ void SetWorkingSetLimits(DWORD pid, int mode)
             {
                 do
                 {
-                    std::string exeName = WideToUtf8(pe.szExeFile);
+                    std::wstring exeName = pe.szExeFile;
                     asciiLower(exeName);
                     
                     if (browsersCopy.count(exeName) && pe.th32ProcessID != pid)
