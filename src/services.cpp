@@ -7,6 +7,9 @@
 #include <unordered_set>
 #include <algorithm>
 
+static constexpr int SERVICE_OP_WAIT_RETRIES = 50;
+static constexpr int SERVICE_OP_WAIT_DELAY_MS = 100;
+
 WindowsServiceManager::~WindowsServiceManager()
 {
     Cleanup();
@@ -148,12 +151,12 @@ bool WindowsServiceManager::SuspendService(const std::wstring& serviceName)
     }
     
     // Fallback to stop
-    if (ControlService(state.handle, SERVICE_CONTROL_STOP, &status))
+	if (ControlService(state.handle, SERVICE_CONTROL_STOP, &status))
     {
         // Wait for service to stop (max 5 seconds)
-        for (int i = 0; i < 50 && status.dwCurrentState != SERVICE_STOPPED; ++i)
+        for (int i = 0; i < SERVICE_OP_WAIT_RETRIES && status.dwCurrentState != SERVICE_STOPPED; ++i)
         {
-            Sleep(100);
+            Sleep(SERVICE_OP_WAIT_DELAY_MS);
             if (!QueryServiceStatus(state.handle, &status)) break;
         }
         
@@ -177,21 +180,14 @@ bool WindowsServiceManager::SuspendService(const std::wstring& serviceName)
     return false;
 }
 
-bool WindowsServiceManager::ResumeService(const std::wstring& serviceName)
+// Helper to process service resumption without lock recursion
+static bool ResumeServiceState(WindowsServiceManager::ServiceState& state, const std::wstring& serviceName)
 {
-    std::lock_guard lock(m_mutex);
-    
-    auto it = m_services.find(serviceName);
-    if (it == m_services.end() || !it->second.handle || it->second.isDisabled)
-        return false;
-    
-    ServiceState& state = it->second;
-    
-    if (state.action == ServiceAction::None)
-        return false; // We didn't suspend it
-    
+    if (state.action == ServiceAction::None) return false;
+
     bool success = false;
-    
+    DWORD error = 0;
+
     if (state.action == ServiceAction::Stopped)
     {
         if (StartServiceW(state.handle, 0, nullptr))
@@ -201,15 +197,15 @@ bool WindowsServiceManager::ResumeService(const std::wstring& serviceName)
         }
         else
         {
-            DWORD err = GetLastError();
-            if (err != ERROR_SERVICE_ALREADY_RUNNING)
+            error = GetLastError();
+            if (error == ERROR_SERVICE_ALREADY_RUNNING)
             {
-                Log("[SERVICE] Failed to start " + WideToUtf8(serviceName.c_str()) + 
-                    ": " + std::to_string(err));
+                success = true;
             }
             else
             {
-                success = true; // Already running is fine
+                Log("[SERVICE] Failed to start " + WideToUtf8(serviceName.c_str()) + 
+                    ": " + std::to_string(error));
             }
         }
     }
@@ -223,17 +219,37 @@ bool WindowsServiceManager::ResumeService(const std::wstring& serviceName)
         }
         else
         {
+            error = GetLastError();
             Log("[SERVICE] Failed to resume " + WideToUtf8(serviceName.c_str()) + 
-                ": " + std::to_string(GetLastError()));
+                ": " + std::to_string(error));
         }
     }
-    
+
+#ifdef _DEBUG
+    if (!success && error != 0)
+    {
+        std::wstring msg = L"[SERVICE] Error resuming " + serviceName + L": " + std::to_wstring(error) + L"\n";
+        OutputDebugStringW(msg.c_str());
+    }
+#endif
+
     if (success)
     {
         state.action = ServiceAction::None;
     }
-    
+
     return success;
+}
+
+bool WindowsServiceManager::ResumeService(const std::wstring& serviceName)
+{
+    std::lock_guard lock(m_mutex);
+    
+    auto it = m_services.find(serviceName);
+    if (it == m_services.end() || !it->second.handle || it->second.isDisabled)
+        return false;
+    
+    return ResumeServiceState(it->second, serviceName);
 }
 
 bool WindowsServiceManager::SuspendAll()
@@ -265,13 +281,7 @@ void WindowsServiceManager::ResumeAll()
     
     for (auto& [name, state] : m_services)
     {
-        if (state.action != ServiceAction::None)
-        {
-            // Unlock for ResumeService (it locks internally)
-            m_mutex.unlock();
-            ResumeService(name);
-            m_mutex.lock();
-        }
+        ResumeServiceState(state, name);
     }
     
     m_anythingSuspended = false;
