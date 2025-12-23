@@ -10,16 +10,41 @@
 #include <iostream>
 #include <vector>
 
+// Add static queue limit counter
+static std::atomic<int> g_iocpQueueSize{0};
+static constexpr int MAX_IOCP_QUEUE_SIZE = 1000;
+
 bool PostIocp(JobType t, DWORD pid, HWND hwnd)
 {
+    // Check queue limit before allocation
+    int currentSize = g_iocpQueueSize.load(std::memory_order_relaxed);
+    if (currentSize >= MAX_IOCP_QUEUE_SIZE) {
+        static std::atomic<int> overflowLogCount{0};
+        if (overflowLogCount.fetch_add(1, std::memory_order_relaxed) % 100 == 0) {
+            Log("[IOCP] WARNING: Queue overflow (" + std::to_string(currentSize) + 
+                " items), dropping jobs. System may be overloaded.");
+        }
+        return false;
+    }
+    
     if (!g_hIocp) return false;
     
-    // Use unique_ptr to manage memory automatically until successful post
-    auto job = std::make_unique<IocpJob>(IocpJob{ t, pid, hwnd });
+    // Use unique_ptr with custom deleter for guaranteed cleanup
+    auto job = std::unique_ptr<IocpJob, void(*)(IocpJob*)>(
+        new IocpJob{ t, pid, hwnd },
+        [](IocpJob* j) { 
+            delete j; 
+            g_iocpQueueSize.fetch_sub(1, std::memory_order_relaxed);
+        }
+    );
+    
+    // Increment queue size before posting
+    g_iocpQueueSize.fetch_add(1, std::memory_order_relaxed);
     
     if (!PostQueuedCompletionStatus(g_hIocp, 0, 0, reinterpret_cast<LPOVERLAPPED>(job.get())))
     {
-        return false; // job is automatically deleted here
+        // Post failed: unique_ptr will delete job, decrement handled by deleter
+        return false;
     }
     
     // Success: release ownership to the IOCP queue
@@ -313,27 +338,39 @@ void IocpConfigWatcher()
         
         if (pov)
         {
-				if (pov == &ov)
+            if (pov == &ov)
             {
-                // Fix 1.1: Avoid race condition by setting flag directly instead of posting new job
-                g_reloadNow.store(true);
+                g_reloadNow.store(true, std::memory_order_release);
                 read();
             }
-            else
-            {
-                std::unique_ptr<IocpJob> job(reinterpret_cast<IocpJob*>(pov));
-                if (job)
+                else
                 {
-                    if (job->type == JobType::Config)
+                    // Use unique_ptr with custom deleter for automatic cleanup
+                    auto job_deleter = [](IocpJob* j) { 
+                        delete j; 
+                        g_iocpQueueSize.fetch_sub(1, std::memory_order_relaxed);
+                    };
+                    
+                    std::unique_ptr<IocpJob, decltype(job_deleter)> 
+                        job(reinterpret_cast<IocpJob*>(pov), job_deleter);
+                    
+                    if (job)
                     {
-                        g_reloadNow = true;
-                    }
-                    else if (job->type == JobType::Policy) 
-                    { 
-                        EvaluateAndSetPolicy(job->pid, job->hwnd); 
+                        switch (job->type)
+                        {
+                            case JobType::Config:
+                                g_reloadNow.store(true, std::memory_order_release);
+                                break;
+                            case JobType::Policy:
+                                // EvaluateAndSetPolicy takes ownership of PID/HWND, not the job
+                                EvaluateAndSetPolicy(job->pid, job->hwnd);
+                                break;
+                            default:
+                                Log("[IOCP] ERROR: Unknown job type encountered");
+                                break;
+                        }
                     }
                 }
-            }
         }
     }
     
