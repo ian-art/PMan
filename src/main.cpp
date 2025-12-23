@@ -167,6 +167,10 @@ static void LaunchRegistryGuard(DWORD originalVal)
 
 int wmain(int argc, wchar_t** argv)
 {
+    // Hardware & OS Safety Check
+    // Must run before any other logic to prevent illegal instruction crashes
+    PreFlightCheck();
+
     // Check for Guard Mode (Must be before Mutex check)
     if (argc >= 4 && (std::wstring(argv[1]) == L"--guard"))
     {

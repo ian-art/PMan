@@ -4,6 +4,7 @@
 #include "types.h"
 
 // Core detection functions
+void PreFlightCheck();
 void DetectOSCapabilities();
 void DetectHybridCoreSupport();
 bool DetectIoPrioritySupport();

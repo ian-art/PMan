@@ -16,6 +16,62 @@
 static void DetectAMDChipletTopology();
 static void DetectAMDFeatures();
 
+// Pre-Flight Safety Checks
+void PreFlightCheck()
+{
+    // 1. AVX2 Instruction Set Check
+    // Prevents "Illegal Instruction" crashes on pre-2013 hardware (e.g., Sandy Bridge, Phenom II)
+    int cpuInfo[4] = {0};
+    __cpuid(cpuInfo, 0);
+    int nIds = cpuInfo[0];
+
+    bool hasAvx2 = false;
+    if (nIds >= 7)
+    {
+        __cpuidex(cpuInfo, 7, 0);
+        hasAvx2 = (cpuInfo[1] & (1 << 5)) != 0;
+    }
+
+    if (!hasAvx2)
+    {
+        MessageBoxW(nullptr, 
+            L"Critical Error: Your CPU does not support AVX2 instructions.\n\n"
+            L"Priority Manager requires a modern processor (Intel Haswell 2013+ / AMD Excavator 2015+).\n"
+            L"The application cannot start.", 
+            L"Priority Manager - Hardware Incompatible", 
+            MB_OK | MB_ICONERROR);
+        ExitProcess(1);
+    }
+
+    // 2. OS Version Check (Windows 10 Version 2004 / Build 19041+)
+    // Ensures PowerThrottling and other APIs are available
+    HMODULE hMod = GetModuleHandleW(L"ntdll.dll");
+    if (hMod)
+    {
+        typedef LONG (WINAPI *RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
+        auto rtlGetVersion = (RtlGetVersionPtr)GetProcAddress(hMod, "RtlGetVersion");
+        if (rtlGetVersion)
+        {
+            RTL_OSVERSIONINFOW rovi = { 0 };
+            rovi.dwOSVersionInfoSize = sizeof(rovi);
+            if (rtlGetVersion(&rovi) == 0)
+            {
+                // Check if older than Windows 10 Build 19041
+                if (rovi.dwMajorVersion < 10 || (rovi.dwMajorVersion == 10 && rovi.dwBuildNumber < 19041))
+                {
+                    std::wstring errorMsg = L"Critical Error: Your Windows version is too old.\n\n"
+                                          L"Detected Build: " + std::to_wstring(rovi.dwBuildNumber) + L"\n"
+                                          L"Required Build: 19041 (Windows 10 Version 2004) or newer.\n\n"
+                                          L"Please update Windows to run Priority Manager.";
+                    
+                    MessageBoxW(nullptr, errorMsg.c_str(), L"Priority Manager - OS Incompatible", MB_OK | MB_ICONERROR);
+                    ExitProcess(1);
+                }
+            }
+        }
+    }
+}
+
 static void DetectCPUVendor()
 {
 #if defined(_M_ARM64)
