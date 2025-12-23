@@ -1,3 +1,4 @@
+#include "build_options.h"
 #ifndef PMAN_GLOBALS_H
 #define PMAN_GLOBALS_H
 
@@ -46,10 +47,10 @@ extern std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime;
 
 // Config Storage
 extern std::shared_mutex g_setMtx;
-extern std::unordered_set<std::string> g_games;
-extern std::unordered_set<std::string> g_browsers;
-extern std::unordered_set<std::string> g_gameWindows;
-extern std::unordered_set<std::string> g_browserWindows;
+extern std::unordered_set<std::string> g_games GUARDED_BY(g_setMtx);
+extern std::unordered_set<std::string> g_browsers GUARDED_BY(g_setMtx);
+extern std::unordered_set<std::string> g_gameWindows GUARDED_BY(g_setMtx);
+extern std::unordered_set<std::string> g_browserWindows GUARDED_BY(g_setMtx);
 
 // Event Handles & Synchronization
 extern HANDLE  g_hIocp;
@@ -66,6 +67,10 @@ extern HANDLE g_hMutex; // Single instance mutex
 // Hardware & OS Capabilities
 extern OSCapabilities g_caps;
 extern CPUInfo g_cpuInfo;
+
+// Fix Compatibility Flags for low-end systems
+extern std::atomic<bool> g_isLowCoreCount;
+extern std::atomic<bool> g_isLowMemory;
 
 // Hybrid Core Management
 extern std::vector<ULONG> g_pCoreSets;
