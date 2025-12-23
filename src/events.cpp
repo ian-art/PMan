@@ -435,144 +435,179 @@ void IocpConfigWatcher()
 void AntiInterferenceWatchdog()
 {
     g_threadCount++;
-    Log("Anti-Interference Watchdog started");
+    Log("Anti-Interference Watchdog started (Event-Driven)");
 
-    int gcCycles = 0; // Track cycles for garbage collection
-
-	while (g_running)
+    // Open Registry Key for monitoring
+    HKEY hKeyRaw = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, 
+        L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl", 
+        0, KEY_NOTIFY | KEY_QUERY_VALUE | KEY_SET_VALUE, &hKeyRaw) != ERROR_SUCCESS)
     {
-        // Fix 6.1: Health Checks
-        if (!g_hIocp || g_hIocp == INVALID_HANDLE_VALUE)
+        Log("[WATCHDOG] Failed to open registry key. Aborting watchdog thread.");
+        g_threadCount--;
+        g_shutdownCv.notify_one();
+        return;
+    }
+    UniqueRegKey hKey(hKeyRaw);
+
+    // Create Event for Registry Notifications
+    UniqueHandle hRegEvent(CreateEventW(nullptr, FALSE, FALSE, nullptr)); // Auto-reset
+    if (!hRegEvent)
+    {
+        Log("[WATCHDOG] Failed to create registry event.");
+        g_threadCount--;
+        g_shutdownCv.notify_one();
+        return;
+    }
+
+    // Register initial notification
+    if (RegNotifyChangeKeyValue(hKey.get(), TRUE, REG_NOTIFY_CHANGE_LAST_SET, hRegEvent.get(), TRUE) != ERROR_SUCCESS)
+    {
+        Log("[WATCHDOG] Failed to register initial registry notification.");
+    }
+
+    HANDLE handles[] = { g_hShutdownEvent, hRegEvent.get() };
+    const DWORD CHECK_INTERVAL_MS = 10000; // 10s heartbeat for health checks
+    int gcCycles = 0;
+
+    while (g_running)
+    {
+        // Wait for Shutdown OR Registry Change OR Timeout (Health/GC)
+        DWORD waitResult = WaitForMultipleObjects(2, handles, FALSE, CHECK_INTERVAL_MS);
+
+        if (waitResult == WAIT_OBJECT_0) // Shutdown
         {
-            Log("[HEALTH] CRITICAL: IOCP handle is invalid. Initiating shutdown.");
-            g_running = false;
+            Log("[WATCHDOG] Shutdown signal received.");
             break;
         }
-
-        // Verify ETW session if it was supposed to be running
-        if (g_caps.canUseEtw && g_etwSession.load() == 0 && g_running)
+        else if (waitResult == WAIT_OBJECT_0 + 1) // Registry Change
         {
-             // Try to restart ETW thread? For now, just warn.
-             static bool etwWarned = false;
-             if (!etwWarned) {
-                 Log("[HEALTH] WARNING: ETW Session is not active (did it crash?)");
-                 etwWarned = true;
-             }
-        }
+            // Re-arm notification immediately
+            RegNotifyChangeKeyValue(hKey.get(), TRUE, REG_NOTIFY_CHANGE_LAST_SET, hRegEvent.get(), TRUE);
 
-        // Check more frequently if policy locking is enabled (10s vs 30s)
-        int checkInterval = g_lockPolicy.load() ? 10 : 30;
-        for (int i = 0; i < checkInterval && g_running; ++i) Sleep(1000);
-        if (!g_running) break;
-
-        int currentMode = g_lastMode.load();
-        if (currentMode == 0) continue;
-        if (!g_caps.hasAdminRights) continue;
-
-        DWORD expectedVal = (currentMode == 1) ? VAL_GAME : VAL_BROWSER;
-        // Helper to get current needed here or we include tweaks
-        // We included tweaks.h, so we can use SetPrioritySeparation, 
-        // but getting current separation is inside tweaks.cpp as a static helper.
-        // For now, we rely on VerifyPrioritySeparation logic or re-implement read.
-        // Actually, let's just use SetPrioritySeparation if we suspect change, 
-        // but we need to READ it first to avoid spam. 
-        // We will move GetCurrentPrioritySeparation to a shared header or rely on simple reg read here.
-        
-		DWORD actualVal = 0xFFFFFFFF;
-
-		actualVal = GetCurrentPrioritySeparation();
-
-        if (actualVal != 0xFFFFFFFF && actualVal != expectedVal)
-        {
-            g_interferenceCount++;
-            
-            if (g_lockPolicy.load())
+            int currentMode = g_lastMode.load();
+            if (currentMode != 0 && g_caps.hasAdminRights)
             {
-                Log("[INTERFERENCE] External tool changed registry to 0x" + std::to_string(actualVal) + 
-                    ". Re-asserting: 0x" + std::to_string(expectedVal));
+                DWORD expectedVal = (currentMode == 1) ? VAL_GAME : VAL_BROWSER;
+                DWORD actualVal = GetCurrentPrioritySeparation();
+
+                if (actualVal != 0xFFFFFFFF && actualVal != expectedVal)
+                {
+                    g_interferenceCount++;
+                    if (g_lockPolicy.load())
+                    {
+                        Log("[INTERFERENCE] External change detected: 0x" + std::to_string(actualVal) + 
+                            ". Re-asserting: 0x" + std::to_string(expectedVal));
+                        
+                        g_cachedRegistryValue.store(0xFFFFFFFF); 
+                        SetPrioritySeparation(expectedVal);
+                    }
+                    else
+                    {
+                        static bool warnedOnce = false;
+                        if (!warnedOnce || (g_interferenceCount % 10 == 0)) 
+                        {
+                            Log("[INTERFERENCE] Registry changed by external tool. 'lock_policy' is OFF.");
+                            warnedOnce = true;
+                        }
+                    }
+                }
+            }
+        }
+        else if (waitResult == WAIT_TIMEOUT) // Heartbeat
+        {
+            // 1. Health Checks
+            if (!g_hIocp || g_hIocp == INVALID_HANDLE_VALUE)
+            {
+                Log("[HEALTH] CRITICAL: IOCP handle is invalid. Initiating shutdown.");
+                g_running = false;
+                break;
+            }
+
+            if (g_caps.canUseEtw && g_etwSession.load() == 0 && g_running)
+            {
+                 static bool etwWarned = false;
+                 if (!etwWarned) {
+                     Log("[HEALTH] WARNING: ETW Session is not active (did it crash?)");
+                     etwWarned = true;
+                 }
+            }
+
+            // 2. Garbage Collection (Every ~2 mins -> 12 * 10s)
+            gcCycles++;
+            if (gcCycles >= 12)
+            {
+                gcCycles = 0;
                 
-                g_cachedRegistryValue.store(0xFFFFFFFF); 
-                SetPrioritySeparation(expectedVal);
-            }
-            else
-            {
-                static bool warnedOnce = false;
-                if (!warnedOnce || (g_interferenceCount % 10 == 0)) 
+                // Clean up working set tracking
                 {
-                    Log("[INTERFERENCE] External tool changed registry. 'lock_policy' is OFF.");
-                    warnedOnce = true;
+                    std::lock_guard lock(g_workingSetMtx);
+                    for (auto it = g_originalWorkingSets.begin(); it != g_originalWorkingSets.end(); )
+                    {
+                        DWORD exitCode = 0;
+                        HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, it->first);
+                        if (!hProcess || (GetExitCodeProcess(hProcess, &exitCode) && exitCode != STILL_ACTIVE))
+                        {
+                            Log("[GC] Removing zombie PID " + std::to_string(it->first) + " from working set map");
+                            if (hProcess) CloseHandle(hProcess);
+                            it = g_originalWorkingSets.erase(it);
+                        }
+                        else
+                        {
+                            if (hProcess) CloseHandle(hProcess);
+                            ++it;
+                        }
+                    }
+                }
+                
+                // Clean up trim times
+                {
+                    std::lock_guard lock(g_trimTimeMtx);
+                    for (auto it = g_lastTrimTimes.begin(); it != g_lastTrimTimes.end(); )
+                    {
+                        DWORD exitCode = 0;
+                        HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, it->first);
+                        if (!hProcess || (GetExitCodeProcess(hProcess, &exitCode) && exitCode != STILL_ACTIVE))
+                        {
+                            if (hProcess) CloseHandle(hProcess);
+                            it = g_lastTrimTimes.erase(it);
+                        }
+                        else
+                        {
+                            if (hProcess) CloseHandle(hProcess);
+                            ++it;
+                        }
+                    }
+                }
+                
+                // Clean up DPC state
+                {
+                    std::lock_guard lock(g_dpcStateMtx);
+                    for (auto it = g_processesWithBoostDisabled.begin(); it != g_processesWithBoostDisabled.end(); )
+                    {
+                        DWORD exitCode = 0;
+                        HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, it->first);
+                        if (!hProcess || (GetExitCodeProcess(hProcess, &exitCode) && exitCode != STILL_ACTIVE))
+                        {
+                            if (hProcess) CloseHandle(hProcess);
+                            it = g_processesWithBoostDisabled.erase(it);
+                        }
+                        else
+                        {
+                            if (hProcess) CloseHandle(hProcess);
+                            ++it;
+                        }
+                    }
                 }
             }
         }
-        
-        // Garbage collection for zombie PIDs (every 2 minutes)
-        gcCycles++;
-        if (gcCycles >= 4) // 4 * 30s = 2 minutes
+        else 
         {
-            gcCycles = 0;
-            
-            // Clean up working set tracking
-            {
-                std::lock_guard lock(g_workingSetMtx);
-                for (auto it = g_originalWorkingSets.begin(); it != g_originalWorkingSets.end(); )
-                {
-                    DWORD exitCode = 0;
-                    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, it->first);
-                    if (!hProcess || (GetExitCodeProcess(hProcess, &exitCode) && exitCode != STILL_ACTIVE))
-                    {
-                        Log("[GC] Removing zombie PID " + std::to_string(it->first) + " from working set map");
-                        if (hProcess) CloseHandle(hProcess);
-                        it = g_originalWorkingSets.erase(it);
-                    }
-                    else
-                    {
-                        if (hProcess) CloseHandle(hProcess);
-                        ++it;
-                    }
-                }
-            }
-            
-            // Clean up trim times
-            {
-                std::lock_guard lock(g_trimTimeMtx);
-                for (auto it = g_lastTrimTimes.begin(); it != g_lastTrimTimes.end(); )
-                {
-                    DWORD exitCode = 0;
-                    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, it->first);
-                    if (!hProcess || (GetExitCodeProcess(hProcess, &exitCode) && exitCode != STILL_ACTIVE))
-                    {
-                        if (hProcess) CloseHandle(hProcess);
-                        it = g_lastTrimTimes.erase(it);
-                    }
-                    else
-                    {
-                        if (hProcess) CloseHandle(hProcess);
-                        ++it;
-                    }
-                }
-            }
-            
-            // Clean up DPC state
-            {
-                std::lock_guard lock(g_dpcStateMtx);
-                for (auto it = g_processesWithBoostDisabled.begin(); it != g_processesWithBoostDisabled.end(); )
-                {
-                    DWORD exitCode = 0;
-                    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, it->first);
-                    if (!hProcess || (GetExitCodeProcess(hProcess, &exitCode) && exitCode != STILL_ACTIVE))
-                    {
-                        if (hProcess) CloseHandle(hProcess);
-                        it = g_processesWithBoostDisabled.erase(it);
-                    }
-                    else
-                    {
-                        if (hProcess) CloseHandle(hProcess);
-                        ++it;
-                    }
-                }
-            }
+            // Error case (e.g. handle invalid)
+            Sleep(1000); 
         }
     } 
+    
     g_threadCount--;
     g_shutdownCv.notify_one();
 }
