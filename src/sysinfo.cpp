@@ -22,9 +22,10 @@ static void DetectCPUVendor()
     __cpuid(cpuInfo, 0);
     
     char vendor[13] = {0};
-    *reinterpret_cast<int*>(vendor) = cpuInfo[1];      // EBX
-    *reinterpret_cast<int*>(vendor + 4) = cpuInfo[3];  // EDX
-    *reinterpret_cast<int*>(vendor + 8) = cpuInfo[2];  // ECX
+    // Use strict aliasing-safe casts
+    std::memcpy(vendor, &cpuInfo[1], sizeof(int));           // EBX
+    std::memcpy(vendor + 4, &cpuInfo[3], sizeof(int));       // EDX  
+    std::memcpy(vendor + 8, &cpuInfo[2], sizeof(int));       // ECX
     
     g_cpuInfo.vendorString = vendor;
     
@@ -198,8 +199,21 @@ static void DetectAMDChipletTopology()
                     // was initialized to 0 and thus coresPerCcd was 0.
                     // Let's keep the logic exact, but note that coresPerCcd might be 0 here.
                     
-                    DWORD coresPerCcd = (g_physicalCoreCount > 0 && g_cpuInfo.ccdCount > 0) 
-                                        ? g_physicalCoreCount / g_cpuInfo.ccdCount : 0;
+					// Fix race condition: g_physicalCoreCount should be initialized before this function is called
+					// But add defensive check and log if still zero
+					static bool topologyLogged = false;
+					DWORD coresPerCcd = 0;
+					if (g_physicalCoreCount > 0 && g_cpuInfo.ccdCount > 0) {
+						coresPerCcd = g_physicalCoreCount / g_cpuInfo.ccdCount;
+					} else {
+						if (!topologyLogged) {
+							Log("[AMD] WARNING: Physical core count (" + std::to_string(g_physicalCoreCount) + 
+								") or CCD count (" + std::to_string(g_cpuInfo.ccdCount) + 
+								") invalid for topology detection");
+							topologyLogged = true;
+						}
+						return; // Cannot proceed without valid topology
+					}
                                         
                     // If 0, we can't proceed with splitting.
                     if (coresPerCcd > 0)
