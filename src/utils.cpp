@@ -2,6 +2,7 @@
 #include "constants.h"
 #include <algorithm>
 #include <cctype>
+#include <cwctype>
 
 std::string WideToUtf8(const wchar_t* wstr)
 {
@@ -13,12 +14,12 @@ std::string WideToUtf8(const wchar_t* wstr)
     return result;
 }
 
-std::string ExeFromPath(const wchar_t* path)
+std::wstring ExeFromPath(const wchar_t* path)
 {
-    if (!path || !*path) return "";
+    if (!path || !*path) return L"";
     const wchar_t* name = wcsrchr(path, L'\\');
     if (!name) name = path; else ++name;
-    std::string s = WideToUtf8(name);
+    std::wstring s = name;
     asciiLower(s);
     return s;
 }
@@ -28,6 +29,14 @@ void asciiLower(std::string& s)
     for (char& c : s) 
     {
         if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+    }
+}
+
+void asciiLower(std::wstring& s)
+{
+    for (wchar_t& c : s) 
+    {
+        if (c >= L'A' && c <= L'Z') c = c - L'A' + L'a';
     }
 }
 
@@ -71,7 +80,22 @@ bool ContainsIgnoreCase(const std::string& haystack, const std::string& needle)
         }
     );
     
-return it != haystack.end();
+    return it != haystack.end();
+}
+
+bool ContainsIgnoreCase(const std::wstring& haystack, const std::wstring& needle)
+{
+    if (needle.empty() || haystack.empty()) return false;
+    
+    auto it = std::search(
+        haystack.begin(), haystack.end(),
+        needle.begin(), needle.end(),
+        [](wchar_t ch1, wchar_t ch2) { 
+            return std::towlower(ch1) == std::towlower(ch2); 
+        }
+    );
+    
+    return it != haystack.end();
 }
 
 std::string GetModeDescription(DWORD val)
