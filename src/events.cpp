@@ -527,33 +527,30 @@ void AntiInterferenceWatchdog()
                 break;
             }
 
-            // ETW Heartbeat & Auto-Recovery
+			// ETW Health Check & Auto-Recovery
             if (g_caps.canUseEtw && g_running)
             {
-                uint64_t lastHeartbeat = g_lastEtwHeartbeat.load(std::memory_order_relaxed);
-                uint64_t now = GetTickCount64();
+                // Fix: Removed 60s silence timeout.
+                // Process events are sporadic; silence does not mean the thread is dead.
+                // Only restart if the session handle is invalid (0), meaning the thread actually exited.
                 
-                // If 0, initialize (first run grace period)
-                if (lastHeartbeat == 0)
+                if (g_etwSession.load() == 0)
                 {
-                     g_lastEtwHeartbeat.compare_exchange_strong(lastHeartbeat, now);
-                }
-                else if ((now - lastHeartbeat) > 60000) // 60s silence timeout
-                {
-                    Log("[HEALTH] ETW Heartbeat lost (>60s). Restarting session...");
-                    
-                    // Force stop existing session (unblocks stuck threads)
-                    ForceStopEtwSession();
-                    
-                    // Spawn replacement thread
-                    std::thread restartThread([]() {
-                        Log("[HEALTH] Spawning new ETW thread...");
-                        EtwThread(); 
-                    });
-                    restartThread.detach();
-                    
-                    // Reset heartbeat to prevent loop while starting
-                    g_lastEtwHeartbeat.store(now);
+                    // Debounce: Ensure we don't spam restarts if it fails instantly
+                    static uint64_t lastRestartAttempt = 0;
+                    uint64_t now = GetTickCount64();
+
+                    if (now - lastRestartAttempt > 5000) 
+                    {
+                        Log("[HEALTH] ETW Session is not running (handle=0). Restarting...");
+                        lastRestartAttempt = now;
+
+                        std::thread restartThread([]() {
+                            Log("[HEALTH] Spawning new ETW thread...");
+                            EtwThread(); 
+                        });
+                        restartThread.detach();
+                    }
                 }
             }
 
