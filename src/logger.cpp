@@ -51,17 +51,34 @@ try
             }
         }
 
-        std::ofstream log(dir / L"log.txt", std::ios::app);
+       std::ofstream log(dir / L"log.txt", std::ios::app);
         if (log)
         {
             auto now = std::chrono::system_clock::now();
             std::time_t t = std::chrono::system_clock::to_time_t(now);
-            char timebuf[32];
+            
+            // Safer buffer handling for timestamp
+            const size_t TIMEBUF_SIZE = 32;
+            char timebuf[TIMEBUF_SIZE] = {0};
             struct tm timeinfo;
-            if (localtime_s(&timeinfo, &t) == 0 && 
-                std::strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", &timeinfo))
+            
+            if (localtime_s(&timeinfo, &t) == 0)
             {
-                log << timebuf << "  " << msg << std::endl;
+                // Use strftime with explicit buffer size control
+                if (std::strftime(timebuf, TIMEBUF_SIZE, "%Y-%m-%d %H:%M:%S", &timeinfo) > 0)
+                {
+                    log << timebuf << "  " << msg << std::endl;
+                }
+                else
+                {
+                    // Handle formatting error gracefully
+                    log << "[Timestamp Error] " << msg << std::endl;
+                }
+            }
+            else
+            {
+                // Fallback if time conversion fails
+                log << msg << std::endl;
             }
         }
     }
