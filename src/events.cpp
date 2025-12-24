@@ -16,8 +16,8 @@ static constexpr int MAX_IOCP_QUEUE_SIZE = 1000;
 
 bool PostIocp(JobType t, DWORD pid, HWND hwnd)
 {
-    // Check queue limit before allocation
-    int currentSize = g_iocpQueueSize.load(std::memory_order_relaxed);
+// Check queue limit before allocation
+    int currentSize = g_iocpQueueSize.load(std::memory_order_acquire);
     if (currentSize >= MAX_IOCP_QUEUE_SIZE) {
         static std::atomic<int> overflowLogCount{0};
         if (overflowLogCount.fetch_add(1, std::memory_order_relaxed) % 100 == 0) {
@@ -27,28 +27,31 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
         return false;
     }
     
-    if (!g_hIocp) return false;
+    if (!g_hIocp || g_hIocp == INVALID_HANDLE_VALUE) return false;
     
-    // Use unique_ptr with custom deleter for guaranteed cleanup
-    auto job = std::unique_ptr<IocpJob, void(*)(IocpJob*)>(
-        new IocpJob{ t, pid, hwnd },
-        [](IocpJob* j) { 
-            delete j; 
-            g_iocpQueueSize.fetch_sub(1, std::memory_order_relaxed);
-        }
-    );
-    
-    // Increment queue size before posting
-    g_iocpQueueSize.fetch_add(1, std::memory_order_relaxed);
-    
-    if (!PostQueuedCompletionStatus(g_hIocp, 0, 0, reinterpret_cast<LPOVERLAPPED>(job.get())))
-    {
-        // Post failed: unique_ptr will delete job, decrement handled by deleter
+    // Use nothrow to prevent crashes on OOM
+    IocpJob* job = new (std::nothrow) IocpJob{ t, pid, hwnd };
+    if (!job) {
+        Log("[IOCP] Failed to allocate job - out of memory");
         return false;
     }
     
-    // Success: release ownership to the IOCP queue
-    job.release();
+    // Increment queue size BEFORE posting
+    g_iocpQueueSize.fetch_add(1, std::memory_order_release);
+    
+    if (!PostQueuedCompletionStatus(g_hIocp, 0, 0, reinterpret_cast<LPOVERLAPPED>(job)))
+    {
+        // Post failed - clean up manually
+        g_iocpQueueSize.fetch_sub(1, std::memory_order_release);
+        delete job;
+        
+        DWORD err = GetLastError();
+        if (err != ERROR_IO_PENDING && err != ERROR_SUCCESS) {
+            Log("[IOCP] PostQueuedCompletionStatus failed: " + std::to_string(err));
+        }
+        return false;
+    }
+    
     return true;
 }
 
@@ -157,31 +160,32 @@ struct TraceSessionGuard {
 
 static void ForceStopEtwSession()
 {
-    TRACEHANDLE session = g_etwSession.load();
+TRACEHANDLE session = g_etwSession.exchange(0);
     if (session == 0) return;
     
     static const wchar_t* SESSION_NAME = L"PriorityMgrPrivateSession";
     
     size_t propsSize = sizeof(EVENT_TRACE_PROPERTIES) + ((wcslen(SESSION_NAME) + 1) * sizeof(wchar_t));
-    std::vector<BYTE> buffer(propsSize);
-    ZeroMemory(buffer.data(), buffer.size());
+    std::vector<BYTE> buffer(propsSize, 0);
     
     PEVENT_TRACE_PROPERTIES props = reinterpret_cast<PEVENT_TRACE_PROPERTIES>(buffer.data());
     props->Wnode.BufferSize = static_cast<ULONG>(propsSize);
+    props->Wnode.Guid = {0};
     props->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
     
+    wcsncpy_s(reinterpret_cast<wchar_t*>(buffer.data() + props->LoggerNameOffset),
+              (propsSize - sizeof(EVENT_TRACE_PROPERTIES)) / sizeof(wchar_t),
+              SESSION_NAME,
+              wcslen(SESSION_NAME));
+    
     ULONG status = ControlTraceW(session, SESSION_NAME, props, EVENT_TRACE_CONTROL_STOP);
-    if (status == ERROR_SUCCESS)
-    {
-        Log("[ETW] Session stopped for shutdown");
-    }
-    else if (status == ERROR_WMI_INSTANCE_NOT_FOUND)
-    {
+    
+    if (status == ERROR_SUCCESS) {
+        Log("[ETW] Session stopped successfully");
+    } else if (status == ERROR_WMI_INSTANCE_NOT_FOUND) {
         Log("[ETW] Session already stopped");
-    }
-    else
-    {
-        Log("[ETW] Stop failed: " + std::to_string(status));
+    } else {
+        Log("[ETW] Stop failed with error: " + std::to_string(status));
     }
 }
 
