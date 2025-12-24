@@ -208,17 +208,17 @@ static void DetectAMDChipletTopology()
 					// But add defensive check and log if still zero
 					static bool topologyLogged = false;
 					DWORD coresPerCcd = 0;
-					if (g_physicalCoreCount > 0 && g_cpuInfo.ccdCount > 0) {
-						coresPerCcd = g_physicalCoreCount / g_cpuInfo.ccdCount;
-					} else {
-						if (!topologyLogged) {
-							Log("[AMD] WARNING: Physical core count (" + std::to_string(g_physicalCoreCount) + 
-								") or CCD count (" + std::to_string(g_cpuInfo.ccdCount) + 
-								") invalid for topology detection");
-							topologyLogged = true;
-						}
-						return; // Cannot proceed without valid topology
-					}
+					if (g_physicalCoreCount == 0 || g_cpuInfo.ccdCount == 0) {
+                        if (!topologyLogged) {
+                            Log("[AMD] WARNING: Invalid topology - Physical cores: " + 
+                                std::to_string(g_physicalCoreCount) + 
+                                ", CCDs: " + std::to_string(g_cpuInfo.ccdCount));
+                            topologyLogged = true;
+                        }
+                        return;
+                    }
+                    // Fix: Update local variable so subsequent checks pass
+                    coresPerCcd = g_physicalCoreCount / g_cpuInfo.ccdCount;
                                         
                     // If 0, we can't proceed with splitting.
                     if (coresPerCcd > 0)
