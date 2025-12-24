@@ -38,7 +38,7 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 
 * Detects CCD topology at runtime
 * Pins games to the **V‑Cache CCD (CCD0)**
-* Offloads non‑latency‑critical tasks to frequency‑optimized CCDs
+* Restores full multi-CCD access (V-Cache + Frequency) for browsers, allowing the OS to utilize all cores for maximum multitasking throughput.
 
 **SMT / Hyper‑Threading Control**
 
@@ -84,10 +84,10 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 * Monitors memory pressure in real time
 * Purges cached RAM **only when necessary** (never blindly)
 
-**Memory Compression Control**
+**Kernel Paging Enforcement**
 
-* Temporarily disables Paging Executive compression during gaming
-* Reduces CPU overhead and latency on hot memory paths
+* Temporarily enables DisablePagingExecutive during gaming
+* Prevents the Windows Kernel from paging core drivers and system code to disk, eliminating micro-stutters caused by disk I/O on hot paths.
 
 ---
 
