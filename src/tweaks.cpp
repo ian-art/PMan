@@ -37,6 +37,9 @@ static bool InitNtMemoryApi()
 
 void IntelligentRamClean()
 {
+    // CRITICAL FIX: Prevent 0x1A BSOD during Hibernate/Sleep
+    if (g_isSuspended.load()) return;
+
     if (!InitNtMemoryApi())
         return;
 
@@ -504,21 +507,26 @@ void SetMemoryCompression(int mode)
     bool shouldCompress = false;
     std::string reason;
     
-    if (totalGB < 7)
+	// Changed minimum from 7GB (8GB stick) to 3GB (4GB stick) to support lower-end devices
+    if (totalGB < 3)
     {
-        reason = "System has " + std::to_string(totalGB) + "GB RAM - skipping (too low)";
+        reason = "System has " + std::to_string(totalGB) + "GB RAM - skipping (critical low memory)";
         Log("[MEMORY] " + reason);
         return;
     }
-    else if (totalGB >= 7 && totalGB <= 16)
+	// Fix: Adjusted range to cover the new minimum (3GB+)
+    // Compression is useful for anything under 32GB in modern gaming scenarios
+    else if (totalGB >= 3 && totalGB <= 32)
     {
         shouldCompress = (mode == 1); 
         reason = "System has " + std::to_string(totalGB) + "GB RAM - compression beneficial";
     }
     else
     {
+        // For >32GB, compression is rarely needed, but we won't force disable it if the user wants it.
+        // We just won't actively manage it.
         shouldCompress = false;
-        reason = "System has " + std::to_string(totalGB) + "GB RAM - compression unnecessary";
+        reason = "System has " + std::to_string(totalGB) + "GB RAM - compression unnecessary (high capacity)";
         Log("[MEMORY] " + reason);
         return;
     }
@@ -799,13 +807,14 @@ void SetWorkingSetLimits(DWORD pid, int mode)
     uint64_t totalGB = ms.ullTotalPhys / (1024ULL * 1024ULL * 1024ULL);
     uint64_t availMB = ms.ullAvailPhys >> 20;
     
-    if (totalGB < 7 || totalGB > 16)
+	// Expanded range: Allow 4GB+ (min 3) and remove 16GB upper limit
+    if (totalGB < 3)
     {
         static bool loggedOnce = false;
         if (!loggedOnce)
         {
             Log("[WORKSET] System has " + std::to_string(totalGB) + 
-                "GB RAM - working set optimization skipped (optimal for 7-16GB)");
+                "GB RAM - working set optimization skipped (requires 4GB+)");
             loggedOnce = true;
         }
         return;

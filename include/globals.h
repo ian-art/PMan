@@ -39,6 +39,7 @@ extern std::atomic<bool> g_restoreOnExit;
 extern std::atomic<bool> g_lockPolicy; 
 extern std::atomic<int>  g_interferenceCount;
 extern std::atomic<bool> g_suspendUpdatesDuringGames;
+extern std::atomic<bool> g_isSuspended;
 
 // Session Lock (Anti-Flapping)
 extern std::atomic<bool> g_sessionLocked;

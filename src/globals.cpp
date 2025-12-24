@@ -25,6 +25,7 @@ std::atomic<bool> g_restoreOnExit{true};
 std::atomic<bool> g_lockPolicy{false};
 std::atomic<int>  g_interferenceCount{0};
 std::atomic<bool> g_suspendUpdatesDuringGames{false};
+std::atomic<bool> g_isSuspended{false};
 
 // Session Lock
 std::atomic<bool> g_sessionLocked{false};

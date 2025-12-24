@@ -448,10 +448,23 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                 break;
             }
             
-            if (msg.message == WM_POWERBROADCAST && 
-                msg.wParam == PBT_POWERSETTINGCHANGE)
+		if (msg.message == WM_POWERBROADCAST)
             {
-                g_reloadNow = true;
+                if (msg.wParam == PBT_APMQUERYSUSPEND || msg.wParam == PBT_APMSUSPEND)
+                {
+                    Log("System suspending - pausing operations to prevent memory corruption");
+                    g_isSuspended.store(true);
+                }
+                else if (msg.wParam == PBT_APMRESUMEAUTOMATIC || msg.wParam == PBT_APMRESUMESUSPEND)
+                {
+                    Log("System resumed - waiting 5s for kernel stability");
+                    Sleep(5000); 
+                    g_isSuspended.store(false);
+                }
+                else if (msg.wParam == PBT_POWERSETTINGCHANGE)
+                {
+                    g_reloadNow = true;
+                }
             }
             
             DispatchMessage(&msg);
