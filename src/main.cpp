@@ -497,9 +497,21 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     
     WaitForThreads();
     
-    if (g_hIocp) CloseHandle(g_hIocp);
-    if (g_hShutdownEvent) CloseHandle(g_hShutdownEvent);
-    if (g_hMutex) CloseHandle(g_hMutex);
+	if (g_hIocp && g_hIocp != INVALID_HANDLE_VALUE) {
+        CloseHandle(g_hIocp);
+        g_hIocp = nullptr;
+    }
+
+    if (g_hShutdownEvent && g_hShutdownEvent != INVALID_HANDLE_VALUE) {
+        CloseHandle(g_hShutdownEvent);
+        g_hShutdownEvent = nullptr;
+    }
+
+    if (g_hMutex && g_hMutex != INVALID_HANDLE_VALUE) {
+        ReleaseMutex(g_hMutex);
+        CloseHandle(g_hMutex);
+        g_hMutex = nullptr;
+    }
     
     Log("=== Priority Manager Stopped ===");
     return 0;
