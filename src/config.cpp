@@ -195,9 +195,17 @@ try
                     {
                         g_suspendUpdatesDuringGames.store(value == L"true" || value == L"1" || value == L"yes");
                     }
-                    else if (key == L"lock_policy")
+					else if (key == L"lock_policy")
                     {
                         lockPolicy = (value == L"true" || value == L"1" || value == L"yes");
+                    }
+                    else if (key == L"idle_revert_enabled")
+                    {
+                        g_idleRevertEnabled.store(value == L"true" || value == L"1" || value == L"yes");
+                    }
+                    else if (key == L"idle_timeout_minutes")
+                    {
+                        try { g_idleTimeoutMinutes.store(std::stoi(value)); } catch (...) { g_idleTimeoutMinutes.store(5); }
                     }
                 }
                 continue;
@@ -236,9 +244,11 @@ try
             std::to_string(g_browsers.size()) + " browsers, " +
             std::to_string(g_gameWindows.size()) + " game windows, " +
             std::to_string(g_browserWindows.size()) + " browser windows | " +
-            "ignore_non_interactive=" + (ignoreNonInteractive ? "true" : "false") + " | " +
+			"ignore_non_interactive=" + (ignoreNonInteractive ? "true" : "false") + " | " +
             "restore_on_exit=" + (restoreOnExit ? "true" : "false") + " | " +
-			"lock_policy=" + (lockPolicy ? "true" : "false") + " | " +
+            "lock_policy=" + (lockPolicy ? "true" : "false") + " | " +
+            "idle_revert=" + (g_idleRevertEnabled.load() ? "true" : "false") + 
+            "(" + std::to_string(g_idleTimeoutMinutes.load()) + "m) | " +
             "suspend_updates=" + (g_suspendUpdatesDuringGames.load() ? "true" : "false"));
 
         // Fix Migration/Reset Logic

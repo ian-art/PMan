@@ -527,8 +527,71 @@ void AntiInterferenceWatchdog()
                 }
             }
         }
-        else if (waitResult == WAIT_TIMEOUT) // Heartbeat
+		else if (waitResult == WAIT_TIMEOUT) // Heartbeat
         {
+            // 0. Idle Revert Logic
+            if (g_idleRevertEnabled.load())
+            {
+                LASTINPUTINFO lii = { sizeof(LASTINPUTINFO) };
+                if (GetLastInputInfo(&lii))
+                {
+                    DWORD idleMs = GetTickCount() - lii.dwTime;
+                    DWORD thresholdMs = g_idleTimeoutMinutes.load() * 60 * 1000;
+                    int currentMode = g_lastMode.load();
+
+                    // Trigger if NOT already in browser mode (2) and idle time exceeded
+                    if (currentMode != 2 && idleMs >= thresholdMs)
+                    {
+                        bool gameIsPresent = false;
+                        
+                        // Strict check: Is a game actually running?
+                        if (currentMode == 1 && g_sessionLocked.load())
+                        {
+                            DWORD gamePid = g_lockedGamePid.load();
+                            if (gamePid != 0)
+                            {
+                                HANDLE hGame = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, gamePid);
+                                if (hGame)
+                                {
+                                    DWORD exitCode = 0;
+                                    if (GetExitCodeProcess(hGame, &exitCode) && exitCode == STILL_ACTIVE)
+                                    {
+                                        gameIsPresent = true;
+                                    }
+                                    CloseHandle(hGame);
+                                }
+                            }
+                        }
+
+                        if (!gameIsPresent)
+                        {
+                            Log("[IDLE] System idle for " + std::to_string(g_idleTimeoutMinutes) + "m with no game running. Reverting to Browser Mode.");
+                            
+                            // Apply Browser Mode System Settings
+                            if (g_caps.hasAdminRights)
+                            {
+                                SetPrioritySeparation(VAL_BROWSER);
+                                SetNetworkQoS(2);
+                                SetMemoryCompression(2);
+                                SetTimerResolution(2);
+                                SetTimerCoalescingControl(2);
+                            }
+                            
+                            // Update State
+                            g_lastMode.store(2);
+                            
+                            // Release locks
+                            if (g_sessionLocked.load())
+                            {
+                                g_sessionLocked.store(false);
+                                g_lockedGamePid.store(0);
+                                ResumeBackgroundServices();
+                            }
+                        }
+                    }
+                }
+            }
+
 			// 1. Health Checks
             if (!g_hIocp || g_hIocp == INVALID_HANDLE_VALUE)
             {

@@ -41,6 +41,10 @@ extern std::atomic<int>  g_interferenceCount;
 extern std::atomic<bool> g_suspendUpdatesDuringGames;
 extern std::atomic<bool> g_isSuspended;
 
+// Idle Revert Feature
+extern std::atomic<bool> g_idleRevertEnabled;
+extern std::atomic<int>  g_idleTimeoutMinutes;
+
 // Session Lock (Anti-Flapping)
 extern std::atomic<bool> g_sessionLocked;
 extern std::atomic<DWORD> g_lockedGamePid;

@@ -64,6 +64,11 @@ lock_policy = false
 ; Services automatically resume when exiting game
 suspend_updates_during_games = false
 
+; Automatically revert to Browser Mode if system is idle for X minutes
+; and no game is currently running (Useful if you leave PC on desktop)
+idle_revert_enabled = true
+idle_timeout_minutes = 5
+
 [games]
 ; Add your game executables here (one per line)
 ; Examples:
