@@ -159,13 +159,7 @@ static void DetectAMDChipletTopology()
             // Each L3 cache represents a CCD
            DWORD ccdId = static_cast<DWORD>(l3CacheGroups.size());
             
-			// Count cores in this L3 group
-            DWORD coreCount = 0;
-            for (WORD i = 0; i < current->Cache.GroupMask.Group; i++)
-            {
-                coreCount += static_cast<DWORD>(std::popcount(current->Cache.GroupMask.Mask));
-            }
-            
+			// CCD identified (L3 cache group)
             l3CacheGroups[ccdId] = std::vector<DWORD>();
         }
         
