@@ -66,26 +66,27 @@ void CheckAndReleaseSessionLock()
         lockedIdentity = g_lockedProcessIdentity;
     }
 
-    // Check if process still exists (expensive operation, outside lock)
+// Check if process still exists (expensive operation, outside lock)
     if (!IsProcessIdentityValid(lockedIdentity))
     {
-        std::lock_guard lock(g_processIdentityMtx);
-        // Re-check under lock to prevent TOCTOU race
-        if (!g_sessionLocked.load(std::memory_order_acquire)) return;
-        if (!(g_lockedProcessIdentity == lockedIdentity)) return;
+        {
+            std::lock_guard lock(g_processIdentityMtx);
+            // Re-check under lock to prevent TOCTOU race
+            if (!g_sessionLocked.load(std::memory_order_acquire)) return;
+            if (!(g_lockedProcessIdentity == lockedIdentity)) return;
+            
+            DWORD lockedPid = lockedIdentity.pid;
+            Log("Session lock RELEASED - process " + std::to_string(lockedPid) + " no longer exists");
+            
+            // Use memory barriers for atomic consistency
+            g_lockedGamePid.store(0, std::memory_order_release);
+            g_sessionLocked.store(false, std::memory_order_release);
+            
+            g_lastProcessIdentity = {0, {0, 0}};
+            g_lockedProcessIdentity = {0, {0, 0}};
+        }
         
-        DWORD lockedPid = lockedIdentity.pid;
-        Log("Session lock RELEASED - process " + std::to_string(lockedPid) + " no longer exists");
-        
-        // Use memory barriers for atomic consistency
-        g_lockedGamePid.store(0, std::memory_order_release);
-        g_sessionLocked.store(false, std::memory_order_release);
-        
-        g_lastProcessIdentity = {0, {0, 0}};
-        g_lockedProcessIdentity = {0, {0, 0}};
-        
-        // Release lock before potentially blocking operation
-        lock.~lock_guard(); // Explicit unlock
+        // Lock released by scope exit before potentially blocking operation
         ResumeBackgroundServices();
     }
 }
