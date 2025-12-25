@@ -66,7 +66,7 @@ void CheckAndReleaseSessionLock()
         lockedIdentity = g_lockedProcessIdentity;
     }
 
-// Check if process still exists (expensive operation, outside lock)
+	// Check if process still exists (expensive operation, outside lock)
     if (!IsProcessIdentityValid(lockedIdentity))
     {
         {
@@ -264,16 +264,8 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         return;
     }
 
-    static std::unordered_set<DWORD> loggedActivePids;
-    static std::mutex loggedActivePidsMtx;
-
-    {
-        std::lock_guard<std::mutex> lg(loggedActivePidsMtx);
-        if (!loggedActivePids.insert(pid).second)
-        {
-            return;
-        }
-    }
+    // Fix: Removed static locals to prevent hidden state issues.
+    // Relying on g_lastPid check (above) which handles the majority of spam.
     
     // 2. Track if this is a mode change or just PID change (launcher->game)
     bool modeChanged = (mode != lastMode);
