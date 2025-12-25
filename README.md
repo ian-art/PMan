@@ -213,6 +213,17 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 **VirusTotal**
 `e573a3ec40b681f7d9ef89b75d6166a43a931c0454a3b2952ab0cd8794641876`
 
+<details>
+<summary><small>Notes</small></summary>
+
+<small>
+All these are AI-generated codes and AI-generated fixes, but everything is my core idea.  
+Tested and running on my Sony VPCCW21FX laptop without issues.  
+Further testing on other devices is required.
+</small>
+
+</details>
+
 <div align="center">
 
 **Priority Manager** — *Tune once. Let the system adapt.*
