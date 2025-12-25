@@ -145,7 +145,8 @@ static void DetectAMDChipletTopology()
         return;
     
     // Parse topology to identify CCDs (L3 cache groups = chiplets)
-    std::unordered_map<DWORD, std::vector<DWORD>> l3CacheGroups;
+	std::unordered_map<DWORD, std::vector<DWORD>> l3CacheGroups;
+    DWORD detectedCoresPerCcd = 0; // New tracking variable
     BYTE* ptr = buffer.data();
     BYTE* end = buffer.data() + bufferSize;
     
@@ -153,13 +154,22 @@ static void DetectAMDChipletTopology()
     {
         auto* current = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(ptr);
         
-        if (current->Relationship == RelationCache && 
+		if (current->Relationship == RelationCache && 
             current->Cache.Level == 3)
         {
             // Each L3 cache represents a CCD
-           DWORD ccdId = static_cast<DWORD>(l3CacheGroups.size());
+            DWORD ccdId = static_cast<DWORD>(l3CacheGroups.size());
+
+			// Count cores in this L3 group
+            // Fix: Directly popcount the mask to get accurate core count per CCD
+            DWORD coreCount = static_cast<DWORD>(std::popcount(current->Cache.GroupMask.Mask));
             
-			// CCD identified (L3 cache group)
+            // Store the detected count (assuming symmetric CCDs, max is safest)
+            if (coreCount > detectedCoresPerCcd)
+            {
+                detectedCoresPerCcd = coreCount;
+            }
+            
             l3CacheGroups[ccdId] = std::vector<DWORD>();
         }
         
@@ -211,8 +221,16 @@ static void DetectAMDChipletTopology()
                         }
                         return;
                     }
-                    // Fix: Update local variable so subsequent checks pass
-                    coresPerCcd = g_physicalCoreCount / g_cpuInfo.ccdCount;
+					// Fix: Use the accurate count we detected earlier
+                    if (detectedCoresPerCcd > 0)
+                    {
+                        coresPerCcd = detectedCoresPerCcd;
+                    }
+                    else
+                    {
+                        // Fallback to heuristic if detection failed
+                        coresPerCcd = g_physicalCoreCount / g_cpuInfo.ccdCount;
+                    }
                                         
                     // If 0, we can't proceed with splitting.
                     if (coresPerCcd > 0)
