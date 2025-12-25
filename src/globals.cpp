@@ -29,7 +29,7 @@ std::atomic<bool> g_isSuspended{false};
 
 // Idle Revert Feature
 std::atomic<bool> g_idleRevertEnabled{true};
-std::atomic<int>  g_idleTimeoutMinutes{5};
+std::atomic<uint32_t> g_idleTimeoutMs{300000}; // Default 5m
 
 // Session Lock
 std::atomic<bool> g_sessionLocked{false};

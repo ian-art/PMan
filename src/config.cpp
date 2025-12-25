@@ -203,9 +203,29 @@ try
                     {
                         g_idleRevertEnabled.store(value == L"true" || value == L"1" || value == L"yes");
                     }
-                    else if (key == L"idle_timeout_minutes")
+                    else if (key == L"idle_timeout")
                     {
-                        try { g_idleTimeoutMinutes.store(std::stoi(value)); } catch (...) { g_idleTimeoutMinutes.store(5); }
+                        if (!value.empty())
+                        {
+                            wchar_t suffix = value.back();
+                            uint32_t multiplier = 60000; // Default to minutes if no suffix
+                            std::wstring numPart = value;
+
+                            if (suffix == L's' || suffix == L'S') {
+                                multiplier = 1000;
+                                numPart.pop_back();
+                            }
+                            else if (suffix == L'm' || suffix == L'M') {
+                                multiplier = 60000;
+                                numPart.pop_back();
+                            }
+
+                            try {
+                                g_idleTimeoutMs.store(static_cast<uint32_t>(std::stoi(numPart)) * multiplier);
+                            } catch (...) {
+                                g_idleTimeoutMs.store(300000); // Fallback 5m
+                            }
+                        }
                     }
                 }
                 continue;
@@ -248,7 +268,7 @@ try
             "restore_on_exit=" + (restoreOnExit ? "true" : "false") + " | " +
             "lock_policy=" + (lockPolicy ? "true" : "false") + " | " +
             "idle_revert=" + (g_idleRevertEnabled.load() ? "true" : "false") + 
-            "(" + std::to_string(g_idleTimeoutMinutes.load()) + "m) | " +
+            "(" + std::to_string(g_idleTimeoutMs.load() / 1000) + "s) | " +
             "suspend_updates=" + (g_suspendUpdatesDuringGames.load() ? "true" : "false"));
 
         // Fix Migration/Reset Logic

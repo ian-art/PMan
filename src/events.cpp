@@ -536,7 +536,7 @@ void AntiInterferenceWatchdog()
                 if (GetLastInputInfo(&lii))
                 {
                     DWORD idleMs = GetTickCount() - lii.dwTime;
-                    DWORD thresholdMs = g_idleTimeoutMinutes.load() * 60 * 1000;
+                    DWORD thresholdMs = g_idleTimeoutMs.load(); // Use the parsed MS value
                     int currentMode = g_lastMode.load();
 
                     // Trigger if NOT already in browser mode (2) and idle time exceeded
@@ -565,7 +565,7 @@ void AntiInterferenceWatchdog()
 
                         if (!gameIsPresent)
                         {
-                            Log("[IDLE] System idle for " + std::to_string(g_idleTimeoutMinutes) + "m with no game running. Reverting to Browser Mode.");
+                            Log("[IDLE] System idle for " + std::to_string(thresholdMs / 1000) + "s with no game running. Reverting to Browser Mode.");
                             
                             // Apply Browser Mode System Settings
                             if (g_caps.hasAdminRights)

@@ -43,7 +43,7 @@ extern std::atomic<bool> g_isSuspended;
 
 // Idle Revert Feature
 extern std::atomic<bool> g_idleRevertEnabled;
-extern std::atomic<int>  g_idleTimeoutMinutes;
+extern std::atomic<uint32_t> g_idleTimeoutMs; // Store in MS for precision
 
 // Session Lock (Anti-Flapping)
 extern std::atomic<bool> g_sessionLocked;
