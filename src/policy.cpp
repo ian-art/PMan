@@ -219,11 +219,22 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
 	wchar_t path[MAX_PATH];
     DWORD sz = MAX_PATH;
     BOOL success = QueryFullProcessImageNameW(h, 0, path, &sz);
+    
+    // Capture error before closing handle
+    DWORD err = GetLastError();
     CloseHandle(h);
     
     if (!success) 
     {
-        Log("[POLICY] QueryFullProcessImageNameW failed for PID " + std::to_string(pid));
+        // Fix: Suppress log noise for short-lived processes (Race Condition)
+        // ERROR_GEN_FAILURE (31) = Device not functioning (common for zombies)
+        // ERROR_ACCESS_DENIED (5) = Protected process (e.g. anti-cheat/system)
+        // ERROR_INVALID_PARAMETER (87) = Process handle bad/exiting
+        if (err != ERROR_GEN_FAILURE && err != ERROR_ACCESS_DENIED && err != ERROR_INVALID_PARAMETER && err != ERROR_PARTIAL_COPY)
+        {
+            Log("[POLICY] QueryFullProcessImageNameW failed for PID " + std::to_string(pid) + 
+                ": " + std::to_string(err));
+        }
         return;
     }
 
