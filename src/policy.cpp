@@ -205,7 +205,7 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     
 	CheckAndReleaseSessionLock();
     
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+	HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!h)
     {
 #ifdef _DEBUG
@@ -221,7 +221,15 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     BOOL success = QueryFullProcessImageNameW(h, 0, path, &sz);
     CloseHandle(h);
     
-    if (!success) return;
+    if (!success) 
+    {
+        Log("[POLICY] QueryFullProcessImageNameW failed for PID " + std::to_string(pid));
+        return;
+    }
+
+    // Fix: Re-verify PID identity to prevent acting on recycled PID
+    ProcessIdentity verifyIdentity;
+    if (!GetProcessIdentity(pid, verifyIdentity)) return;
     
     std::wstring exe = ExeFromPath(path);
     if (exe.empty()) return;
