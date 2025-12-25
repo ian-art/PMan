@@ -307,15 +307,7 @@ try
             if (sect == G && !item.empty()) games.insert(item);
             if (sect == B && !item.empty()) browsers.insert(item);
             if (sect == GW && !item.empty()) gameWindows.insert(item);
-            if (sect == BW && !item.empty()) browserWindows.insert(item);
-        }
-        
-        {
-            std::unique_lock lg(g_setMtx);
-            g_games = std::move(games);
-            g_browsers = std::move(browsers);
-            g_gameWindows = std::move(gameWindows);
-            g_browserWindows = std::move(browserWindows);
+			if (sect == BW && !item.empty()) browserWindows.insert(item);
         }
         
 		// Fix Smart Migration Logic (Runs BEFORE moving data to globals)
