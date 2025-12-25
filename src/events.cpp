@@ -105,12 +105,14 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
                 desc.ArrayIndex = ULONG_MAX;
                 desc.Reserved = 0;
 
-                DWORD pid = 0;
+				DWORD pid = 0;
                 DWORD pidSize = sizeof(pid);
                 
                 if (TdhGetProperty(rec, 0, nullptr, 1, &desc, pidSize, reinterpret_cast<BYTE*>(&pid)) == ERROR_SUCCESS)
                 {
-					if (pid != 0)
+                    // Protection against race with ForceStopEtwSession
+                    // In a real fix, you might use a shared_mutex or check g_etwSession != 0
+                    if (pid != 0 && g_running)
                     {
                         // Phase 3: Update Heartbeat
                         g_lastEtwHeartbeat.store(GetTickCount64(), std::memory_order_relaxed);
@@ -158,9 +160,13 @@ struct TraceSessionGuard {
     void Release() { handle = 0; }
 };
 
+// Mutex to prevent race conditions during session stop/callback
+static std::mutex g_etwSessionMtx;
+
 static void ForceStopEtwSession()
 {
-TRACEHANDLE session = g_etwSession.exchange(0);
+    std::lock_guard lock(g_etwSessionMtx);
+    TRACEHANDLE session = g_etwSession.exchange(0);
     if (session == 0) return;
     
     static const wchar_t* SESSION_NAME = L"PriorityMgrPrivateSession";
