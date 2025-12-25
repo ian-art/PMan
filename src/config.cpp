@@ -44,9 +44,71 @@ static bool IsValidExecutableName(const std::wstring& name)
         L"audiodg.exe", L"dwm.exe", L"spoolsv.exe"
     };
     
-    if (BLACKLIST.count(name)) return false;
+if (BLACKLIST.count(name)) return false;
     
     return true;
+}
+
+// Helper to save current settings to file (preserves user data during migration)
+static void SaveConfig(const std::filesystem::path& path, 
+                      const std::unordered_set<std::wstring>& games,
+                      const std::unordered_set<std::wstring>& browsers,
+                      const std::unordered_set<std::wstring>& gameWindows,
+                      const std::unordered_set<std::wstring>& browserWindows,
+                      bool ignoreNonInteractive,
+                      bool restoreOnExit,
+                      bool lockPolicy,
+                      bool suspendUpdates,
+                      bool idleRevert,
+                      uint32_t idleTimeoutMs)
+{
+    std::ofstream f(path);
+    if (!f) return;
+
+    // Convert ms back to readable format
+    std::string timeoutStr;
+    if (idleTimeoutMs % 60000 == 0) timeoutStr = std::to_string(idleTimeoutMs / 60000) + "m";
+    else timeoutStr = std::to_string(idleTimeoutMs / 1000) + "s";
+
+    f << "; Priority Manager Configuration\n";
+    f << "; Auto-migrated config file\n\n";
+    
+    f << "[meta]\n";
+    f << "version=" << CONFIG_VERSION << "\n\n";
+    
+    f << "[global]\n";
+    f << "; Ignore non-interactive processes (services, scheduled tasks, SYSTEM processes)\n";
+    f << "ignore_non_interactive = " << (ignoreNonInteractive ? "true" : "false") << "\n\n";
+    
+    f << "; Restore original Win32PrioritySeparation value when program exits\n";
+    f << "restore_on_exit = " << (restoreOnExit ? "true" : "false") << "\n\n";
+    
+    f << "; Lock policy against external interference (other tweaking tools)\n";
+    f << "lock_policy = " << (lockPolicy ? "true" : "false") << "\n\n";
+    
+    f << "; Suspend Windows Update and background transfers during gaming\n";
+    f << "suspend_updates_during_games = " << (suspendUpdates ? "true" : "false") << "\n\n";
+
+    f << "; Automatically revert to Browser Mode if system is idle for specified time\n";
+    f << "; and no game is currently running.\n";
+    f << "idle_revert_enabled = " << (idleRevert ? "true" : "false") << "\n";
+    f << "idle_timeout = " << timeoutStr << "\n\n";
+    
+    f << "[games]\n";
+    for (const auto& s : games) f << WideToUtf8(s.c_str()) << "\n";
+    f << "\n";
+
+    f << "[browsers]\n";
+    for (const auto& s : browsers) f << WideToUtf8(s.c_str()) << "\n";
+    f << "\n";
+
+    f << "[game_windows]\n";
+    for (const auto& s : gameWindows) f << WideToUtf8(s.c_str()) << "\n";
+    f << "\n";
+
+    f << "[browser_windows]\n";
+    for (const auto& s : browserWindows) f << WideToUtf8(s.c_str()) << "\n";
+    f << "\n";
 }
 
 bool CreateDefaultConfig(const std::filesystem::path& configPath)
@@ -256,6 +318,38 @@ try
             g_browserWindows = std::move(browserWindows);
         }
         
+		// Fix Smart Migration Logic (Runs BEFORE moving data to globals)
+        // This preserves user settings while adding new defaults
+        if (configVersion < CONFIG_VERSION)
+        {
+            f.close(); // Close reader before writing
+            Log("[CONFIG] Version mismatch (File: " + std::to_string(configVersion) + 
+                ", App: " + std::to_string(CONFIG_VERSION) + "). Migrating settings...");
+            
+            std::filesystem::path backupPath = configPath;
+            backupPath += L".old";
+            std::filesystem::copy_file(configPath, backupPath, std::filesystem::copy_options::overwrite_existing);
+            
+            // Save the data we just loaded (plus the new default values for idle_revert, etc)
+            SaveConfig(configPath, games, browsers, gameWindows, browserWindows,
+                       ignoreNonInteractive, restoreOnExit, lockPolicy, 
+                       g_suspendUpdatesDuringGames.load(), // Use global default if not in file
+                       g_idleRevertEnabled.load(),         // Uses default 'true' if not in old file
+                       g_idleTimeoutMs.load());            // Uses default '300000' if not in old file
+            
+            // Recursively load the newly created file to populate globals correctly
+            LoadConfig(); 
+            return;
+        }
+
+        {
+            std::unique_lock lg(g_setMtx);
+            g_games = std::move(games);
+            g_browsers = std::move(browsers);
+            g_gameWindows = std::move(gameWindows);
+            g_browserWindows = std::move(browserWindows);
+        }
+        
         g_ignoreNonInteractive.store(ignoreNonInteractive);
         g_restoreOnExit.store(restoreOnExit);
         g_lockPolicy.store(lockPolicy);
@@ -264,30 +358,12 @@ try
             std::to_string(g_browsers.size()) + " browsers, " +
             std::to_string(g_gameWindows.size()) + " game windows, " +
             std::to_string(g_browserWindows.size()) + " browser windows | " +
-			"ignore_non_interactive=" + (ignoreNonInteractive ? "true" : "false") + " | " +
+            "ignore_non_interactive=" + (ignoreNonInteractive ? "true" : "false") + " | " +
             "restore_on_exit=" + (restoreOnExit ? "true" : "false") + " | " +
             "lock_policy=" + (lockPolicy ? "true" : "false") + " | " +
             "idle_revert=" + (g_idleRevertEnabled.load() ? "true" : "false") + 
             "(" + std::to_string(g_idleTimeoutMs.load() / 1000) + "s) | " +
             "suspend_updates=" + (g_suspendUpdatesDuringGames.load() ? "true" : "false"));
-
-        // Fix Migration/Reset Logic
-        if (configVersion < CONFIG_VERSION)
-        {
-            f.close(); // Close reader before moving
-            Log("[CONFIG] Version mismatch (File: " + std::to_string(configVersion) + 
-                ", App: " + std::to_string(CONFIG_VERSION) + "). backing up and resetting...");
-            
-            std::filesystem::path backupPath = configPath;
-            backupPath += L".old";
-            std::filesystem::copy_file(configPath, backupPath, std::filesystem::copy_options::overwrite_existing);
-            std::filesystem::remove(configPath);
-            CreateDefaultConfig(configPath);
-            
-            // Recursively load the new config
-            LoadConfig(); 
-            return;
-        }
     }
     catch (const std::exception& e)
     { 
