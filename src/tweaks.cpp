@@ -576,12 +576,13 @@ void SetMemoryCompression(int mode)
         return;
     }
     
-    DWORD currentValue = 0;
+	DWORD currentValue = 0;
     DWORD size = sizeof(currentValue);
     if (RegQueryValueExW(key, L"DisablePagingExecutive", nullptr, nullptr,
                         reinterpret_cast<BYTE*>(&currentValue), &size) == ERROR_SUCCESS)
     {
-        if (currentValue == targetValue)
+        // Fix: Validate size to prevent partial reads or buffer overflow risks
+        if (size == sizeof(currentValue) && currentValue == targetValue)
         {
             RegCloseKey(key);
             return; 
