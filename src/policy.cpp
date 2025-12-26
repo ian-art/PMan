@@ -388,13 +388,13 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         // Update tracking (always)
         // Fix Atomic update of both PID and Mode
         uint64_t encodedState = (static_cast<uint64_t>(pid) << 32) | static_cast<uint32_t>(mode);
-        g_policyState.store(encodedState);
+        g_policyState.store(encodedState, std::memory_order_release);
 
 		if (modeChanged)
         {
-            g_lastMode.store(mode);
+            g_lastMode.store(mode, std::memory_order_release);
         }
-        g_lastPid.store(pid);
+        g_lastPid.store(pid, std::memory_order_release);
         
         // Store process identity for PID reuse protection
         ProcessIdentity newIdentity;
