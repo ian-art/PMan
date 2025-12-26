@@ -748,7 +748,7 @@ if (!hProcess)
 	else if (mode == 2)
     {
 		// Fix: Prevent overflow on 64-core systems (1ULL << 64 is UB)
-        if (g_logicalCoreCount > 0 && g_logicalCoreCount < 64)
+        if (g_logicalCoreCount > 0 && g_logicalCoreCount < (sizeof(DWORD_PTR) * 8))
             affinityMask = (1ULL << g_logicalCoreCount) - 1;
         else
             affinityMask = static_cast<DWORD_PTR>(-1);
