@@ -335,9 +335,9 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     DWORD val = (mode == 1) ? VAL_GAME : VAL_BROWSER;
     
     // Pre-game RAM cleaning
-    if (mode == 1)
+	if (mode == 1)
     {
-        static std::unordered_set<DWORD> cleanedGamePids;
+        // Fix: Removed leaking static set. Rely on atomic tracker.
         DWORD lastClean = g_lastRamCleanPid.load();
         if (lastClean != pid)
         {
@@ -351,7 +351,6 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
                 Log("[RAM] Memory OK - skipping cleanup");
             }
 
-            cleanedGamePids.insert(pid);
             g_lastRamCleanPid.store(pid);
         }
     }
