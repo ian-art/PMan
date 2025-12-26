@@ -226,10 +226,16 @@ static void DetectAMDChipletTopology()
                     {
                         coresPerCcd = detectedCoresPerCcd;
                     }
-                    else
+					else
                     {
                         // Fallback to heuristic if detection failed
-                        coresPerCcd = g_physicalCoreCount / g_cpuInfo.ccdCount;
+                        // Fix: Prevent division by zero crash on detection failure
+                        if (g_cpuInfo.ccdCount > 0) {
+                            coresPerCcd = g_physicalCoreCount / g_cpuInfo.ccdCount;
+                        } else {
+                            Log("[AMD] Topology detection failed (CCD count 0). Skipping affinity optimization.");
+                            coresPerCcd = 0;
+                        }
                     }
                                         
                     // If 0, we can't proceed with splitting.
