@@ -100,11 +100,21 @@ static bool IsTaskInstalled(const std::wstring& taskName)
 // Phase 4: Crash-Proof Registry Guard
 static void RunRegistryGuard(DWORD targetPid, DWORD originalVal)
 {
-    // 1. Wait for the main process to exit (crash, kill, or close)
-    HANDLE hProcess = OpenProcess(SYNCHRONIZE, FALSE, targetPid);
+	// 1. Wait for the main process to exit (crash, kill, or close)
+    HANDLE hProcess = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
     if (hProcess)
     {
-        WaitForSingleObject(hProcess, INFINITE);
+        // Fix: Verify we are watching the correct binary to prevent PID reuse exploits
+        wchar_t path[MAX_PATH];
+        DWORD sz = MAX_PATH;
+        if (QueryFullProcessImageNameW(hProcess, 0, path, &sz))
+        {
+            // Simple check to ensure we aren't waiting on a random system process
+            if (std::wstring(path).find(L"pman.exe") != std::wstring::npos) 
+            {
+                WaitForSingleObject(hProcess, INFINITE);
+            }
+        }
         CloseHandle(hProcess);
     }
     // If OpenProcess failed, process is already gone, proceed to check.
