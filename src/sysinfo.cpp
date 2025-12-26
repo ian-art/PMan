@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <iostream>
 #include <intrin.h>
-#include <bit> // For std::popcount
+#include <bitset> // Use bitset for C++17 compatibility
 
 // Forward declarations
 static void DetectAMDChipletTopology();
@@ -162,7 +162,8 @@ static void DetectAMDChipletTopology()
 
 			// Count cores in this L3 group
             // Fix: Directly popcount the mask to get accurate core count per CCD
-            DWORD coreCount = static_cast<DWORD>(std::popcount(current->Cache.GroupMask.Mask));
+            // Using std::bitset for C++17 compatibility instead of std::popcount (C++20)
+            DWORD coreCount = static_cast<DWORD>(std::bitset<sizeof(ULONG_PTR) * 8>(current->Cache.GroupMask.Mask).count());
             
             // Store the detected count (assuming symmetric CCDs, max is safest)
             if (coreCount > detectedCoresPerCcd)
