@@ -232,9 +232,9 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     std::vector<wchar_t> pathBuf(sz);
     BOOL success = QueryFullProcessImageNameW(h, 0, pathBuf.data(), &sz);
     
-    if (!success && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+	if (!success && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
     {
-        pathBuf.resize(sz); // Resize to required length
+        pathBuf.resize(sz + 1); // Resize to required length + null terminator
         success = QueryFullProcessImageNameW(h, 0, pathBuf.data(), &sz);
     }
 
