@@ -878,8 +878,10 @@ void SetWorkingSetLimits(DWORD pid, int mode)
             }
         }
         
-        SIZE_T minWS = 50ULL * 1024 * 1024;
-        SIZE_T maxWS = static_cast<SIZE_T>(-1);
+		SIZE_T minWS = 50ULL * 1024 * 1024;
+        // Fix: Cap max working set to physical RAM to prevent system starvation
+        // (Using -1 can sometimes cause the OS to grant unsafe amounts in low-memory conditions)
+        SIZE_T maxWS = (totalGB > 0 ? (totalGB * 1024ULL * 1024ULL * 1024ULL) : static_cast<SIZE_T>(-1));
         
         if (availMB < 3072)
         {
