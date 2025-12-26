@@ -4,7 +4,8 @@
 // Thread safety debugging options
 #ifdef _DEBUG
     // Enable thread safety annotations for Clang/MSVC
-    #if defined(__clang__) || defined(_MSC_VER)
+    // Fix: MSVC does not support __attribute__ syntax
+    #if defined(__clang__)
         #define THREAD_ANNOTATION_ATTRIBUTE__(x) __attribute__((x))
     #else
         #define THREAD_ANNOTATION_ATTRIBUTE__(x)
