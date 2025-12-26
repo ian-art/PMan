@@ -103,11 +103,12 @@ bool ShouldIgnoreDueToSessionLock(int detectedMode, DWORD /*pid*/)
             lockedIdentity = g_lockedProcessIdentity;
         }
         
-        if (IsProcessIdentityValid(lockedIdentity))
+		if (IsProcessIdentityValid(lockedIdentity))
         {
             HWND fg = GetForegroundWindow();
             DWORD fgPid = 0;
-            GetWindowThreadProcessId(fg, &fgPid);
+            // Fix: Validate window handle to prevent null pointer dereference
+            if (fg) GetWindowThreadProcessId(fg, &fgPid);
 
             // Fix Verify PID Identity to prevent PID reuse exploits
             if (fgPid == lockedIdentity.pid)
