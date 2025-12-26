@@ -17,6 +17,7 @@ static constexpr int MAX_IOCP_QUEUE_SIZE = 1000;
 bool PostIocp(JobType t, DWORD pid, HWND hwnd)
 {
 // Check queue limit before allocation
+    // Fix: Use correct memory ordering for producer-consumer synchronization
     int currentSize = g_iocpQueueSize.load(std::memory_order_acquire);
     if (currentSize >= MAX_IOCP_QUEUE_SIZE) {
         static std::atomic<int> overflowLogCount{0};
@@ -36,8 +37,9 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
         return false;
     }
     
-    // Increment queue size BEFORE posting
-    g_iocpQueueSize.fetch_add(1, std::memory_order_release);
+	// Increment queue size BEFORE posting
+    // Fix: Ensure strict ordering (acq_rel) so increment is visible before job is processed
+    g_iocpQueueSize.fetch_add(1, std::memory_order_acq_rel);
     
     if (!PostQueuedCompletionStatus(g_hIocp, 0, 0, reinterpret_cast<LPOVERLAPPED>(job)))
     {
