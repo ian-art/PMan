@@ -35,10 +35,12 @@
 #if defined(_MSC_VER) && _MSC_VER >= 1920
     #pragma warning(push)
     #pragma warning(disable: 28251) // Inconsistent annotation warning
-    #ifdef _DEBUG
+	#ifdef _DEBUG
         // MSVC thread sanitizer (available in VS 2019+)
         #pragma comment(linker, "/include:__scrt_initialize_winrt")
     #endif
+    
+    #pragma warning(pop)
 #endif
 
 #endif // PMAN_BUILD_OPTIONS_H
