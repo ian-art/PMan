@@ -88,6 +88,9 @@ static bool VerifyPrioritySeparation(DWORD expectedVal)
 
 bool SetPrioritySeparation(DWORD val)
 {
+    // CRITICAL FIX: Prevent registry corruption during power state transitions
+    if (g_isSuspended.load()) return false;
+
     // Registry Write Guard
     DWORD cachedVal = g_cachedRegistryValue.load();
     if (cachedVal != 0xFFFFFFFF && cachedVal == val)
@@ -546,7 +549,7 @@ void SetMemoryCompression(int mode)
     {
         DWORD original = 0;
         DWORD size = sizeof(original);
-        if (RegQueryValueExW(key, L"DisablePagingExecutive", nullptr, nullptr,
+        if (RegQueryValueExW(key, L"StoreCompression", nullptr, nullptr,
                             reinterpret_cast<BYTE*>(&original), &size) == ERROR_SUCCESS)
         {
             g_originalMemoryCompression.store(original);
@@ -578,7 +581,7 @@ void SetMemoryCompression(int mode)
     
 	DWORD currentValue = 0;
     DWORD size = sizeof(currentValue);
-    if (RegQueryValueExW(key, L"DisablePagingExecutive", nullptr, nullptr,
+    if (RegQueryValueExW(key, L"StoreCompression", nullptr, nullptr,
                         reinterpret_cast<BYTE*>(&currentValue), &size) == ERROR_SUCCESS)
     {
         // Fix: Validate size to prevent partial reads or buffer overflow risks
@@ -589,7 +592,8 @@ void SetMemoryCompression(int mode)
         }
     }
     
-    rc = RegSetValueExW(key, L"DisablePagingExecutive", 0, REG_DWORD,
+	// Fix: Use correct key for memory compression (StoreCompression) instead of kernel paging
+    rc = RegSetValueExW(key, L"StoreCompression", 0, REG_DWORD,
                        reinterpret_cast<const BYTE*>(&targetValue), sizeof(targetValue));
     
     if (rc == ERROR_SUCCESS)
@@ -743,11 +747,11 @@ if (!hProcess)
     }
 	else if (mode == 2)
     {
-        // Fix Safe affinity mask calculation for 64+ cores or error states
+		// Fix: Prevent overflow on 64-core systems (1ULL << 64 is UB)
         if (g_logicalCoreCount > 0 && g_logicalCoreCount < 64)
             affinityMask = (1ULL << g_logicalCoreCount) - 1;
         else
-            affinityMask = (DWORD_PTR)-1; // Use all available cores
+            affinityMask = static_cast<DWORD_PTR>(-1);
 
         if (SetProcessAffinityMask(hProcess, affinityMask))
         {
