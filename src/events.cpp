@@ -830,7 +830,7 @@ void PerformGracefulShutdown()
             0, KEY_SET_VALUE, &key) == ERROR_SUCCESS)
         {
             DWORD original = g_originalMemoryCompression.load();
-            RegSetValueExW(key, L"DisablePagingExecutive", 0, REG_DWORD,
+            RegSetValueExW(key, L"StoreCompression", 0, REG_DWORD,
                           reinterpret_cast<const BYTE*>(&original), sizeof(original));
             RegCloseKey(key);
             Log("Restored original memory compression: " + std::to_string(original));
