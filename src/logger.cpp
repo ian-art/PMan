@@ -48,10 +48,21 @@ try
             {
                 // Fallback if security descriptor fails
                 std::filesystem::create_directories(dir);
-            }
+			}
         }
 
-       std::ofstream log(dir / L"log.txt", std::ios::app);
+        auto logPath = dir / L"log.txt";
+
+        // Fix Log rotation (Max 5MB)
+        try {
+            if (std::filesystem::exists(logPath) && std::filesystem::file_size(logPath) > 5 * 1024 * 1024) {
+                auto backupPath = dir / L"log.old.txt";
+                std::filesystem::copy_file(logPath, backupPath, std::filesystem::copy_options::overwrite_existing);
+                std::filesystem::resize_file(logPath, 0); // Truncate current log
+            }
+        } catch (...) {}
+
+       std::ofstream log(logPath, std::ios::app);
         if (log)
         {
             auto now = std::chrono::system_clock::now();

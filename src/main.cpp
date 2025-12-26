@@ -265,16 +265,22 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         return 0;
     }
 
-    bool taskExists = IsTaskInstalled(taskName);
+	bool taskExists = IsTaskInstalled(taskName);
 
     if (!taskExists)
     {
-        std::wstring cmd = L"schtasks /create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\"\" /sc onlogon /rl highest /f";
+        std::wstring cmdStr = L"schtasks /create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\"\" /sc onlogon /rl highest /f";
+        
+        // Fix CreateProcessW requires a mutable buffer
+        std::vector<wchar_t> cmdBuf(cmdStr.begin(), cmdStr.end());
+        cmdBuf.push_back(L'\0');
+
         STARTUPINFOW si{};
         PROCESS_INFORMATION pi{};
         si.dwFlags = STARTF_USESHOWWINDOW;
         si.wShowWindow = SW_HIDE;
-        BOOL created = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+        
+        BOOL created = CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
         if (created)
         {
             WaitForSingleObject(pi.hProcess, 10000);

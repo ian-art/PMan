@@ -208,7 +208,10 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         }
     }
     
-	CheckAndReleaseSessionLock();
+	// Fix Validate window handle before use if provided
+    if (hwnd && !IsWindow(hwnd)) hwnd = nullptr;
+
+    CheckAndReleaseSessionLock();
     
 	HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!h)
@@ -221,11 +224,17 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         return;
     }
     
-	wchar_t path[MAX_PATH];
+	// Fix Support paths longer than MAX_PATH (260 chars)
     DWORD sz = MAX_PATH;
-    BOOL success = QueryFullProcessImageNameW(h, 0, path, &sz);
+    std::vector<wchar_t> pathBuf(sz);
+    BOOL success = QueryFullProcessImageNameW(h, 0, pathBuf.data(), &sz);
     
-    // Capture error before closing handle
+    if (!success && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+    {
+        pathBuf.resize(sz); // Resize to required length
+        success = QueryFullProcessImageNameW(h, 0, pathBuf.data(), &sz);
+    }
+
     DWORD err = GetLastError();
     CloseHandle(h);
     
@@ -243,11 +252,12 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         return;
     }
 
-    // Fix: Re-verify PID identity to prevent acting on recycled PID
+	// Fix: Re-verify PID identity to prevent acting on recycled PID
     ProcessIdentity verifyIdentity;
     if (!GetProcessIdentity(pid, verifyIdentity)) return;
     
-    std::wstring exe = ExeFromPath(path);
+    // Fix: Use pathBuf.data() because 'path' was replaced by a vector
+    std::wstring exe = ExeFromPath(pathBuf.data());
     if (exe.empty()) return;
 
     int mode = 0;
