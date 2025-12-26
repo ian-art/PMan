@@ -238,10 +238,11 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         success = QueryFullProcessImageNameW(h, 0, pathBuf.data(), &sz);
     }
 
-    DWORD err = GetLastError();
-    CloseHandle(h);
+	DWORD err = GetLastError();
+    // Fix: Keep handle open (RAII) to prevent PID reuse during evaluation
+    UniqueHandle hGuard(h); 
     
-    if (!success) 
+    if (!success)
     {
         // Fix: Suppress log noise for short-lived processes (Race Condition)
         // ERROR_GEN_FAILURE (31) = Device not functioning (common for zombies)
