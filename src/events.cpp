@@ -221,9 +221,12 @@ void EtwThread()
     
 	if (status == ERROR_SUCCESS)
     {
-        // Fix Protect session handle storage to prevent race with ForceStop
-        std::lock_guard lock(g_etwSessionMtx);
-        g_etwSession.store(hSession);
+        // Fix: Ensure handle is valid before storing to prevent race conditions
+        if (hSession != 0 && hSession != INVALID_PROCESSTRACE_HANDLE)
+        {
+            std::lock_guard lock(g_etwSessionMtx);
+            g_etwSession.store(hSession);
+        }
     }
 
     if (status == ERROR_ALREADY_EXISTS)
