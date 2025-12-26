@@ -98,19 +98,18 @@ static bool IsTaskInstalled(const std::wstring& taskName)
 }
 
 // Phase 4: Crash-Proof Registry Guard
-static void RunRegistryGuard(DWORD targetPid, DWORD originalVal)
+static void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWORD originalVal)
 {
 	// 1. Wait for the main process to exit (crash, kill, or close)
     HANDLE hProcess = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
     if (hProcess)
     {
-        // Fix: Verify we are watching the correct binary to prevent PID reuse exploits
-        wchar_t path[MAX_PATH];
-        DWORD sz = MAX_PATH;
-        if (QueryFullProcessImageNameW(hProcess, 0, path, &sz))
+        // Verify process identity using creation time to prevent PID reuse
+        FILETIME ftCreation, ftExit, ftKernel, ftUser;
+        if (GetProcessTimes(hProcess, &ftCreation, &ftExit, &ftKernel, &ftUser))
         {
-            // Simple check to ensure we aren't waiting on a random system process
-            if (std::wstring(path).find(L"pman.exe") != std::wstring::npos) 
+            // Check if the PID still belongs to the original instance
+            if (ftCreation.dwLowDateTime == lowTime && ftCreation.dwHighDateTime == highTime)
             {
                 WaitForSingleObject(hProcess, INFINITE);
             }
@@ -150,9 +149,15 @@ static void LaunchRegistryGuard(DWORD originalVal)
     wchar_t selfPath[MAX_PATH];
     GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
 
-    // Pass PID and Original Value to the guard instance
+    // Get current process creation time for identity verification
+    FILETIME ftCreation, ftExit, ftKernel, ftUser;
+    GetProcessTimes(GetCurrentProcess(), &ftCreation, &ftExit, &ftKernel, &ftUser);
+
+    // Pass PID, Creation Time (Low/High), and Original Value to the guard instance
     std::wstring cmd = L"\"" + std::wstring(selfPath) + L"\" --guard " + 
                        std::to_wstring(GetCurrentProcessId()) + L" " + 
+                       std::to_wstring(ftCreation.dwLowDateTime) + L" " +
+                       std::to_wstring(ftCreation.dwHighDateTime) + L" " +
                        std::to_wstring(originalVal);
 
     STARTUPINFOW si{};
@@ -178,11 +183,13 @@ static void LaunchRegistryGuard(DWORD originalVal)
 int wmain(int argc, wchar_t** argv)
 {
     // Check for Guard Mode (Must be before Mutex check)
-    if (argc >= 4 && (std::wstring(argv[1]) == L"--guard"))
+    if (argc >= 6 && (std::wstring(argv[1]) == L"--guard"))
     {
         DWORD pid = std::wcstoul(argv[2], nullptr, 10);
-        DWORD val = std::wcstoul(argv[3], nullptr, 10);
-        RunRegistryGuard(pid, val);
+        DWORD low = std::wcstoul(argv[3], nullptr, 10);
+        DWORD high = std::wcstoul(argv[4], nullptr, 10);
+        DWORD val = std::wcstoul(argv[5], nullptr, 10);
+        RunRegistryGuard(pid, low, high, val);
         return 0;
     }
 
