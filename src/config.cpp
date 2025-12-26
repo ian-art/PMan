@@ -322,7 +322,7 @@ try
             backupPath += L".old";
             std::filesystem::copy_file(configPath, backupPath, std::filesystem::copy_options::overwrite_existing);
             
-            // Save the data we just loaded (plus the new default values for idle_revert, etc)
+			// Save the data we just loaded (plus the new default values for idle_revert, etc)
             SaveConfig(configPath, games, browsers, gameWindows, browserWindows,
                        ignoreNonInteractive, restoreOnExit, lockPolicy, 
                        g_suspendUpdatesDuringGames.load(), // Use global default if not in file
@@ -330,7 +330,14 @@ try
                        g_idleTimeoutMs.load());            // Uses default '300000' if not in old file
             
             // Recursively load the newly created file to populate globals correctly
-            LoadConfig(); 
+            // Fix: Prevent infinite recursion stack overflow if save fails or version glitch
+            static int recursionDepth = 0;
+            if (recursionDepth < 3)
+            {
+                recursionDepth++;
+                LoadConfig(); 
+                recursionDepth--;
+            }
             return;
         }
 
