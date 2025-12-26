@@ -386,15 +386,46 @@ void IocpConfigWatcher()
             break;
         }
         
-        if (pov)
+		if (pov)
         {
             if (pov == &ov)
             {
-                g_reloadNow.store(true, std::memory_order_release);
-                read();
-            }
+                // Filter events: Only reload if config.ini actually changed
+                // This prevents log.txt writes from triggering the debounce timer
+                bool configChanged = false;
+                
+                if (bytes > 0)
+                {
+                    PFILE_NOTIFY_INFORMATION info = reinterpret_cast<PFILE_NOTIFY_INFORMATION>(buf);
+                    while (true)
+                    {
+                        std::wstring fileName(info->FileName, info->FileNameLength / sizeof(wchar_t));
+                        if (ContainsIgnoreCase(fileName, CONFIG_FILENAME))
+                        {
+                            configChanged = true;
+                            break;
+                        }
+                        
+                        if (info->NextEntryOffset == 0) break;
+                        info = reinterpret_cast<PFILE_NOTIFY_INFORMATION>(
+                            reinterpret_cast<BYTE*>(info) + info->NextEntryOffset);
+                    }
+                }
                 else
                 {
+                    // Buffer overflow or unknown change - safer to reload
+                    configChanged = true;
+                }
+
+                if (configChanged)
+                {
+                    g_reloadNow.store(true, std::memory_order_release);
+                }
+                
+                read();
+            }
+            else
+            {
                     // Use unique_ptr with custom deleter for automatic cleanup
                     auto job_deleter = [](IocpJob* j) { 
                         delete j; 
