@@ -177,14 +177,16 @@ bool IsPolicyChangeAllowed(int newMode)
     int currentMode = g_lastMode.load();
     if (newMode == currentMode) return true;
     
-    // Policy Cooldown / Hysteresis
+	// Policy Cooldown / Hysteresis
     static constexpr auto POLICY_COOLDOWN = std::chrono::seconds(5);
-    auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto lastChange = g_lastPolicyChange.load();
+    auto nowPoint = std::chrono::steady_clock::now();
+    auto lastChangeRep = g_lastPolicyChange.load();
     
-    if (lastChange == 0) return true;
-    
-    auto elapsed_ms = (now - lastChange) / 1000000;
+    if (lastChangeRep == 0) return true;
+
+    // Fix Use portable chrono math instead of hardcoded division
+    auto lastPoint = std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(lastChangeRep));
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(nowPoint - lastPoint).count();
     auto required_ms = std::chrono::duration_cast<std::chrono::milliseconds>(POLICY_COOLDOWN).count();
     
     if (elapsed_ms >= required_ms) return true;

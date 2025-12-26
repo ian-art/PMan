@@ -688,13 +688,17 @@ void SetTimerResolution(int mode)
                 "ms precision (reduces input lag)");
         }
     }
-    else if (mode == 2 && g_timerResolutionActive.load() != 0)
+	else if (mode == 2 && g_timerResolutionActive.load() != 0)
     {
         ULONG min, max, current;
         if (NT_SUCCESS(pNtQueryTimerResolution(&min, &max, &current)))
         {
             ULONG actual = 0;
-            pNtSetTimerResolution(max, FALSE, &actual);
+            // Fix Restore original resolution or disable request properly
+            ULONG restoreVal = g_originalTimerResolution.load();
+            if (restoreVal == 0) restoreVal = current; // Fallback
+            
+            pNtSetTimerResolution(restoreVal, FALSE, &actual);
             g_timerResolutionActive.store(0);
             Log("[TIMER] Browser mode: Released timer request (system default)");
         }

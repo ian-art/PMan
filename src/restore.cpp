@@ -111,15 +111,14 @@ void EnsureStartupRestorePoint()
         return;
     }
 
-    // Attempt creation
+	// Attempt creation
     if (CreateRestorePoint())
     {
         MarkRestorePointAsCreated();
     }
     else
     {
-        // Optional: If you want to retry on next launch if it failed, do nothing here.
-        // give up and stop trying (to prevent boot delays)
-        MarkRestorePointAsCreated(); 
+        // Fix Do NOT mark as created on failure, so we retry next time
+        Log("[BACKUP] Restore point creation failed. Will retry on next startup.");
     }
 }
