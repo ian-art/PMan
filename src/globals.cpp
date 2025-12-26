@@ -10,6 +10,7 @@ MemoryTelemetry g_memTelemetry{};
 // App State
 std::atomic<bool> g_running{true};
 std::atomic<bool> g_reloadNow{false};
+std::atomic<uint64_t> g_policyState{0}; // Fix
 std::atomic<DWORD> g_lastPid{0};
 std::atomic<int>   g_lastMode{0}; 
 std::atomic<DWORD> g_lastRamCleanPid{0};

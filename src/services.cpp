@@ -138,14 +138,14 @@ bool WindowsServiceManager::SuspendService(const std::wstring& serviceName)
         return false;
     }
     
-    // Try to pause first (preferred for BITS)
+	// Try to pause first (preferred for BITS)
     if (status.dwControlsAccepted & SERVICE_ACCEPT_PAUSE_CONTINUE)
     {
         if (ControlService(state.handle, SERVICE_CONTROL_PAUSE, &status))
         {
             state.action = ServiceAction::Paused;
             Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " paused successfully");
-            m_anythingSuspended = true;
+            m_anythingSuspended.store(true); // Fix
             return true;
         }
     }
@@ -161,7 +161,7 @@ bool WindowsServiceManager::SuspendService(const std::wstring& serviceName)
         }
         
         state.action = ServiceAction::Stopped;
-        m_anythingSuspended = true;
+        m_anythingSuspended.store(true); // Fix
         
         if (status.dwCurrentState == SERVICE_STOPPED)
         {

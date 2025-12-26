@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include <mutex>
+#include <atomic>
 
 // Enhanced Service Management Class
 class WindowsServiceManager
@@ -25,9 +26,9 @@ public:
     
 private:
     SC_HANDLE m_scManager;
-    std::unordered_map<std::wstring, ServiceState> m_services;
+	std::unordered_map<std::wstring, ServiceState> m_services;
     std::mutex m_mutex;
-    bool m_anythingSuspended;
+    std::atomic<bool> m_anythingSuspended;
     
 public:
     WindowsServiceManager() : m_scManager(nullptr), m_anythingSuspended(false) {}

@@ -24,8 +24,10 @@ extern MemoryTelemetry g_memTelemetry;
 // App State
 extern std::atomic<bool> g_running;
 extern std::atomic<bool> g_reloadNow;
-extern std::atomic<DWORD> g_lastPid;
-extern std::atomic<int>   g_lastMode; // 0 unknown, 1 game, 2 browser
+// Fix Combine Mode (low 32) and PID (high 32) for atomic updates
+extern std::atomic<uint64_t> g_policyState; 
+extern std::atomic<int>   g_lastMode; // Kept for legacy reads, updated after
+extern std::atomic<DWORD> g_lastPid;  // Kept for legacy reads, updated after
 extern std::atomic<DWORD> g_lastRamCleanPid;
 
 // Process Identity (PID reuse protection)

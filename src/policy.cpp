@@ -95,7 +95,7 @@ bool ShouldIgnoreDueToSessionLock(int detectedMode, DWORD /*pid*/)
 {
     if (!g_sessionLocked.load()) return false;
     
-    if (detectedMode == 2)
+	if (detectedMode == 2)
     {
         ProcessIdentity lockedIdentity;
         {
@@ -109,11 +109,16 @@ bool ShouldIgnoreDueToSessionLock(int detectedMode, DWORD /*pid*/)
             DWORD fgPid = 0;
             GetWindowThreadProcessId(fg, &fgPid);
 
+            // Fix Verify PID Identity to prevent PID reuse exploits
             if (fgPid == lockedIdentity.pid)
             {
-                Log("Session lock ACTIVE - ignoring browser switch (locked to game PID: " +
-                    std::to_string(lockedIdentity.pid) + ")");
-                return true;
+                ProcessIdentity fgIdentity;
+                if (GetProcessIdentity(fgPid, fgIdentity) && fgIdentity == lockedIdentity)
+                {
+                    Log("Session lock ACTIVE - ignoring browser switch (locked to game PID: " +
+                        std::to_string(lockedIdentity.pid) + ")");
+                    return true;
+                }
             }
         }
         else
@@ -365,9 +370,13 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         changeSuccess = true;
     }
 
-    if (changeSuccess)
+	if (changeSuccess)
     {
         // Update tracking (always)
+        // Fix Atomic update of both PID and Mode
+        uint64_t encodedState = (static_cast<uint64_t>(pid) << 32) | static_cast<uint32_t>(mode);
+        g_policyState.store(encodedState);
+
 		if (modeChanged)
         {
             g_lastMode.store(mode);

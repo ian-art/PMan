@@ -217,8 +217,10 @@ void EtwThread()
     TRACEHANDLE hSession = 0;
     ULONG status = StartTraceW(&hSession, SESSION_NAME, props);
     
-    if (status == ERROR_SUCCESS)
+	if (status == ERROR_SUCCESS)
     {
+        // Fix Protect session handle storage to prevent race with ForceStop
+        std::lock_guard lock(g_etwSessionMtx);
         g_etwSession.store(hSession);
     }
 
@@ -493,15 +495,18 @@ void AntiInterferenceWatchdog()
             Log("[WATCHDOG] Shutdown signal received.");
             break;
         }
-        else if (waitResult == WAIT_OBJECT_0 + 1) // Registry Change
-        {
-            // Re-arm notification immediately
-            RegNotifyChangeKeyValue(hKey.get(), TRUE, REG_NOTIFY_CHANGE_LAST_SET, hRegEvent.get(), TRUE);
-
-            int currentMode = g_lastMode.load();
-            if (currentMode != 0 && g_caps.hasAdminRights)
+			else if (waitResult == WAIT_OBJECT_0 + 1) // Registry Change
             {
-                DWORD expectedVal = (currentMode == 1) ? VAL_GAME : VAL_BROWSER;
+                // Re-arm notification immediately
+                RegNotifyChangeKeyValue(hKey.get(), TRUE, REG_NOTIFY_CHANGE_LAST_SET, hRegEvent.get(), TRUE);
+
+                // Fix Read atomic state
+                uint64_t state = g_policyState.load();
+                int currentMode = static_cast<int>(state & 0xFFFFFFFF);
+                
+                if (currentMode != 0 && g_caps.hasAdminRights)
+                {
+                    DWORD expectedVal = (currentMode == 1) ? VAL_GAME : VAL_BROWSER;
                 DWORD actualVal = GetCurrentPrioritySeparation();
 
                 if (actualVal != 0xFFFFFFFF && actualVal != expectedVal)
