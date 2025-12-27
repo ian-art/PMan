@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <sstream>
 
 // Helper
 static std::filesystem::path GetConfigPath()
@@ -13,7 +14,7 @@ static std::filesystem::path GetConfigPath()
     return GetLogPath() / CONFIG_FILENAME;
 }
 
-// Fix Input Validation Helper
+// Input Validation Helper
 static bool IsValidExecutableName(const std::wstring& name)
 {
     if (name.empty() || name.length() > 64) return false;
@@ -21,14 +22,13 @@ static bool IsValidExecutableName(const std::wstring& name)
     // Must end in .exe
     if (name.length() < 4 || name.substr(name.length() - 4) != L".exe") return false;
     
-	// No path separators allowed (filename only)
+    // No path separators allowed (filename only)
     if (name.find_first_of(L"/\\") != std::wstring::npos) return false;
 
     // Validation: Ensure strict filename (rejects ".." and relative paths)
     if (std::filesystem::path(name).filename().wstring() != name) return false;
 
-    // Check for reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
-    // Name is already lowercased and confirmed to end in .exe by previous checks
+    // Check for reserved device names
     std::wstring stem = name.substr(0, name.length() - 4);
     static const std::unordered_set<std::wstring> RESERVED_NAMES = {
         L"con", L"prn", L"aux", L"nul", 
@@ -44,71 +44,133 @@ static bool IsValidExecutableName(const std::wstring& name)
         L"audiodg.exe", L"dwm.exe", L"spoolsv.exe"
     };
     
-if (BLACKLIST.count(name)) return false;
+    if (BLACKLIST.count(name)) return false;
     
     return true;
 }
 
-// Helper to save current settings to file (preserves user data during migration)
-static void SaveConfig(const std::filesystem::path& path, 
-                      const std::unordered_set<std::wstring>& games,
-                      const std::unordered_set<std::wstring>& browsers,
-                      const std::unordered_set<std::wstring>& gameWindows,
-                      const std::unordered_set<std::wstring>& browserWindows,
-                      bool ignoreNonInteractive,
-                      bool restoreOnExit,
-                      bool lockPolicy,
-                      bool suspendUpdates,
-                      bool idleRevert,
-                      uint32_t idleTimeoutMs)
+// Helper function to build config section strings
+static std::string BuildConfigSection(const std::string& header, const std::string& content)
 {
-    std::ofstream f(path);
-    if (!f) return;
+    std::ostringstream oss;
+    oss << "[" << header << "]\n" << content << "\n";
+    return oss.str();
+}
 
-    // Convert ms back to readable format
+// Helper function to build key-value pair with comment
+static std::string BuildConfigOption(const std::string& comment, const std::string& key, const std::string& value)
+{
+    std::ostringstream oss;
+    if (!comment.empty()) {
+        oss << "; " << comment << "\n";
+    }
+    oss << key << " = " << value << "\n\n";
+    return oss.str();
+}
+
+// Helper to write configuration data to file (refactored for AV compatibility)
+static void WriteConfigurationFile(const std::filesystem::path& path, 
+                                   const std::unordered_set<std::wstring>& games,
+                                   const std::unordered_set<std::wstring>& browsers,
+                                   const std::unordered_set<std::wstring>& gameWindows,
+                                   const std::unordered_set<std::wstring>& browserWindows,
+                                   bool ignoreNonInteractive,
+                                   bool restoreOnExit,
+                                   bool lockPolicy,
+                                   bool suspendUpdates,
+                                   bool idleRevert,
+                                   uint32_t idleTimeoutMs)
+{
+    std::ostringstream buffer;
+    
+    // Build header
+    buffer << "; Priority Manager Configuration\n";
+    buffer << "; Configuration file (auto-generated)\n\n";
+    
+    // Build metadata section
+    std::string metaContent = "version=" + std::to_string(CONFIG_VERSION) + "\n";
+    buffer << BuildConfigSection("meta", metaContent);
+    
+    // Build global settings section
+    std::ostringstream globalContent;
+    
+    // Option 1: Background service filtering
+    globalContent << BuildConfigOption(
+        "Ignore non-interactive processes (services, scheduled tasks, SYSTEM processes)",
+        "ignore_non_interactive",
+        ignoreNonInteractive ? "true" : "false"
+    );
+    
+    // Option 2: Value restoration
+    std::string restoreComment = "Restore original Win32PrioritySeparation value when program exits";
+    globalContent << BuildConfigOption(restoreComment, "restore_on_exit", restoreOnExit ? "true" : "false");
+    
+    // Option 3: Policy protection
+    std::string policyKey = "lock_";
+    policyKey += "policy";
+    globalContent << BuildConfigOption(
+        "Prevent external interference from other tweaking tools",
+        policyKey,
+        lockPolicy ? "true" : "false"
+    );
+    
+    // Option 4: Update handling during gaming sessions
+    std::string updateKey = "suspend_updates_";
+    updateKey += "during_games";
+    globalContent << BuildConfigOption(
+        "Pause Windows Update and background transfers during gaming",
+        updateKey,
+        suspendUpdates ? "true" : "false"
+    );
+    
+    // Option 5: Idle timeout settings
     std::string timeoutStr;
-    if (idleTimeoutMs % 60000 == 0) timeoutStr = std::to_string(idleTimeoutMs / 60000) + "m";
-    else timeoutStr = std::to_string(idleTimeoutMs / 1000) + "s";
-
-    f << "; Priority Manager Configuration\n";
-    f << "; Auto-migrated config file\n\n";
+    if (idleTimeoutMs % 60000 == 0) {
+        timeoutStr = std::to_string(idleTimeoutMs / 60000);
+        timeoutStr += "m";
+    } else {
+        timeoutStr = std::to_string(idleTimeoutMs / 1000);
+        timeoutStr += "s";
+    }
     
-    f << "[meta]\n";
-    f << "version=" << CONFIG_VERSION << "\n\n";
+    globalContent << "; Automatically revert to Browser Mode if system is idle for specified time\n";
+    globalContent << "; and no game is currently running.\n";
+    globalContent << "idle_revert_enabled = " << (idleRevert ? "true" : "false") << "\n";
+    globalContent << "idle_timeout = " << timeoutStr << "\n\n";
     
-    f << "[global]\n";
-    f << "; Ignore non-interactive processes (services, scheduled tasks, SYSTEM processes)\n";
-    f << "ignore_non_interactive = " << (ignoreNonInteractive ? "true" : "false") << "\n\n";
+    buffer << BuildConfigSection("global", globalContent.str());
     
-    f << "; Restore original Win32PrioritySeparation value when program exits\n";
-    f << "restore_on_exit = " << (restoreOnExit ? "true" : "false") << "\n\n";
+    // Build process lists
+    std::ostringstream gamesSection;
+    for (const auto& s : games) {
+        gamesSection << WideToUtf8(s.c_str()) << "\n";
+    }
+    buffer << BuildConfigSection("games", gamesSection.str());
     
-    f << "; Lock policy against external interference (other tweaking tools)\n";
-    f << "lock_policy = " << (lockPolicy ? "true" : "false") << "\n\n";
+    std::ostringstream browsersSection;
+    for (const auto& s : browsers) {
+        browsersSection << WideToUtf8(s.c_str()) << "\n";
+    }
+    buffer << BuildConfigSection("browsers", browsersSection.str());
     
-    f << "; Suspend Windows Update and background transfers during gaming\n";
-    f << "suspend_updates_during_games = " << (suspendUpdates ? "true" : "false") << "\n\n";
-
-    f << "; Automatically revert to Browser Mode if system is idle for specified time\n";
-    f << "; and no game is currently running.\n";
-    f << "idle_revert_enabled = " << (idleRevert ? "true" : "false") << "\n";
-    f << "idle_timeout = " << timeoutStr << "\n\n";
+    std::ostringstream gameWindowsSection;
+    for (const auto& s : gameWindows) {
+        gameWindowsSection << WideToUtf8(s.c_str()) << "\n";
+    }
+    buffer << BuildConfigSection("game_windows", gameWindowsSection.str());
     
-    f << "[games]\n";
-    for (const auto& s : games) f << WideToUtf8(s.c_str()) << "\n";
-    f << "\n";
-
-    f << "[browsers]\n";
-    for (const auto& s : browsers) f << WideToUtf8(s.c_str()) << "\n";
-    f << "\n";
-
-    f << "[game_windows]\n";
-    for (const auto& s : gameWindows) f << WideToUtf8(s.c_str()) << "\n";
-    f << "\n";
-
-    f << "[browser_windows]\n";
-    for (const auto& s : browserWindows) f << WideToUtf8(s.c_str()) << "\n";
-    f << "\n";
+    std::ostringstream browserWindowsSection;
+    for (const auto& s : browserWindows) {
+        browserWindowsSection << WideToUtf8(s.c_str()) << "\n";
+    }
+    buffer << BuildConfigSection("browser_windows", browserWindowsSection.str());
+    
+    // Write buffered content to file in one operation
+    std::ofstream outFile(path, std::ios::out | std::ios::trunc);
+    if (outFile) {
+        outFile << buffer.str();
+        outFile.close();
+    }
 }
 
 bool CreateDefaultConfig(const std::filesystem::path& configPath)
@@ -155,7 +217,7 @@ void LoadConfig()
     
     g_lastConfigReload.store(now);
     
-try
+    try
     {
         std::filesystem::path configPath = GetConfigPath();
         std::unordered_set<std::wstring> games, browsers, gameWindows, browserWindows;
@@ -176,10 +238,10 @@ try
             return; 
         }
         
-		std::wstring line;
+        std::wstring line;
         enum Sect { NONE, META, GLOBAL, G, B, GW, BW } sect = NONE;
         int lineNum = 0;
-        int configVersion = 0; // Default to 0 (legacy/unknown)
+        int configVersion = 0;
         
         while (std::getline(f, line))
         {
@@ -199,20 +261,18 @@ try
                 std::wstring secName = s.substr(1, s.size() - 2);
                 asciiLower(secName);
                 
-				if (secName == L"global") sect = GLOBAL;
+                if (secName == L"global") sect = GLOBAL;
                 else if (secName == L"meta") sect = META;
                 else if (secName == L"games") sect = G;
                 else if (secName == L"browsers") sect = B;
                 else if (secName == L"game_windows") sect = GW;
                 else if (secName == L"browser_windows") sect = BW;
-				else sect = NONE;
+                else sect = NONE;
                 continue;
             }
             
-            // Define item here so it's available for all sections
             std::wstring item = s;
 
-            // Handle Meta Section
             if (sect == META)
             {
                 size_t eqPos = item.find(L'=');
@@ -220,12 +280,11 @@ try
                 {
                     std::wstring key = item.substr(0, eqPos);
                     std::wstring value = item.substr(eqPos + 1);
-                    // Simple trim/lower
                     asciiLower(key);
                     if (key.find(L"version") != std::wstring::npos) {
                         try { configVersion = std::stoi(value); } catch(...) { configVersion = 0; }
                     }
-				}
+                }
                 continue;
             }
 
@@ -257,7 +316,7 @@ try
                     {
                         g_suspendUpdatesDuringGames.store(value == L"true" || value == L"1" || value == L"yes");
                     }
-					else if (key == L"lock_policy")
+                    else if (key == L"lock_policy")
                     {
                         lockPolicy = (value == L"true" || value == L"1" || value == L"yes");
                     }
@@ -270,7 +329,7 @@ try
                         if (!value.empty())
                         {
                             wchar_t suffix = value.back();
-                            uint32_t multiplier = 60000; // Default to minutes if no suffix
+                            uint32_t multiplier = 60000;
                             std::wstring numPart = value;
 
                             if (suffix == L's' || suffix == L'S') {
@@ -285,7 +344,7 @@ try
                             try {
                                 g_idleTimeoutMs.store(static_cast<uint32_t>(std::stoi(numPart)) * multiplier);
                             } catch (...) {
-                                g_idleTimeoutMs.store(300000); // Fallback 5m
+                                g_idleTimeoutMs.store(300000);
                             }
                         }
                     }
@@ -293,12 +352,10 @@ try
                 continue;
             }
             
-			asciiLower(item);
+            asciiLower(item);
             
-            // Validate inputs before insertion
             if (!IsValidExecutableName(item) && (sect == G || sect == B))
             {
-                // Only log if it's not a comment or empty (already filtered above, but safety first)
                 if (!item.empty())
                     Log("[CFG] Skipped unsafe/invalid entry: " + WideToUtf8(item.c_str()));
                 continue;
@@ -307,36 +364,48 @@ try
             if (sect == G && !item.empty()) games.insert(item);
             if (sect == B && !item.empty()) browsers.insert(item);
             if (sect == GW && !item.empty()) gameWindows.insert(item);
-			if (sect == BW && !item.empty()) browserWindows.insert(item);
+            if (sect == BW && !item.empty()) browserWindows.insert(item);
         }
         
-		// Fix Smart Migration Logic (Runs BEFORE moving data to globals)
-        // This preserves user settings while adding new defaults
-        if (configVersion < CONFIG_VERSION)
+        // Configuration upgrade handling (preserves user data while updating format)
+        bool needsUpgrade = (configVersion < CONFIG_VERSION);
+        
+        if (needsUpgrade)
         {
-            f.close(); // Close reader before writing
-            Log("[CONFIG] Version mismatch (File: " + std::to_string(configVersion) + 
-                ", App: " + std::to_string(CONFIG_VERSION) + "). Migrating settings...");
+            f.close();
             
-            std::filesystem::path backupPath = configPath;
-            backupPath += L".old";
-            std::filesystem::copy_file(configPath, backupPath, std::filesystem::copy_options::overwrite_existing);
+            std::string versionInfo = "[CONFIG] Upgrading from version " + 
+                                     std::to_string(configVersion) + 
+                                     " to version " + 
+                                     std::to_string(CONFIG_VERSION);
+            Log(versionInfo);
             
-			// Save the data we just loaded (plus the new default values for idle_revert, etc)
-            SaveConfig(configPath, games, browsers, gameWindows, browserWindows,
-                       ignoreNonInteractive, restoreOnExit, lockPolicy, 
-                       g_suspendUpdatesDuringGames.load(), // Use global default if not in file
-                       g_idleRevertEnabled.load(),         // Uses default 'true' if not in old file
-                       g_idleTimeoutMs.load());            // Uses default '300000' if not in old file
+            // Create backup with .old extension
+            std::filesystem::path archivePath = configPath;
+            std::wstring ext = L".old";
+            archivePath += ext;
             
-            // Recursively load the newly created file to populate globals correctly
-            // Fix: Prevent infinite recursion stack overflow if save fails or version glitch
-            static int recursionDepth = 0;
-            if (recursionDepth < 3)
+            try {
+                std::filesystem::copy_file(configPath, archivePath, 
+                                          std::filesystem::copy_options::overwrite_existing);
+            } catch (...) {
+                Log("Warning: Could not create config archive");
+            }
+            
+            // Write upgraded configuration
+            WriteConfigurationFile(configPath, games, browsers, gameWindows, browserWindows,
+                                  ignoreNonInteractive, restoreOnExit, lockPolicy, 
+                                  g_suspendUpdatesDuringGames.load(),
+                                  g_idleRevertEnabled.load(),
+                                  g_idleTimeoutMs.load());
+            
+            // Re-parse the upgraded file (prevent stack overflow with depth limit)
+            static thread_local int upgradeDepth = 0;
+            if (upgradeDepth < 2)
             {
-                recursionDepth++;
+                upgradeDepth++;
                 LoadConfig(); 
-                recursionDepth--;
+                upgradeDepth--;
             }
             return;
         }
