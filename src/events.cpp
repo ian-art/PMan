@@ -648,14 +648,14 @@ void AntiInterferenceWatchdog()
                 // Process events are sporadic; silence does not mean the thread is dead.
                 // Only restart if the session handle is invalid (0), meaning the thread actually exited.
                 
-				if (g_etwSession.load() == 0)
+			if (g_etwSession.load() == 0)
                 {
-                    // Fix Prevent infinite thread spawning loop
-                    static int retryCount = 0;
-                    static uint64_t lastRestartAttempt = 0;
+                    // Fix Prevent infinite thread spawning loop (Use atomic to prevent races)
+                    static std::atomic<int> retryCount{0};
+                    static std::atomic<uint64_t> lastRestartAttempt{0};
                     uint64_t now = GetTickCount64();
 
-                    if (retryCount < 3 && (now - lastRestartAttempt > 5000)) 
+                    if (retryCount < 3 && (now - lastRestartAttempt > 5000))
                     {
                         Log("[HEALTH] ETW Session is not running. Restarting (Attempt " + 
                             std::to_string(retryCount + 1) + "/3)...");
