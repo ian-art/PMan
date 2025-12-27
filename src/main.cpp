@@ -498,10 +498,12 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
             LoadConfig();
         }
 
-        // Safety check: ensure services are not left suspended
+		// Safety check: ensure services are not left suspended
         CheckAndReleaseSessionLock();
 
-        Sleep(100);
+        // Use MsgWaitForMultipleObjects to stay responsive to inputs/shutdown while waiting
+        // This replaces the polling Sleep(100)
+        MsgWaitForMultipleObjects(1, &g_hShutdownEvent, FALSE, 100, QS_ALLINPUT);
     }
     
     if (hook) UnhookWinEvent(hook);
