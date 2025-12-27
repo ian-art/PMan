@@ -105,6 +105,15 @@ typedef enum _IO_PRIORITY_HINT {
 #define ProcessIoPriority ((PROCESS_INFORMATION_CLASS)33)
 #endif
 
+// Safe definitions for Undocumented APIs
+#ifndef ProcessGpuPriority
+#define ProcessGpuPriority ((PROCESS_INFORMATION_CLASS)82)
+#endif
+
+#ifndef ThreadBasePriority
+#define ThreadBasePriority ((THREADINFOCLASS)3)
+#endif
+
 // Windows 10+ I/O priority structure (for newer systems)
 typedef struct _IO_PRIORITY_INFO {
     ULONG Size;

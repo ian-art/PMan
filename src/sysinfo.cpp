@@ -708,8 +708,7 @@ void DetectOSCapabilities()
                     
 					if (pNtSetInformationProcess)
                     {
-                        PROCESS_INFORMATION_CLASS gpuPriorityClass = 
-                            static_cast<PROCESS_INFORMATION_CLASS>(UndocumentedApi::ProcessGpuPriority);
+						PROCESS_INFORMATION_CLASS gpuPriorityClass = ProcessGpuPriority;
                         ULONG testPriority = 0;
                         
                         NTSTATUS status = pNtSetInformationProcess(

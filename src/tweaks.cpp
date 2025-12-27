@@ -632,8 +632,7 @@ void SetGpuPriority(DWORD pid, int mode)
                 GetProcAddress(ntdll, "NtSetInformationProcess"));
 		if (pNtSetInformationProcess)
         {
-            PROCESS_INFORMATION_CLASS gpuPriorityClass = 
-                static_cast<PROCESS_INFORMATION_CLASS>(UndocumentedApi::ProcessGpuPriority);
+			PROCESS_INFORMATION_CLASS gpuPriorityClass = ProcessGpuPriority;
             
             ULONG gpuPriority = (mode == 1) ? 1 : 0;
             
@@ -1056,9 +1055,9 @@ void OptimizeThreadScheduling(DWORD pid, int mode)
 					if (mode == 1) // GAME MODE
                     {
                         LONG basePriority = THREAD_PRIORITY_HIGHEST;
-                        NTSTATUS status = pNtSetInformationThread(
+						NTSTATUS status = pNtSetInformationThread(
                             hThread, 
-                            static_cast<THREADINFOCLASS>(UndocumentedApi::ThreadBasePriority), 
+                            ThreadBasePriority, 
                             &basePriority, 
                             sizeof(basePriority));
                         
@@ -1082,9 +1081,9 @@ void OptimizeThreadScheduling(DWORD pid, int mode)
                     else if (mode == 2) // BROWSER MODE
                     {
 						LONG basePriority = THREAD_PRIORITY_NORMAL;
-                        pNtSetInformationThread(
+						pNtSetInformationThread(
                             hThread, 
-                            static_cast<THREADINFOCLASS>(UndocumentedApi::ThreadBasePriority), 
+                            ThreadBasePriority, 
                             &basePriority, 
                             sizeof(basePriority));
                         
