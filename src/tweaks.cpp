@@ -883,9 +883,10 @@ void SetWorkingSetLimits(DWORD pid, int mode)
         }
         
 		SIZE_T minWS = 50ULL * 1024 * 1024;
-        // Fix: Cap max working set to physical RAM to prevent system starvation
-        // (Using -1 can sometimes cause the OS to grant unsafe amounts in low-memory conditions)
-        SIZE_T maxWS = (totalGB > 0 ? (totalGB * 1024ULL * 1024ULL * 1024ULL) : static_cast<SIZE_T>(-1));
+		// Fix: Cap max working set to physical RAM to prevent system starvation
+        // Calculate in 64-bit first, then cap at SIZE_T max to prevent overflow on 32-bit builds
+        unsigned long long totalBytes = (totalGB > 0) ? (totalGB * 1024ULL * 1024ULL * 1024ULL) : static_cast<unsigned long long>(-1);
+        SIZE_T maxWS = (totalBytes > static_cast<SIZE_T>(-1)) ? static_cast<SIZE_T>(-1) : static_cast<SIZE_T>(totalBytes);
         
         if (availMB < 3072)
         {
