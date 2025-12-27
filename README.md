@@ -210,6 +210,11 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 
 ---
 
+## License
+
+This project is licensed under the MIT License.
+See the `LICENSE` file for details.
+
 **VirusTotal**
 `e573a3ec40b681f7d9ef89b75d6166a43a931c0454a3b2952ab0cd8794641876`
 
