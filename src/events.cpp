@@ -439,11 +439,12 @@ void IocpConfigWatcher()
                 
                 if (bytes > 0)
                 {
-                    PFILE_NOTIFY_INFORMATION info = reinterpret_cast<PFILE_NOTIFY_INFORMATION>(buf);
+					PFILE_NOTIFY_INFORMATION info = reinterpret_cast<PFILE_NOTIFY_INFORMATION>(buf);
                     while (true)
                     {
                         std::wstring fileName(info->FileName, info->FileNameLength / sizeof(wchar_t));
-                        if (ContainsIgnoreCase(fileName, CONFIG_FILENAME))
+                        if (ContainsIgnoreCase(fileName, CONFIG_FILENAME) || 
+                            ContainsIgnoreCase(fileName, CUSTOM_LAUNCHERS_FILENAME))
                         {
                             configChanged = true;
                             break;

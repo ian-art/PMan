@@ -7,6 +7,7 @@
 
 // Config
 static constexpr wchar_t CONFIG_FILENAME[] = L"config.ini";
+static constexpr wchar_t CUSTOM_LAUNCHERS_FILENAME[] = L"custom_launchers.txt";
 static constexpr int CONFIG_VERSION = 1; // Increment when config structure changes
 
 // Registry Values

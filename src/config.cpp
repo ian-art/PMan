@@ -14,6 +14,50 @@ static std::filesystem::path GetConfigPath()
     return GetLogPath() / CONFIG_FILENAME;
 }
 
+// Forward declaration to fix compiler error C3861
+static bool IsValidExecutableName(const std::wstring& name);
+
+static void LoadCustomLaunchers(std::unordered_set<std::wstring>& outSet)
+{
+    std::filesystem::path path = GetLogPath() / CUSTOM_LAUNCHERS_FILENAME;
+
+    // Create default file if missing
+    if (!std::filesystem::exists(path))
+    {
+        std::ofstream f(path);
+        if (f)
+        {
+            f << "; Custom Launchers Configuration\n";
+            f << "; Add executable names here to force them into Tier 3 (Launcher/Background Mode)\n";
+            f << "; One per line. Example:\n";
+            f << "; my_custom_launcher.exe\n";
+            f.close();
+        }
+        return;
+    }
+
+    std::wifstream f(path);
+    if (!f) return;
+
+    std::wstring line;
+    while (std::getline(f, line))
+    {
+        size_t first = line.find_first_not_of(L" \t\r\n");
+        if (first == std::wstring::npos) continue;
+        size_t last = line.find_last_not_of(L" \t\r\n");
+        std::wstring exe = line.substr(first, last - first + 1);
+
+        if (exe.empty() || exe[0] == L';' || exe[0] == L'#') continue;
+
+        asciiLower(exe);
+        // Reuse existing validation
+        if (IsValidExecutableName(exe))
+        {
+            outSet.insert(exe);
+        }
+    }
+}
+
 // Input Validation Helper
 static bool IsValidExecutableName(const std::wstring& name)
 {
@@ -217,12 +261,15 @@ void LoadConfig()
     
     g_lastConfigReload.store(now);
     
-    try
+	try
     {
         std::filesystem::path configPath = GetConfigPath();
-        std::unordered_set<std::wstring> games, browsers, gameWindows, browserWindows;
+        std::unordered_set<std::wstring> games, browsers, gameWindows, browserWindows, customLaunchers;
         bool ignoreNonInteractive = true;
         bool restoreOnExit = true;
+
+        // Load custom launchers
+        LoadCustomLaunchers(customLaunchers);
         bool lockPolicy = false;
         
         if (!std::filesystem::exists(configPath))
@@ -410,20 +457,22 @@ void LoadConfig()
             return;
         }
 
-        {
+{
             std::unique_lock lg(g_setMtx);
             g_games = std::move(games);
             g_browsers = std::move(browsers);
             g_gameWindows = std::move(gameWindows);
             g_browserWindows = std::move(browserWindows);
+            g_customLaunchers = std::move(customLaunchers);
         }
         
         g_ignoreNonInteractive.store(ignoreNonInteractive);
         g_restoreOnExit.store(restoreOnExit);
         g_lockPolicy.store(lockPolicy);
         
-        Log("Config loaded: " + std::to_string(g_games.size()) + " games, " +
+		Log("Config loaded: " + std::to_string(g_games.size()) + " games, " +
             std::to_string(g_browsers.size()) + " browsers, " +
+            std::to_string(g_customLaunchers.size()) + " custom launchers, " +
             std::to_string(g_gameWindows.size()) + " game windows, " +
             std::to_string(g_browserWindows.size()) + " browser windows | " +
             "ignore_non_interactive=" + (ignoreNonInteractive ? "true" : "false") + " | " +

@@ -48,6 +48,7 @@ std::unordered_set<std::wstring> g_games;
 std::unordered_set<std::wstring> g_browsers;
 std::unordered_set<std::wstring> g_gameWindows;
 std::unordered_set<std::wstring> g_browserWindows;
+std::unordered_set<std::wstring> g_customLaunchers;
 
 // Event Handles & Synchronization
 HANDLE  g_hIocp = nullptr;

@@ -423,7 +423,14 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         }
         
 		// TIER 3 CHECK: Game Launchers
-        if (GAME_LAUNCHERS.count(exe)) 
+        bool isLauncher = GAME_LAUNCHERS.count(exe);
+        if (!isLauncher)
+        {
+            std::shared_lock lg(g_setMtx);
+            isLauncher = g_customLaunchers.count(exe);
+        }
+
+        if (isLauncher) 
         {
             Log("[TIER3] Launcher detected: " + WideToUtf8(exe.c_str()));
             
