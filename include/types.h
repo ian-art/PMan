@@ -236,4 +236,23 @@ struct IocpJob
     HWND hwnd;
 };
 
+// Process Hierarchy Node
+struct ProcessNode {
+    ProcessIdentity identity;
+    ProcessIdentity parent;
+    std::vector<ProcessIdentity> children;
+    int inheritedMode; // 0 = none, 1 = game, 2 = browser
+
+    ProcessNode() : inheritedMode(0) {}
+};
+
+// Hash for ProcessIdentity to use in unordered_map
+struct ProcessIdentityHash {
+    std::size_t operator()(const ProcessIdentity& k) const {
+        return std::hash<DWORD>()(k.pid) ^ 
+               (std::hash<DWORD>()(k.creationTime.dwLowDateTime) << 1) ^ 
+               (std::hash<DWORD>()(k.creationTime.dwHighDateTime) << 1);
+    }
+};
+
 #endif // PMAN_TYPES_H

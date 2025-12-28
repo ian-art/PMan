@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cwctype>
+#include <tlhelp32.h>
 
 std::string WideToUtf8(const wchar_t* wstr)
 {
@@ -126,5 +127,53 @@ DWORD GetCurrentPrioritySeparation()
     rc = RegQueryValueExW(key, L"Win32PrioritySeparation", nullptr, nullptr, reinterpret_cast<BYTE*>(&val), &size);
     RegCloseKey(key);
     
-    return (rc == ERROR_SUCCESS) ? val : 0xFFFFFFFF;
+return (rc == ERROR_SUCCESS) ? val : 0xFFFFFFFF;
+}
+
+bool IsAntiCheatProtected(DWORD pid)
+{
+    // Snapshot modules to detect anti-cheat engines
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid);
+    if (hSnap != INVALID_HANDLE_VALUE) 
+    {
+        MODULEENTRY32W me32; 
+        me32.dwSize = sizeof(me32);
+        
+        if (Module32FirstW(hSnap, &me32)) 
+        {
+            do {
+                std::wstring mod = me32.szModule;
+                // Check for common AC signatures
+                if (mod.find(L"EasyAntiCheat") != std::wstring::npos ||
+                    mod.find(L"BEClient") != std::wstring::npos || // BattlEye
+                    mod.find(L"vgk") != std::wstring::npos ||      // Vanguard
+                    mod.find(L"EAC") != std::wstring::npos) 
+                {
+                    CloseHandle(hSnap);
+                    return true;
+                }
+            } while (Module32NextW(hSnap, &me32));
+        }
+        CloseHandle(hSnap);
+    }
+return false;
+}
+
+DWORD GetParentProcessId(DWORD pid)
+{
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnap == INVALID_HANDLE_VALUE) return 0;
+    
+    PROCESSENTRY32W pe = {sizeof(pe)};
+    if (Process32FirstW(hSnap, &pe)) {
+        do {
+            if (pe.th32ProcessID == pid) {
+                DWORD parent = pe.th32ParentProcessID;
+                CloseHandle(hSnap);
+                return parent;
+            }
+        } while (Process32NextW(hSnap, &pe));
+    }
+    CloseHandle(hSnap);
+    return 0;
 }

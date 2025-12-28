@@ -20,6 +20,11 @@ std::mutex g_processIdentityMtx;
 ProcessIdentity g_lastProcessIdentity = {0, {0, 0}};
 ProcessIdentity g_lockedProcessIdentity = {0, {0, 0}};
 
+// Process Hierarchy
+std::shared_mutex g_hierarchyMtx;
+std::unordered_map<ProcessIdentity, ProcessNode, ProcessIdentityHash> g_processHierarchy;
+std::unordered_map<DWORD, ProcessIdentity> g_inheritedGamePids;
+
 // Config Flags
 std::atomic<bool> g_ignoreNonInteractive{true};
 std::atomic<bool> g_restoreOnExit{true};

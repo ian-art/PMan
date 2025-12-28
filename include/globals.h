@@ -35,6 +35,11 @@ extern std::mutex g_processIdentityMtx;
 extern ProcessIdentity g_lastProcessIdentity;
 extern ProcessIdentity g_lockedProcessIdentity;
 
+// Process Hierarchy
+extern std::shared_mutex g_hierarchyMtx;
+extern std::unordered_map<ProcessIdentity, ProcessNode, ProcessIdentityHash> g_processHierarchy;
+extern std::unordered_map<DWORD, ProcessIdentity> g_inheritedGamePids;
+
 // Config Flags
 extern std::atomic<bool> g_ignoreNonInteractive;
 extern std::atomic<bool> g_restoreOnExit;

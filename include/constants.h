@@ -2,6 +2,8 @@
 #define PMAN_CONSTANTS_H
 
 #include <windows.h>
+#include <unordered_set>
+#include <string>
 
 // Config
 static constexpr wchar_t CONFIG_FILENAME[] = L"config.ini";
@@ -24,6 +26,87 @@ static constexpr wchar_t MMCSS_TASK_DISPLAY[] = L"DisplayPostProcessing";
 // Kernel Process GUID for ETW
 static const GUID KernelProcessGuid = 
     { 0x22fb2cd6, 0x0e7b, 0x422b, { 0xa0, 0xc7, 0x2f, 0xad, 0x1f, 0xd0, 0xe7, 0x16 } };
+
+// Known Game Launchers (Tier 3 - Background Mode)
+static const std::unordered_set<std::wstring> GAME_LAUNCHERS = {
+    // ─────────────────────────────────────────────────────────────
+    // MAJOR PLATFORMS
+    // ─────────────────────────────────────────────────────────────
+    L"steam.exe",                    // Steam
+    L"steamservice.exe",             // Steam Service (background)
+    L"steamwebhelper.exe",           // Steam Web Helper
+    L"epicgameslauncher.exe",        // Epic Games Store
+    L"epicwebhelper.exe",            // Epic Web Helper
+    L"eaapp.exe",                    // EA App (modern)
+    L"origin.exe",                   // Origin (legacy)
+    L"eadesktop.exe",                // EA Desktop (interim)
+    L"riotclientservices.exe",       // Riot Client (League, Valorant)
+    L"valorant.exe",                 // Valorant Bootstrapper
+    L"battlenet.exe",                // Battle.net
+    L"battle.net.exe",               // Battle.net variant
+    L"ubisoftconnect.exe",           // Ubisoft Connect
+    L"uplay.exe",                    // Uplay (legacy)
+    L"ubisoftgame-launcher.exe",     // Ubisoft Game Launcher
+    L"galaxyclient.exe",             // GOG Galaxy
+    L"goglauncher.exe",              // GOG Launcher
+    L"rockstar-games-launcher.exe",  // Rockstar Games Launcher
+    L"rockstarlauncher.exe",         // Rockstar Launcher (old)
+    
+    // ─────────────────────────────────────────────────────────────
+    // MICROSOFT / XBOX
+    // ─────────────────────────────────────────────────────────────
+    L"xboxapp.exe",                  // Xbox App
+    L"gamingservices.exe",           // Gaming Services (background)
+    L"gamingservicesnet.exe",        // Gaming Services Net
+    L"minecraftlauncher.exe",        // Minecraft Launcher
+    L"mspcmanager.exe",              // Microsoft PC Manager
+    
+    // ─────────────────────────────────────────────────────────────
+    // VR PLATFORMS
+    // ─────────────────────────────────────────────────────────────
+    L"steamvr.exe",                  // SteamVR
+    L"oculusclient.exe",             // Oculus/Meta PC App
+    L"vrservice.exe",                // VR Service (generic)
+    L"vrserver.exe",                 // SteamVR Server
+    L"vrmonitor.exe",                // SteamVR Monitor
+    
+    // ─────────────────────────────────────────────────────────────
+    // MISCELLANEOUS / WEB-BASED
+    // ─────────────────────────────────────────────────────────────
+    L"robloxplayerbeta.exe",         // Roblox Player
+    L"robloxlauncher.exe",           // Roblox Launcher
+    L"playnite.fullscreenapp.exe",   // Playnite (launcher aggregator)
+    L"launchbox.exe",                // LaunchBox (launcher aggregator)
+    L"itch.exe",                     // itch.io app
+    
+    // ─────────────────────────────────────────────────────────────
+    // RETAIL / CLOUD
+    // ─────────────────────────────────────────────────────────────
+    L"amazon games.exe",             // Amazon Games App
+    L"amazon games ui.exe",          // Amazon Games UI
+    L"playstation plus.exe",         // PlayStation PC App
+    L"psn ui.exe",                   // PlayStation UI
+    L"nvidia geforce now.exe",       // GeForce NOW
+    L"xboxgamebar.exe",              // Xbox Game Bar (overlay)
+    
+    // ─────────────────────────────────────────────────────────────
+    // PUBLISHER-SPECIFIC
+    // ─────────────────────────────────────────────────────────────
+    L"wargaminggamecenter.exe",      // Wargaming Game Center
+    L"wargamingerror.exe",           // Wargaming Error Reporter
+    L"bethesdalauncher.exe",         // Bethesda Launcher
+    L"bandai-namco-launcher.exe",    // Bandai Namco Launcher
+    L"quarenaclient.exe",            // Square Enix Launcher
+    
+    // ─────────────────────────────────────────────────────────────
+    // BACKGROUND SERVICES (also Tier 3)
+    // ─────────────────────────────────────────────────────────────
+    L"easyservice.exe",              // EA Background Service
+    L"epic Online services.exe",     // Epic Online Services
+    L"riot-vanguard.exe",            // Riot Vanguard (kernel, but handle carefully)
+    L"battle.net helper.exe",        // Battle.net Helper
+    L"steam client bootstrapper.exe" // Steam Bootstrapper
+};
 
 // Undocumented API constants have been moved to types.h
 

@@ -88,50 +88,93 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
     DWORD bufferSize = 0;
     TdhGetEventInformation(rec, 0, nullptr, nullptr, &bufferSize);
     
-    if (bufferSize == 0) return;
+	if (bufferSize == 0) return;
 
     std::vector<BYTE> buffer(bufferSize);
     TRACE_EVENT_INFO* info = reinterpret_cast<TRACE_EVENT_INFO*>(buffer.data());
 
     if (TdhGetEventInformation(rec, 0, nullptr, info, &bufferSize) == ERROR_SUCCESS)
     {
+        DWORD pid = 0;
+        DWORD parentPid = 0;
+
         for (DWORD i = 0; i < info->PropertyCount; i++)
         {
             wchar_t* propName = reinterpret_cast<wchar_t*>(
                 reinterpret_cast<BYTE*>(info) + info->EventPropertyInfoArray[i].NameOffset);
 
-            if (propName && wcscmp(propName, L"ProcessID") == 0)
+            if (propName)
             {
-                PROPERTY_DATA_DESCRIPTOR desc;
-                desc.PropertyName = reinterpret_cast<ULONGLONG>(propName);
-                desc.ArrayIndex = ULONG_MAX;
-                desc.Reserved = 0;
-
-				DWORD pid = 0;
-                DWORD pidSize = sizeof(pid);
-                
-                if (TdhGetProperty(rec, 0, nullptr, 1, &desc, pidSize, reinterpret_cast<BYTE*>(&pid)) == ERROR_SUCCESS)
+                if (wcscmp(propName, L"ProcessID") == 0)
                 {
-                    // Protection against race with ForceStopEtwSession
-                    // In a real fix, you might use a shared_mutex or check g_etwSession != 0
-                    if (pid != 0 && g_running)
-                    {
-                        // Phase 3: Update Heartbeat
-                        g_lastEtwHeartbeat.store(GetTickCount64(), std::memory_order_relaxed);
+                    PROPERTY_DATA_DESCRIPTOR desc;
+                    desc.PropertyName = reinterpret_cast<ULONGLONG>(propName);
+                    desc.ArrayIndex = ULONG_MAX;
+                    desc.Reserved = 0;
+                    DWORD sz = sizeof(pid);
+                    TdhGetProperty(rec, 0, nullptr, 1, &desc, sz, reinterpret_cast<BYTE*>(&pid));
+                }
+                else if (opcode == 1 && wcscmp(propName, L"ParentProcessID") == 0)
+                {
+                    PROPERTY_DATA_DESCRIPTOR desc;
+                    desc.PropertyName = reinterpret_cast<ULONGLONG>(propName);
+                    desc.ArrayIndex = ULONG_MAX;
+                    desc.Reserved = 0;
+                    DWORD sz = sizeof(parentPid);
+                    TdhGetProperty(rec, 0, nullptr, 1, &desc, sz, reinterpret_cast<BYTE*>(&parentPid));
+                }
+            }
+        }
 
-                        if (opcode == 1)
+        if (pid != 0 && g_running)
+        {
+            g_lastEtwHeartbeat.store(GetTickCount64(), std::memory_order_relaxed);
+
+            if (opcode == 1)
+            {
+                // Process Start - Build Hierarchy
+                ProcessIdentity identity;
+                if (GetProcessIdentity(pid, identity)) 
+                {
+                    std::unique_lock lg(g_hierarchyMtx);
+                    
+                    ProcessNode node;
+                    node.identity = identity;
+                    node.inheritedMode = 0;
+
+                    // Link to parent
+                    ProcessIdentity parentIdentity;
+                    if (parentPid != 0 && GetProcessIdentity(parentPid, parentIdentity)) 
+                    {
+                        node.parent = parentIdentity;
+                        auto it = g_processHierarchy.find(parentIdentity);
+                        
+                        if (it != g_processHierarchy.end()) 
                         {
-                            // Process started - evaluate for policy
-                            PostIocp(JobType::Policy, pid);
-                        }
-                        else if (opcode == 2)
-                        {
-                            // Process ended - cleanup resources
-                            CleanupProcessState(pid);
+                            it->second.children.push_back(identity);
+                            
+                            // Check inheritance
+                            if (it->second.inheritedMode == 1 || g_inheritedGamePids.count(parentPid)) 
+                            {
+                                node.inheritedMode = 1;
+                                g_inheritedGamePids[pid] = identity;
+                                Log("[HIERARCHY] Child " + std::to_string(pid) + " inherits GAME mode from " + std::to_string(parentPid));
+                            }
                         }
                     }
+                    g_processHierarchy[identity] = node;
                 }
-                break;
+                
+                PostIocp(JobType::Policy, pid);
+            }
+            else if (opcode == 2)
+            {
+                // Process End - Cleanup
+                CleanupProcessState(pid);
+                
+                std::unique_lock lg(g_hierarchyMtx);
+                g_inheritedGamePids.erase(pid);
+                // Note: Complete tree cleanup omitted for safety, relies on periodic GC or restart
             }
         }
     }
@@ -737,6 +780,26 @@ void AntiInterferenceWatchdog()
                         else
                         {
                             if (hProcess) CloseHandle(hProcess);
+                            ++it;
+}
+                    }
+                }
+                
+                // Clean up Process Hierarchy (Leak Protection)
+                {
+                    std::unique_lock lh(g_hierarchyMtx);
+                    for (auto it = g_processHierarchy.begin(); it != g_processHierarchy.end(); ) 
+                    {
+                        if (!IsProcessIdentityValid(it->first)) 
+                        {
+                            // Remove all children from fast lookup map
+                            for (const auto& childId : it->second.children) {
+                                g_inheritedGamePids.erase(childId.pid);
+                            }
+                            it = g_processHierarchy.erase(it);
+                        } 
+                        else 
+                        {
                             ++it;
                         }
                     }

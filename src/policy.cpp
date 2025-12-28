@@ -91,10 +91,19 @@ void CheckAndReleaseSessionLock()
     }
 }
 
-bool ShouldIgnoreDueToSessionLock(int detectedMode, DWORD /*pid*/)
+bool ShouldIgnoreDueToSessionLock(int detectedMode, DWORD pid)
 {
     if (!g_sessionLocked.load()) return false;
     
+    // CRITICAL FIX: Hierarchy check must be global, NOT nested inside browser check
+    // Allow children of the locked game to pass through regardless of detected mode
+    {
+        std::shared_lock lh(g_hierarchyMtx);
+        if (g_inheritedGamePids.count(pid)) {
+            return false; // Inherit parent's lock permission
+        }
+    }
+
 	if (detectedMode == 2)
     {
         ProcessIdentity lockedIdentity;
@@ -276,11 +285,21 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         }
     }
     
-    if (mode == 0)
+	if (mode == 0)
     {
         std::shared_lock lg(g_setMtx);
         if (g_games.count(exe))   mode = 1;
         else if (g_browsers.count(exe)) mode = 2;
+    }
+
+    // Hierarchy Inheritance Override
+    if (mode == 0) 
+    {
+        std::shared_lock lh(g_hierarchyMtx);
+        if (g_inheritedGamePids.count(pid)) 
+        {
+             mode = 1;
+        }
     }
     
     if (mode == 0) return;
@@ -403,26 +422,92 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
             g_lockedProcessIdentity = newIdentity;
         }
         
+		// TIER 3 CHECK: Game Launchers
+        if (GAME_LAUNCHERS.count(exe)) 
+        {
+            Log("[TIER3] Launcher detected: " + WideToUtf8(exe.c_str()));
+            
+            // Open with PROCESS_SET_QUOTA for working set limits
+            HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
+            if (hProc) {
+                // 1. Deprioritize CPU Priority
+                SetPriorityClass(hProc, IDLE_PRIORITY_CLASS); // Never preempt game
+                
+                // 2. Deprioritize I/O (Using existing helper which takes PID and Mode 2=Low)
+                SetProcessIoPriority(pid, 2);   
+
+                // 3. Pin to Core 0 only (Efficiency Core on Intel, or weakest thread)
+                SetProcessAffinityMask(hProc, 1);             
+                
+                // 4. Aggressive Memory Trimming
+                // Special case: Don't freeze anti-cheat services if they mistakenly ended up in this list
+                if (exe != L"riot-vanguard.exe" && exe != L"easyanticheat.exe" && 
+                    exe != L"beservice.exe" && exe != L"navapsvc.exe") 
+                {
+                    // Aggressive trim to 50MB-100MB
+                    SetProcessWorkingSetSize(hProc, 50 * 1024 * 1024, 100 * 1024 * 1024); 
+                }
+                
+                CloseHandle(hProc);
+            }
+            return; // Skip standard game/browser logic
+        }
+
+        // TIER 2 CHECK: Anti-Cheat & Workers
+        bool isGameChild = false;
+        if (mode == 1) 
+        {
+            if (IsAntiCheatProtected(pid)) 
+            {
+                Log("[TIER2] Anti-cheat protection detected - applying worker isolation");
+                isGameChild = true;
+            }
+            else 
+            {
+                // Check hierarchy for inherited status
+                std::shared_lock lh(g_hierarchyMtx);
+                if (g_inheritedGamePids.count(pid)) {
+                    isGameChild = true;
+                }
+            }
+        }
+
         if (modeChanged)
         {
             Log((mode == 1 ? "[GAME] "s : "[BROWSER] "s) + WideToUtf8(exe.c_str()));
         }
         
-        // Apply PROCESS-SPECIFIC optimizations (ALWAYS for new PID)
-        if (g_cpuInfo.vendor == CPUVendor::Intel && g_caps.hasHybridCores)
+        // Apply TIERED Optimizations (CPU/IO Isolation)
+        if (mode == 1) 
         {
+            ApplyTieredOptimization(pid, mode, isGameChild);
+            
+            // Apply supplementary optimizations
+            if (!isGameChild) {
+                SetGpuPriority(pid, mode); // Only Tier 1 gets GPU priority
+                SetProcessAffinity(pid, mode); // Standard affinity fallback
+                SetWorkingSetLimits(pid, mode);
+                OptimizeDpcIsrLatency(pid, mode);
+            } else {
+                // Tier 2 gets standard affinity fallback but no GPU boost
+                 SetProcessAffinity(pid, mode);
+            }
+            
+            // Special handling for AMD 3D V-Cache (Tier 1 Only)
+            if (!isGameChild && g_cpuInfo.vendor == CPUVendor::AMD && g_cpuInfo.hasAmd3DVCache)
+            {
+                SetAmd3DVCacheAffinity(pid, mode);
+            }
+        }
+        else 
+        {
+            // Browser / Normal Mode
             SetHybridCoreAffinity(pid, mode);
+            SetProcessIoPriority(pid, mode);
+            SetProcessAffinity(pid, mode);
+            SetWorkingSetLimits(pid, mode);
+            OptimizeDpcIsrLatency(pid, mode);
         }
-        else if (g_cpuInfo.vendor == CPUVendor::AMD && g_cpuInfo.hasAmd3DVCache)
-        {
-            SetAmd3DVCacheAffinity(pid, mode);
-        }
-        
-        SetProcessIoPriority(pid, mode);
-        SetGpuPriority(pid, mode);
-        SetProcessAffinity(pid, mode);
-        SetWorkingSetLimits(pid, mode);
-        OptimizeDpcIsrLatency(pid, mode);
         
         // Update policy change timestamp
         if (modeChanged)

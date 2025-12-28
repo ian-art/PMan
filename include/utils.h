@@ -46,4 +46,10 @@ struct RegKeyDeleter {
 };
 using UniqueRegKey = std::unique_ptr<std::remove_pointer<HKEY>::type, RegKeyDeleter>;
 
+// Check for known anti-cheat modules in process
+bool IsAntiCheatProtected(DWORD pid);
+
+// Get Parent PID (Non-ETW fallback)
+DWORD GetParentProcessId(DWORD pid);
+
 #endif // PMAN_UTILS_H

@@ -8,6 +8,7 @@
 #include <tlhelp32.h>
 #include <vector>
 #include <string>
+#include <algorithm> // For std::max
 
 // NT MEMORY TRIM DEFINITIONS
 typedef NTSTATUS (NTAPI *NtSetSystemInformation_t)(
@@ -1251,5 +1252,88 @@ bool IsUnderMemoryPressure()
     if ((availMB * 100) / totalMB < 20)
         return true;
 
-    return false;
+return false;
+}
+
+void ApplyTieredOptimization(DWORD pid, int mode, bool isGameChild)
+{
+    if (mode == 0) return;
+    
+    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProcess) return;
+
+    // LEGACY CPU PATH (Temporal Isolation for <4 cores)
+    if (g_isLowCoreCount.load()) 
+    {
+        if (mode == 1) 
+        {
+            if (isGameChild) 
+            {
+                SetPriorityClass(hProcess, HIGH_PRIORITY_CLASS);
+                Log("[LEGACY-TIER2] Worker elevated to HIGH (temporal isolation)");
+            } 
+            else 
+            {
+                SetPriorityClass(hProcess, REALTIME_PRIORITY_CLASS);
+                Log("[LEGACY-TIER1] Game elevated to REALTIME");
+            }
+        }
+    }
+    // MODERN CPU PATH (Spatial Isolation)
+    else if (mode == 1) 
+    {
+        HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+        HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+
+        if (isGameChild && kernel32) 
+        {
+            // TIER 2: Game Worker (Anti-cheat, Renderer)
+            // Strategy: Use a subset of P-cores to keep L3 cache hot but prevent main thread preemption
+            
+            typedef BOOL (WINAPI *SetProcessDefaultCpuSetsPtr)(HANDLE, CONST ULONG*, ULONG);
+            auto pSetProcessDefaultCpuSets = 
+                reinterpret_cast<SetProcessDefaultCpuSetsPtr>(
+                    GetProcAddress(kernel32, "SetProcessDefaultCpuSets"));
+
+			if (pSetProcessDefaultCpuSets)
+            {
+                std::lock_guard lock(g_cpuSetMtx);
+                if (!g_pCoreSets.empty()) 
+                {
+                    // Use last 25% of P-cores for workers (min 1)
+                    // Fix: Use parentheses to prevent Windows 'max' macro expansion
+                    size_t workerCount = (std::max)(size_t(1), g_pCoreSets.size() / 4);
+                    size_t offset = g_pCoreSets.size() - workerCount;
+                    
+                    if (pSetProcessDefaultCpuSets(hProcess, &g_pCoreSets[offset], static_cast<ULONG>(workerCount)))
+                    {
+                        Log("[TIER2] Game worker isolated to " + std::to_string(workerCount) + " P-cores");
+                    }
+                }
+            }
+            
+            // High I/O priority (Not Critical)
+            SetProcessIoPriority(pid, 1); 
+        } 
+        else 
+        {
+            // TIER 1: Main Game Process
+            // Strategy: Full P-Core Access + Critical I/O
+            
+            SetHybridCoreAffinity(pid, mode); // Uses existing P-core logic
+            
+            // Set I/O to Critical (4) manually as SetProcessIoPriority only supports High/Normal/Low
+            if (ntdll) {
+                typedef NTSTATUS (NTAPI *NtSetInformationProcessPtr)(HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG);
+                auto pNtSetInformationProcess = reinterpret_cast<NtSetInformationProcessPtr>(GetProcAddress(ntdll, "NtSetInformationProcess"));
+                if (pNtSetInformationProcess) {
+                     ULONG ioPriority = 4; // IoPriorityCritical
+                     pNtSetInformationProcess(hProcess, ProcessIoPriority, &ioPriority, sizeof(ioPriority));
+                     Log("[TIER1] I/O Priority set to CRITICAL");
+                }
+            }
+        }
+    }
+    
+    CloseHandle(hProcess);
 }
