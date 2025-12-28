@@ -581,7 +581,7 @@ void AntiInterferenceWatchdog()
                     int currentMode = g_lastMode.load();
 
                     // Trigger if NOT already in browser mode (2) and idle time exceeded
-                    if (currentMode != 2 && idleMs >= thresholdMs)
+                    if (currentMode == 1 && idleMs >= thresholdMs)
                     {
                         bool gameIsPresent = false;
                         
