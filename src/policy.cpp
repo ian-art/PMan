@@ -529,6 +529,13 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
             g_lockedGamePid.store(pid);
             g_lockStartTime.store(std::chrono::steady_clock::now().time_since_epoch().count());
     
+            // Verify if core pinning is allowed by profile
+            if (!g_perfGuardian.IsOptimizationAllowed(exe, "pin")) {
+                Log("[PERF] Core pinning disabled by learned profile for " + WideToUtf8(exe.c_str()));
+                // Revert affinity to all cores if it was set
+                SetProcessAffinity(pid, 2); 
+            }	
+	
             // Store process identity for PID reuse protection
             ProcessIdentity currentIdentity;
             if (GetProcessIdentity(pid, currentIdentity)) {

@@ -354,6 +354,9 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     Log("=== Priority Manager Starting ===");
     Log("All Levels Implemented: Session-Scoped | Cooldown | Registry Guard | Graceful Shutdown | OS Detection | Anti-Interference");
     
+    // Initialize Performance Guardian
+    g_perfGuardian.Initialize();
+
     DetectOSCapabilities();
 	// Create restore point before we do anything drastic, 
     // but only if we have Admin rights (checked in DetectOSCapabilities)

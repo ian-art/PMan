@@ -80,6 +80,19 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
 {
     if (!rec || !g_running) return;
 
+    // Handle DXGI Present Events (Provider: Microsoft-Windows-DxgKrnl)
+    static const GUID DxgKrnlGuid = { 0x802ec45a, 0x1e99, 0x4b83, { 0x99, 0x20, 0x87, 0xc9, 0x82, 0x77, 0xba, 0x9d } };
+    if (IsEqualGUID(rec->EventHeader.ProviderId, DxgKrnlGuid))
+    {
+        // Event ID 184 = PresentStart (Approximate for Frame Time calculation)
+        if (rec->EventHeader.EventDescriptor.Id == 184) 
+        {
+            // Use ProcessId from header
+            g_perfGuardian.OnPresentEvent(rec->EventHeader.ProcessId, rec->EventHeader.TimeStamp.QuadPart);
+        }
+        return;
+    }
+
     // Opcode 1 = ProcessStart, Opcode 2 = ProcessEnd
     BYTE opcode = rec->EventHeader.EventDescriptor.Opcode;
     
@@ -295,6 +308,13 @@ void EtwThread()
     status = EnableTraceEx2(hSession, &KernelProcessGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
                             TRACE_LEVEL_INFORMATION, 0x10, 0, 0, nullptr);
 
+	// Enable DXGI Provider for FPS/Frame Time Monitoring
+    // Microsoft-Windows-DxgKrnl: {802ec45a-1e99-4b83-9920-87c98277ba9d}
+    // Keyword: 0x1 (Base events including Present)
+    static const GUID DxgKrnlGuid = { 0x802ec45a, 0x1e99, 0x4b83, { 0x99, 0x20, 0x87, 0xc9, 0x82, 0x77, 0xba, 0x9d } };
+    EnableTraceEx2(hSession, &DxgKrnlGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+                   TRACE_LEVEL_INFORMATION, 0x1, 0, 0, nullptr);
+
     if (status != ERROR_SUCCESS)
     {
         Log("ETW: EnableTraceEx2 failed: " + std::to_string(status));
@@ -486,9 +506,13 @@ void IocpConfigWatcher()
                             case JobType::Config:
                                 g_reloadNow.store(true, std::memory_order_release);
                                 break;
-                            case JobType::Policy:
+							case JobType::Policy:
                                 // EvaluateAndSetPolicy takes ownership of PID/HWND, not the job
                                 EvaluateAndSetPolicy(job->pid, job->hwnd);
+                                break;
+                            case JobType::PerformanceEmergency:
+                                // Handle Stutter Emergency
+                                g_perfGuardian.TriggerEmergencyBoost(job->pid);
                                 break;
                             default:
                                 Log("[IOCP] ERROR: Unknown job type encountered");

@@ -4,6 +4,9 @@
 WindowsServiceManager g_serviceManager;
 std::atomic<bool> g_servicesSuspended{false};
 
+// Performance Guardian
+PerformanceGuardian g_perfGuardian;
+
 // Memory Telemetry
 MemoryTelemetry g_memTelemetry{};
 

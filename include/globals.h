@@ -4,6 +4,7 @@
 
 #include "types.h"
 #include "services.h" // Needed for WindowsServiceManager type
+#include "performance.h" // Performance Guardian
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
@@ -17,6 +18,9 @@
 // Service Manager
 extern WindowsServiceManager g_serviceManager;
 extern std::atomic<bool> g_servicesSuspended;
+
+// Performance Guardian
+extern PerformanceGuardian g_perfGuardian;
 
 // Memory Telemetry
 extern MemoryTelemetry g_memTelemetry;

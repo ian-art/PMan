@@ -228,8 +228,8 @@ struct ProcessIdentity
 };
 
 // IOCP Job Structure
-enum class JobType : DWORD { Config, Policy };
-struct IocpJob 
+enum class JobType : DWORD { Config, Policy, PerformanceEmergency };
+struct IocpJob
 { 
     JobType type; 
     DWORD pid;
