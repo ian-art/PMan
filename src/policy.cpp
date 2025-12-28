@@ -271,7 +271,45 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     
     // Fix: Use pathBuf.data() because 'path' was replaced by a vector
     std::wstring exe = ExeFromPath(pathBuf.data());
-    if (exe.empty()) return;
+	if (exe.empty()) return;
+
+    // TIER 3 CHECK: Game Launchers (Moved to top to prevent early exit)
+    bool isLauncher = GAME_LAUNCHERS.count(exe);
+    if (!isLauncher)
+    {
+        std::shared_lock lg(g_setMtx);
+        isLauncher = g_customLaunchers.count(exe);
+    }
+
+    if (isLauncher) 
+    {
+        Log("[TIER3] Launcher detected: " + WideToUtf8(exe.c_str()));
+        
+        // Open with PROCESS_SET_QUOTA for working set limits
+        HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
+        if (hProc) {
+            // 1. Deprioritize CPU Priority
+            SetPriorityClass(hProc, IDLE_PRIORITY_CLASS); // Never preempt game
+            
+            // 2. Deprioritize I/O (Using existing helper which takes PID and Mode 2=Low)
+            SetProcessIoPriority(pid, 2);   
+
+            // 3. Pin to Core 0 only (Efficiency Core on Intel, or weakest thread)
+            SetProcessAffinityMask(hProc, 1);             
+            
+            // 4. Aggressive Memory Trimming
+            // Special case: Don't freeze anti-cheat services if they mistakenly ended up in this list
+            if (exe != L"riot-vanguard.exe" && exe != L"easyanticheat.exe" && 
+                exe != L"beservice.exe" && exe != L"navapsvc.exe") 
+            {
+                // Aggressive trim to 50MB-100MB
+                SetProcessWorkingSetSize(hProc, 50 * 1024 * 1024, 100 * 1024 * 1024); 
+            }
+            
+            CloseHandle(hProc);
+        }
+        return; // Skip standard game/browser logic
+    }
 
     int mode = 0;
     
@@ -420,44 +458,6 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         if (GetProcessIdentity(pid, newIdentity)) {
             std::lock_guard lock(g_processIdentityMtx);
             g_lockedProcessIdentity = newIdentity;
-        }
-        
-		// TIER 3 CHECK: Game Launchers
-        bool isLauncher = GAME_LAUNCHERS.count(exe);
-        if (!isLauncher)
-        {
-            std::shared_lock lg(g_setMtx);
-            isLauncher = g_customLaunchers.count(exe);
-        }
-
-        if (isLauncher) 
-        {
-            Log("[TIER3] Launcher detected: " + WideToUtf8(exe.c_str()));
-            
-            // Open with PROCESS_SET_QUOTA for working set limits
-            HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
-            if (hProc) {
-                // 1. Deprioritize CPU Priority
-                SetPriorityClass(hProc, IDLE_PRIORITY_CLASS); // Never preempt game
-                
-                // 2. Deprioritize I/O (Using existing helper which takes PID and Mode 2=Low)
-                SetProcessIoPriority(pid, 2);   
-
-                // 3. Pin to Core 0 only (Efficiency Core on Intel, or weakest thread)
-                SetProcessAffinityMask(hProc, 1);             
-                
-                // 4. Aggressive Memory Trimming
-                // Special case: Don't freeze anti-cheat services if they mistakenly ended up in this list
-                if (exe != L"riot-vanguard.exe" && exe != L"easyanticheat.exe" && 
-                    exe != L"beservice.exe" && exe != L"navapsvc.exe") 
-                {
-                    // Aggressive trim to 50MB-100MB
-                    SetProcessWorkingSetSize(hProc, 50 * 1024 * 1024, 100 * 1024 * 1024); 
-                }
-                
-                CloseHandle(hProc);
-            }
-            return; // Skip standard game/browser logic
         }
 
         // TIER 2 CHECK: Anti-Cheat & Workers
