@@ -6,6 +6,8 @@
 #include <string>
 #include <unordered_set>
 #include <algorithm>
+#include <pdh.h>
+#pragma comment(lib, "pdh.lib")
 
 static constexpr int SERVICE_OP_WAIT_RETRIES = 50;
 static constexpr int SERVICE_OP_WAIT_DELAY_MS = 100;
@@ -384,6 +386,38 @@ void ResumeBackgroundServices()
         return;
     }
     
-    g_serviceManager.ResumeAll();
+g_serviceManager.ResumeAll();
     g_servicesSuspended.store(false);
+}
+
+double GetBitsBandwidth()
+{
+    static PDH_HQUERY query = nullptr;
+    static PDH_HCOUNTER counter = nullptr;
+    static bool initialized = false;
+    static bool available = false;
+
+    if (!initialized)
+    {
+        if (PdhOpenQueryW(nullptr, 0, &query) == ERROR_SUCCESS)
+        {
+            // Monitor total bytes transferred by BITS
+            if (PdhAddCounterW(query, L"\\BITS\\Total Bytes Transferred/Sec", 0, &counter) == ERROR_SUCCESS)
+            {
+                available = true;
+            }
+        }
+        initialized = true;
+    }
+
+    if (!available || !query) return 0.0;
+
+    PdhCollectQueryData(query);
+    
+    PDH_FMT_COUNTERVALUE value;
+    if (PdhGetFormattedCounterValue(counter, PDH_FMT_DOUBLE, nullptr, &value) == ERROR_SUCCESS)
+    {
+        return value.doubleValue / (1024.0 * 1024.0); // Convert to MB/s
+    }
+    return 0.0;
 }

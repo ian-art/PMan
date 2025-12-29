@@ -93,6 +93,60 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
         return;
     }
 
+	// DPC Monitoring (Microsoft-Windows-Kernel-Perf)
+    static const GUID DpcGuid = { 0x13976d09, 0x032d, 0x4fd7, { 0x81, 0x0a, 0x44, 0x40, 0x2c, 0x10, 0xe2, 0xc1 } };
+    if (IsEqualGUID(rec->EventHeader.ProviderId, DpcGuid))
+    {
+        // Event ID 66 = DPC, 67 = ISR
+        if (rec->EventHeader.EventDescriptor.Id == 66)
+        {
+            // Extract Duration (typically property index 1 or 2, checking properties is safer)
+            DWORD bufferSize = 0;
+            TdhGetEventInformation(rec, 0, nullptr, nullptr, &bufferSize);
+            
+            if (bufferSize > 0)
+            {
+                std::vector<BYTE> buffer(bufferSize);
+                TRACE_EVENT_INFO* info = reinterpret_cast<TRACE_EVENT_INFO*>(buffer.data());
+                
+                if (TdhGetEventInformation(rec, 0, nullptr, info, &bufferSize) == ERROR_SUCCESS)
+                {
+                    for (DWORD i = 0; i < info->PropertyCount; i++)
+                    {
+                        wchar_t* propName = reinterpret_cast<wchar_t*>(
+                            reinterpret_cast<BYTE*>(info) + info->EventPropertyInfoArray[i].NameOffset);
+                        
+                        if (propName && wcscmp(propName, L"Duration") == 0)
+                        {
+                            PROPERTY_DATA_DESCRIPTOR desc;
+                            desc.PropertyName = reinterpret_cast<ULONGLONG>(propName);
+                            desc.ArrayIndex = ULONG_MAX;
+                            desc.Reserved = 0;
+                            
+                            // Duration can be ULONG or ULONGLONG depending on OS version
+                            ULONGLONG duration = 0;
+                            DWORD sz = 8; // Try 64-bit first
+                            
+                            if (TdhGetProperty(rec, 0, nullptr, 1, &desc, sz, reinterpret_cast<BYTE*>(&duration)) != ERROR_SUCCESS)
+                            {
+                                sz = 4; // Fallback to 32-bit
+                                ULONG duration32 = 0;
+                                TdhGetProperty(rec, 0, nullptr, 1, &desc, sz, reinterpret_cast<BYTE*>(&duration32));
+                                duration = duration32;
+                            }
+                            
+                            // Convert 100ns units to microseconds
+                            double latUs = duration / 10.0;
+                            g_lastDpcLatency.store(latUs, std::memory_order_relaxed);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        return;
+    }
+
     // Opcode 1 = ProcessStart, Opcode 2 = ProcessEnd
     BYTE opcode = rec->EventHeader.EventDescriptor.Opcode;
     
@@ -311,8 +365,13 @@ void EtwThread()
 	// Enable DXGI Provider for FPS/Frame Time Monitoring
     // Microsoft-Windows-DxgKrnl: {802ec45a-1e99-4b83-9920-87c98277ba9d}
     // Keyword: 0x1 (Base events including Present)
-    static const GUID DxgKrnlGuid = { 0x802ec45a, 0x1e99, 0x4b83, { 0x99, 0x20, 0x87, 0xc9, 0x82, 0x77, 0xba, 0x9d } };
+	static const GUID DxgKrnlGuid = { 0x802ec45a, 0x1e99, 0x4b83, { 0x99, 0x20, 0x87, 0xc9, 0x82, 0x77, 0xba, 0x9d } };
     EnableTraceEx2(hSession, &DxgKrnlGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+                   TRACE_LEVEL_INFORMATION, 0x1, 0, 0, nullptr);
+
+    // DPC/ISR Latency Provider (Microsoft-Windows-Kernel-Perf)
+    static const GUID DpcGuid = { 0x13976d09, 0x032d, 0x4fd7, { 0x81, 0x0a, 0x44, 0x40, 0x2c, 0x10, 0xe2, 0xc1 } };
+    EnableTraceEx2(hSession, &DpcGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
                    TRACE_LEVEL_INFORMATION, 0x1, 0, 0, nullptr);
 
     if (status != ERROR_SUCCESS)

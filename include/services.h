@@ -49,4 +49,7 @@ public:
 void SuspendBackgroundServices();
 void ResumeBackgroundServices();
 
+// BITS Bandwidth Monitor
+double GetBitsBandwidth();
+
 #endif // PMAN_SERVICES_H

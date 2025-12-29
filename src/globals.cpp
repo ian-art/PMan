@@ -111,3 +111,6 @@ HANDLE g_hShutdownEvent = nullptr;
 DWORD g_originalRegistryValue = 0xFFFFFFFF;
 std::atomic<TRACEHANDLE> g_etwSession{0};
 std::atomic<uint64_t> g_lastEtwHeartbeat{0};
+
+// Root Cause Correlation Global
+std::atomic<double> g_lastDpcLatency{0.0};

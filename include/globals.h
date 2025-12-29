@@ -128,4 +128,7 @@ extern DWORD g_originalRegistryValue;
 extern std::atomic<TRACEHANDLE> g_etwSession;
 extern std::atomic<uint64_t> g_lastEtwHeartbeat; // ETW Liveness
 
+// Root Cause Correlation Global
+extern std::atomic<double> g_lastDpcLatency;
+
 #endif // PMAN_GLOBALS_H
