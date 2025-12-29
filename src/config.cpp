@@ -123,7 +123,8 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
                                    bool lockPolicy,
                                    bool suspendUpdates,
                                    bool idleRevert,
-                                   uint32_t idleTimeoutMs)
+                                   uint32_t idleTimeoutMs,
+                                   const ExplorerConfig& explorerConfig)
 {
     std::ostringstream buffer;
     
@@ -179,10 +180,46 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
     
     globalContent << "; Automatically revert to Browser Mode if system is idle for specified time\n";
     globalContent << "; and no game is currently running.\n";
-    globalContent << "idle_revert_enabled = " << (idleRevert ? "true" : "false") << "\n";
+	globalContent << "idle_revert_enabled = " << (idleRevert ? "true" : "false") << "\n";
     globalContent << "idle_timeout = " << timeoutStr << "\n\n";
     
     buffer << BuildConfigSection("global", globalContent.str());
+
+    // Build Explorer section
+    std::ostringstream expContent;
+    expContent << "; Smart Shell Boost: Optimizes Windows UI only when system is truly idle\n";
+    expContent << "; WARNING: Admin rights required for DWM boosting. Set 'enabled=false' for esports.\n\n";
+    
+    expContent << "enabled = " << (explorerConfig.enabled ? "true" : "false") << "\n\n";
+    
+    std::string explorerTimeoutStr;
+    if (explorerConfig.idleThresholdMs % 60000 == 0) explorerTimeoutStr = std::to_string(explorerConfig.idleThresholdMs / 60000) + "m";
+    else explorerTimeoutStr = std::to_string(explorerConfig.idleThresholdMs / 1000) + "s";
+
+    expContent << "; Idle detection: Time with NO user input AND no foreground game\n";
+    expContent << "idle_threshold = " << explorerTimeoutStr << "\n\n";
+
+    expContent << "; Also boost Desktop Window Manager (dwm.exe) for smoother animations\n";
+    expContent << "boost_dwm = " << (explorerConfig.boostDwm ? "true" : "false") << "\n\n";
+
+    expContent << "; Apply High I/O priority to file operations (snappier folder loading)\n";
+    expContent << "boost_io_priority = " << (explorerConfig.boostIoPriority ? "true" : "false") << "\n\n";
+
+    expContent << "; Disable \"Power Throttling\" (EcoQoS) for Explorer/DWM\n";
+    expContent << "disable_power_throttling = " << (explorerConfig.disablePowerThrottling ? "true" : "false") << "\n\n";
+
+    expContent << "; Prevents Windows from paging out Explorer/DWM during gaming\n";
+    expContent << "prevent_shell_paging = " << (explorerConfig.preventShellPaging ? "true" : "false") << "\n\n";
+
+    expContent << "; Process scan interval (seconds)\n";
+    std::string scanStr = (explorerConfig.scanIntervalMs % 1000 == 0) ? 
+                          (std::to_string(explorerConfig.scanIntervalMs / 1000) + "s") : 
+                          (std::to_string(explorerConfig.scanIntervalMs) + "ms");
+    expContent << "scan_interval = " << scanStr << "\n\n";
+    
+    expContent << "debug_logging = " << (explorerConfig.debugLogging ? "true" : "false") << "\n\n";
+
+    buffer << BuildConfigSection("explorer", expContent.str());
     
     // Build process lists
     std::ostringstream gamesSection;
@@ -248,8 +285,10 @@ void LoadConfig()
     auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     auto last = g_lastConfigReload.load();
     
-    // Debounce check
-    static constexpr int CONFIG_RELOAD_DEBOUNCE_MS = 2000; 
+	// Debounce check
+    // Reduced to 200ms to allow "correction" updates if the first file-change event read stale data
+    // (Common with editors that use temp files or UAC elevation like Notepad++)
+    static constexpr int CONFIG_RELOAD_DEBOUNCE_MS = 200; 
     if (last != 0)
     {
         auto elapsed_ms = (now - last) / 1000000;
@@ -278,15 +317,18 @@ void LoadConfig()
             CreateDefaultConfig(configPath);
         }
         
-        std::wifstream f(configPath);
+		std::wifstream f(configPath);
         if (!f) 
         { 
             Log("Config not found at: " + WideToUtf8(configPath.c_str())); 
             return; 
         }
         
+        // Explorer config
+        ExplorerConfig explorerConfig;
+        
         std::wstring line;
-        enum Sect { NONE, META, GLOBAL, G, B, GW, BW } sect = NONE;
+        enum Sect { NONE, META, GLOBAL, EXPLORER, G, B, GW, BW } sect = NONE;
         int lineNum = 0;
         int configVersion = 0;
         
@@ -309,6 +351,7 @@ void LoadConfig()
                 asciiLower(secName);
                 
                 if (secName == L"global") sect = GLOBAL;
+				else if (secName == L"explorer") sect = EXPLORER;
                 else if (secName == L"meta") sect = META;
                 else if (secName == L"games") sect = G;
                 else if (secName == L"browsers") sect = B;
@@ -395,6 +438,56 @@ void LoadConfig()
                             }
                         }
                     }
+				}
+                continue;
+            }
+
+            if (sect == EXPLORER)
+            {
+                size_t eqPos = item.find(L'=');
+                if (eqPos != std::wstring::npos)
+                {
+                    std::wstring key = item.substr(0, eqPos);
+                    std::wstring value = item.substr(eqPos + 1);
+                    
+                    // Trim
+                    key.erase(0, key.find_first_not_of(L" \t"));
+                    key.erase(key.find_last_not_of(L" \t") + 1);
+                    value.erase(0, value.find_first_not_of(L" \t"));
+                    value.erase(value.find_last_not_of(L" \t") + 1);
+                    
+                    asciiLower(key);
+                    asciiLower(value);
+                    
+                    auto ParseTime = [](const std::wstring& v) -> uint32_t {
+                        if (v.empty()) return 15000;
+                        wchar_t suffix = v.back();
+                        uint32_t mul = 1000;
+                        std::wstring n = v;
+                        if (suffix == L's' || suffix == L'S') { n.pop_back(); mul = 1000; }
+                        else if (suffix == L'm' || suffix == L'M') { n.pop_back(); mul = 60000; }
+                        try { return static_cast<uint32_t>(std::stoi(n)) * mul; } catch(...) { return 15000; }
+                    };
+
+                    auto ParseBool = [](const std::wstring& v) {
+                        return (v == L"true" || v == L"1" || v == L"yes");
+                    };
+
+                    if (key == L"enabled") explorerConfig.enabled = ParseBool(value);
+                    else if (key == L"idle_threshold") explorerConfig.idleThresholdMs = ParseTime(value);
+                    else if (key == L"boost_dwm") explorerConfig.boostDwm = ParseBool(value);
+                    else if (key == L"boost_io_priority") explorerConfig.boostIoPriority = ParseBool(value);
+                    else if (key == L"disable_power_throttling") explorerConfig.disablePowerThrottling = ParseBool(value);
+					else if (key == L"prevent_shell_paging") explorerConfig.preventShellPaging = ParseBool(value);
+                    else if (key == L"scan_interval") explorerConfig.scanIntervalMs = ParseTime(value);
+					else if (key == L"debug_logging") {
+						bool parsedValue = ParseBool(value);
+						explorerConfig.debugLogging = parsedValue;
+    
+						// ALWAYS log this to verify it's being parsed correctly
+						Log("[CONFIG] Setting debug_logging to: " + WideToUtf8(value.c_str()) + 
+						" (parsed as: " + std::string(parsedValue ? "TRUE" : "FALSE") + ")");
+					}
                 }
                 continue;
             }
@@ -439,12 +532,14 @@ void LoadConfig()
                 Log("Warning: Could not create config archive");
             }
             
-            // Write upgraded configuration
-            WriteConfigurationFile(configPath, games, browsers, gameWindows, browserWindows,
+			// Write upgraded configuration
+            // Note: explorerConfig contains defaults at this point, which is exactly what we want for a fresh section
+			WriteConfigurationFile(configPath, games, browsers, gameWindows, browserWindows,
                                   ignoreNonInteractive, restoreOnExit, lockPolicy, 
                                   g_suspendUpdatesDuringGames.load(),
                                   g_idleRevertEnabled.load(),
-                                  g_idleTimeoutMs.load());
+                                  g_idleTimeoutMs.load(),
+                                  explorerConfig);
             
             // Re-parse the upgraded file (prevent stack overflow with depth limit)
             static thread_local int upgradeDepth = 0;
@@ -466,9 +561,25 @@ void LoadConfig()
             g_customLaunchers = std::move(customLaunchers);
         }
         
-        g_ignoreNonInteractive.store(ignoreNonInteractive);
+		g_ignoreNonInteractive.store(ignoreNonInteractive);
         g_restoreOnExit.store(restoreOnExit);
         g_lockPolicy.store(lockPolicy);
+        
+		// Finalize Explorer Config with Validations
+        // Cross-validate with global idle settings
+        if (explorerConfig.enabled && g_idleRevertEnabled.load()) {
+            if (g_idleTimeoutMs.load() < explorerConfig.idleThresholdMs) {
+                Log("[CONFIG] Forcing global idle_timeout to match explorer idle_threshold");
+                g_idleTimeoutMs.store(explorerConfig.idleThresholdMs);
+            }
+        }
+
+        // Enforce minimum thresholds
+        if (explorerConfig.idleThresholdMs < 5000) {
+             Log("[CONFIG] explorer.idle_threshold too low (<5s). Forcing to 15s.");
+             explorerConfig.idleThresholdMs = 15000;
+        }
+        g_explorerBooster.UpdateConfig(explorerConfig);
         
 		Log("Config loaded: " + std::to_string(g_games.size()) + " games, " +
             std::to_string(g_browsers.size()) + " browsers, " +
@@ -480,7 +591,8 @@ void LoadConfig()
             "lock_policy=" + (lockPolicy ? "true" : "false") + " | " +
             "idle_revert=" + (g_idleRevertEnabled.load() ? "true" : "false") + 
             "(" + std::to_string(g_idleTimeoutMs.load() / 1000) + "s) | " +
-            "suspend_updates=" + (g_suspendUpdatesDuringGames.load() ? "true" : "false"));
+            "suspend_updates=" + (g_suspendUpdatesDuringGames.load() ? "true" : "false") + " | " +
+            "smart_explorer=" + (explorerConfig.enabled ? "true" : "false"));
     }
     catch (const std::exception& e)
     { 

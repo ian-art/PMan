@@ -357,8 +357,11 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     Log("=== Priority Manager Starting ===");
     Log("All Levels Implemented: Session-Scoped | Cooldown | Registry Guard | Graceful Shutdown | OS Detection | Anti-Interference");
     
-    // Initialize Performance Guardian
+	// Initialize Performance Guardian
     g_perfGuardian.Initialize();
+
+    // Initialize Smart Shell Booster
+    g_explorerBooster.Initialize();
 
     DetectOSCapabilities();
 	// Create restore point before we do anything drastic, 
@@ -455,13 +458,32 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     wc.lpszClassName = L"PMHidden";
     RegisterClassW(&wc);
     
-    HWND hwnd = CreateWindowW(wc.lpszClassName, L"", 0, 0, 0, 0, 0, 
+	HWND hwnd = CreateWindowW(wc.lpszClassName, L"", 0, 0, 0, 0, 0, 
                               HWND_MESSAGE, nullptr, nullptr, nullptr);
     RegisterPowerNotifications(hwnd);
     
+    // Register for Raw Input to track user activity (Keyboard & Mouse) for Explorer Booster
+    RAWINPUTDEVICE Rid[2];
+    // Keyboard
+    Rid[0].usUsagePage = 0x01; 
+    Rid[0].usUsage = 0x06; 
+    Rid[0].dwFlags = RIDEV_INPUTSINK;   
+    Rid[0].hwndTarget = hwnd;
+    // Mouse
+    Rid[1].usUsagePage = 0x01; 
+    Rid[1].usUsage = 0x02; 
+    Rid[1].dwFlags = RIDEV_INPUTSINK; 
+    Rid[1].hwndTarget = hwnd;
+
+    if (!RegisterRawInputDevices(Rid, 2, sizeof(Rid[0]))) {
+        Log("[INIT] Raw Input registration failed: " + std::to_string(GetLastError()));
+    } else {
+        Log("[INIT] Raw Input registered for idle detection");
+    }
+
     Log("Background mode ready - monitoring foreground applications");
     
-	DWORD currentSetting = ReadCurrentPrioritySeparation();
+    DWORD currentSetting = ReadCurrentPrioritySeparation();
     if (currentSetting != 0xFFFFFFFF)
     {
         Log("Current system setting: " + GetModeDescription(currentSetting));
@@ -477,9 +499,11 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     else
     {
         Log("WARNING: Unable to read current registry setting");
-    }
+	}
     
     MSG msg;
+    static uint32_t g_lastExplorerPollMs = 0;
+
     while (g_running)
     {
         if (CheckForShutdownSignal())
@@ -496,7 +520,13 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                 break;
             }
             
-		if (msg.message == WM_POWERBROADCAST)
+            if (msg.message == WM_INPUT) 
+            {
+                // Signal user activity to Smart Explorer Booster
+                g_explorerBooster.OnUserActivity();
+                DefWindowProc(msg.hwnd, msg.message, msg.wParam, msg.lParam);
+            }
+            else if (msg.message == WM_POWERBROADCAST)
             {
                 if (msg.wParam == PBT_APMQUERYSUSPEND || msg.wParam == PBT_APMSUSPEND)
                 {
@@ -518,17 +548,40 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
             DispatchMessage(&msg);
         }
         
-        if (g_reloadNow.exchange(false))
+		if (g_reloadNow.exchange(false))
         {
+            // Allow file system to settle (fixes empty-read race conditions with Notepad++/UAC)
+            Sleep(250);
             LoadConfig();
         }
 
-		// Safety check: ensure services are not left suspended
+        // Safety check: ensure services are not left suspended
         CheckAndReleaseSessionLock();
 
+        // Wait for messages with timeout - efficient polling that doesn't spin CPU
         // Use MsgWaitForMultipleObjects to stay responsive to inputs/shutdown while waiting
-        // This replaces the polling Sleep(100)
-        MsgWaitForMultipleObjects(1, &g_hShutdownEvent, FALSE, 100, QS_ALLINPUT);
+        DWORD waitResult = MsgWaitForMultipleObjects(1, &g_hShutdownEvent, FALSE, 100, QS_ALLINPUT);
+        
+        // Process explorer boost tick only if we timed out (no messages to process)
+        // This prevents calling OnTick() during active user input, reducing overhead
+        if (waitResult == WAIT_TIMEOUT)
+        {
+            // Calculate adaptive polling interval based on idle state
+            uint32_t now = GetTickCount();
+            uint32_t idleDurationMs = now - static_cast<uint32_t>(g_explorerBooster.GetLastUserActivity());
+            uint32_t thresholdMs = g_explorerBooster.GetIdleThreshold();
+            
+            // Adaptive poll rate: poll faster when approaching idle threshold (within 5s)
+            bool approachingIdle = (idleDurationMs > 0 && idleDurationMs < thresholdMs && 
+                                   idleDurationMs > (thresholdMs - 5000));
+            uint32_t pollIntervalMs = approachingIdle ? 250 : 2000;
+
+            // Rate limit the tick calls to prevent CPU spinning
+            if ((now - g_lastExplorerPollMs) >= pollIntervalMs) {
+                g_explorerBooster.OnTick();
+                g_lastExplorerPollMs = now;
+            }
+        }
     }
     
     if (hook) UnhookWinEvent(hook);
@@ -536,9 +589,10 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     if (hwnd) DestroyWindow(hwnd);
     UnregisterClassW(wc.lpszClassName, nullptr);
     
-    CoUninitialize();
+	CoUninitialize();
     
     g_running = false;
+    g_explorerBooster.Shutdown();
     PostShutdown();
     
     if (configThread.joinable()) configThread.join();

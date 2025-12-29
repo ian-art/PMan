@@ -351,9 +351,18 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     }
     
     int lastMode = g_lastMode.load();
-    DWORD lastPid = g_lastPid.load();
+	DWORD lastPid = g_lastPid.load();
+    
+    // CRITICAL: Revert Explorer BEFORE game mode applies to prevent conflict
+    if (mode == 1) {
+        // Pre-emptive revert
+        g_explorerBooster.OnGameStart(pid);
+    } else if (mode == 2) {
+        g_explorerBooster.OnBrowserStart(pid);
+    }
     
     // Check cooldown
+    if (!IsPolicyChangeAllowed(mode)) return;
     if (!IsPolicyChangeAllowed(mode)) return;
     
     // 1. Exact same process and mode - skip entirely
@@ -564,8 +573,23 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
                 Log("[SERVICE] Service suspension disabled by config");
             }
         }
-		else
+        else
         {
+            // CRITICAL FIX: ALWAYS call OnGameStop when leaving game mode
+            // This resets m_gameOrBrowserActive flag
+            
+            // Check if we were previously in game mode
+            bool wasGameMode = (g_lastMode.load() == 1);
+            
+            // Only log if this is a real mode change (prevent spam)
+            if (wasGameMode || g_sessionLocked.load()) {
+                Log("Mode transition from GAME to BROWSER - resetting booster state");
+            }
+            
+            // CRITICAL: Call this FIRST before any other state changes
+            // This ensures the Explorer Booster flag is reset immediately
+            g_explorerBooster.OnGameStop();
+
             if (g_sessionLocked.load())
             {
                 // Notify Performance Guardian and generate report

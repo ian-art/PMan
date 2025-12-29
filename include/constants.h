@@ -8,7 +8,7 @@
 // Config
 static constexpr wchar_t CONFIG_FILENAME[] = L"config.ini";
 static constexpr wchar_t CUSTOM_LAUNCHERS_FILENAME[] = L"custom_launchers.txt";
-static constexpr int CONFIG_VERSION = 1; // Increment when config structure changes
+static constexpr int CONFIG_VERSION = 2; // Increment when config structure changes
 
 // Registry Values
 static constexpr DWORD   VAL_GAME   = 0x28;
@@ -481,6 +481,41 @@ Microsoft Edge
 ; - Remove .exe names you don't use to keep config clean
 ; - Add your specific games/browsers if not listed
 ; - Check log at: C:\ProgramData\PriorityMgr\log.txt
+
+[explorer]
+; Smart Shell Boost: Optimizes Windows UI only when system is truly idle
+; WARNING: Admin rights required for DWM boosting. Set 'enabled=false' for esports.
+enabled = true
+
+; Idle detection: Time with NO user input AND no foreground game
+; Format: 15s | 30s | 1m | 5m  (suffix: s=seconds, m=minutes)
+; Minimum: 10s | Recommended: 15s-30s
+idle_threshold = 15s
+
+; --- Boost Targets ---
+; Also boost Desktop Window Manager (dwm.exe) for smoother animations
+boost_dwm = true
+
+; --- Boost Methods ---
+; Apply High I/O priority to file operations (snappier folder loading)
+; Set FALSE for competitive gaming (prevents 0.5-2% FPS loss in CPU-bound scenarios)
+boost_io_priority = false
+
+; Disable "Power Throttling" (EcoQoS) for Explorer/DWM - ALWAYS SAFE
+disable_power_throttling = true
+
+; --- Memory Guard (Anti-Paging) ---
+; Prevents Windows from paging out Explorer/DWM during gaming
+; Fixes the "laggy taskbar" issue when quitting heavy games
+; Limitation: Best-effort; cannot fully override kernel memory manager
+prevent_shell_paging = true
+
+; Process scan interval (seconds) - how often to check for new Explorer windows
+scan_interval = 5s
+
+; Debug logging (set 'true' to see state changes in log.txt)
+debug_logging = false
+
 ; ================= END OF CONFIG =================
 )";
 
