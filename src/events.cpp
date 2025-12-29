@@ -75,6 +75,68 @@ void WaitForThreads(DWORD timeoutMs)
     }
 }
 
+// Microsoft-Windows-DPC
+static const GUID DPCGuid = { 0x13976d09, 0x032d, 0x4fd7, { 0x81, 0x0a, 0x44, 0x40, 0x2c, 0x10, 0xe2, 0xc1 } };
+// Microsoft-Windows-ISR
+static const GUID ISRGuid = { 0x99f948be, 0xb355, 0x4fc8, { 0x88, 0x7c, 0x7f, 0xf4, 0x67, 0x9c, 0x88, 0x4d } };
+
+static void WINAPI DpcIsrCallback(EVENT_RECORD* rec) {
+    static std::mutex dpcMtx;
+    static std::deque<uint64_t> dpcHistory; // Ring buffer of recent latencies
+    
+    if (!rec) return;
+
+    DWORD bufferSize = 0;
+    TdhGetEventInformation(rec, 0, nullptr, nullptr, &bufferSize);
+    if (bufferSize == 0) return;
+    
+    std::vector<BYTE> buffer(bufferSize);
+    TRACE_EVENT_INFO* info = reinterpret_cast<TRACE_EVENT_INFO*>(buffer.data());
+    
+    if (TdhGetEventInformation(rec, 0, nullptr, info, &bufferSize) != ERROR_SUCCESS) 
+        return;
+
+    // Parse DPC duration (event ID 2 = DPCExec)
+    // Note: For DPC (Provider {139...}), Event ID 1=Enter, 2=Leave (Duration)
+    if (rec->EventHeader.EventDescriptor.Id == 2) {
+        ULONGLONG duration = 0;
+        for (DWORD i = 0; i < info->PropertyCount; i++) {
+            wchar_t* propName = reinterpret_cast<wchar_t*>(
+                reinterpret_cast<BYTE*>(info) + info->EventPropertyInfoArray[i].NameOffset);
+            
+            if (propName && wcscmp(propName, L"Duration") == 0) {
+                PROPERTY_DATA_DESCRIPTOR desc;
+                desc.PropertyName = reinterpret_cast<ULONGLONG>(propName);
+                desc.ArrayIndex = ULONG_MAX;
+                desc.Reserved = 0;
+                DWORD sz = sizeof(duration);
+                
+                if (TdhGetProperty(rec, 0, nullptr, 1, &desc, sz, 
+                                 reinterpret_cast<BYTE*>(&duration)) == ERROR_SUCCESS) {
+                    // duration is in 100ns units, convert to microseconds
+                    uint64_t latencyUs = duration / 10;
+                    
+                    std::lock_guard lock(dpcMtx);
+                    dpcHistory.push_back(latencyUs);
+                    if (dpcHistory.size() > 100) dpcHistory.pop_front();
+                    
+                    // Store the 95th percentile as system health metric
+                    if (!dpcHistory.empty()) {
+                        std::vector<uint64_t> sorted(dpcHistory.begin(), dpcHistory.end());
+                        std::sort(sorted.begin(), sorted.end());
+                        size_t idx = static_cast<size_t>(sorted.size() * 0.95);
+                        if (idx >= sorted.size()) idx = sorted.size() - 1;
+                        
+                        // FIX: Explicit static_cast to double prevents C4244 warning
+                        g_lastDpcLatency.store(static_cast<double>(sorted[idx]), std::memory_order_relaxed);
+                    }
+                }
+                break;
+            }
+        }
+    }
+}
+
 // ---------------------------  ETW  ------------------------------------
 static void WINAPI EtwCallback(EVENT_RECORD* rec)
 {
@@ -94,56 +156,10 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
     }
 
 	// DPC Monitoring (Microsoft-Windows-Kernel-Perf)
-    static const GUID DpcGuid = { 0x13976d09, 0x032d, 0x4fd7, { 0x81, 0x0a, 0x44, 0x40, 0x2c, 0x10, 0xe2, 0xc1 } };
-    if (IsEqualGUID(rec->EventHeader.ProviderId, DpcGuid))
+	if (IsEqualGUID(rec->EventHeader.ProviderId, DPCGuid) || 
+        IsEqualGUID(rec->EventHeader.ProviderId, ISRGuid)) 
     {
-        // Event ID 66 = DPC, 67 = ISR
-        if (rec->EventHeader.EventDescriptor.Id == 66)
-        {
-            // Extract Duration (typically property index 1 or 2, checking properties is safer)
-            DWORD bufferSize = 0;
-            TdhGetEventInformation(rec, 0, nullptr, nullptr, &bufferSize);
-            
-            if (bufferSize > 0)
-            {
-                std::vector<BYTE> buffer(bufferSize);
-                TRACE_EVENT_INFO* info = reinterpret_cast<TRACE_EVENT_INFO*>(buffer.data());
-                
-                if (TdhGetEventInformation(rec, 0, nullptr, info, &bufferSize) == ERROR_SUCCESS)
-                {
-                    for (DWORD i = 0; i < info->PropertyCount; i++)
-                    {
-                        wchar_t* propName = reinterpret_cast<wchar_t*>(
-                            reinterpret_cast<BYTE*>(info) + info->EventPropertyInfoArray[i].NameOffset);
-                        
-                        if (propName && wcscmp(propName, L"Duration") == 0)
-                        {
-                            PROPERTY_DATA_DESCRIPTOR desc;
-                            desc.PropertyName = reinterpret_cast<ULONGLONG>(propName);
-                            desc.ArrayIndex = ULONG_MAX;
-                            desc.Reserved = 0;
-                            
-                            // Duration can be ULONG or ULONGLONG depending on OS version
-                            ULONGLONG duration = 0;
-                            DWORD sz = 8; // Try 64-bit first
-                            
-                            if (TdhGetProperty(rec, 0, nullptr, 1, &desc, sz, reinterpret_cast<BYTE*>(&duration)) != ERROR_SUCCESS)
-                            {
-                                sz = 4; // Fallback to 32-bit
-                                ULONG duration32 = 0;
-                                TdhGetProperty(rec, 0, nullptr, 1, &desc, sz, reinterpret_cast<BYTE*>(&duration32));
-                                duration = duration32;
-                            }
-                            
-                            // Convert 100ns units to microseconds
-                            double latUs = duration / 10.0;
-                            g_lastDpcLatency.store(latUs, std::memory_order_relaxed);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+        DpcIsrCallback(rec);
         return;
     }
 
@@ -369,10 +385,14 @@ void EtwThread()
     EnableTraceEx2(hSession, &DxgKrnlGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
                    TRACE_LEVEL_INFORMATION, 0x1, 0, 0, nullptr);
 
-    // DPC/ISR Latency Provider (Microsoft-Windows-Kernel-Perf)
-    static const GUID DpcGuid = { 0x13976d09, 0x032d, 0x4fd7, { 0x81, 0x0a, 0x44, 0x40, 0x2c, 0x10, 0xe2, 0xc1 } };
-    EnableTraceEx2(hSession, &DpcGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
-                   TRACE_LEVEL_INFORMATION, 0x1, 0, 0, nullptr);
+	// Enable DPC & ISR Providers (Verbose for duration data)
+    status = EnableTraceEx2(hSession, &DPCGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+                            TRACE_LEVEL_VERBOSE, 0xFF, 0, 0, nullptr);
+    if (status != ERROR_SUCCESS) Log("ETW: DPC EnableTraceEx2 failed: " + std::to_string(status));
+
+    status = EnableTraceEx2(hSession, &ISRGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+                            TRACE_LEVEL_VERBOSE, 0xFF, 0, 0, nullptr);
+    if (status != ERROR_SUCCESS) Log("ETW: ISR EnableTraceEx2 failed: " + std::to_string(status));
 
     if (status != ERROR_SUCCESS)
     {

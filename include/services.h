@@ -41,8 +41,16 @@ public:
     bool ResumeService(const std::wstring& serviceName);
     bool SuspendAll();
     void ResumeAll();
-    bool IsAnythingSuspended() const;
+	bool IsAnythingSuspended() const;
     void Cleanup();
+
+    // Metrics
+    double GetBitsBandwidthMBps() const;
+
+private:
+    mutable std::mutex m_metricsMtx;
+    mutable double m_lastBitsBandwidth = 0.0;
+    mutable uint64_t m_lastBandwidthQuery = 0;
 };
 
 // Global helper functions for service management logic

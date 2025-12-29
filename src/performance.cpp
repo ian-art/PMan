@@ -243,38 +243,31 @@ void PerformanceGuardian::AnalyzeStutter(GameSession& session, DWORD pid) {
 PerformanceGuardian::SystemSnapshot PerformanceGuardian::CaptureSnapshot(DWORD pid) {
     SystemSnapshot snap = {};
     snap.timestamp = GetTickCount64();
-    
-    // ENHANCEMENT: Use 'pid' to verify process is still alive before wasting cycles
-    // This fixes the C4100 warning and ensures we don't profile dead processes.
-    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid);
-    if (!hProc) {
-        // Process has likely exited during the stutter event
-        return snap; 
-    }
-    
-    // Optional: We could read specific process memory here using GetProcessMemoryInfo(hProc, ...)
-    // For now, we just ensure the handle is valid.
+
+    // ENHANCEMENT: Verify process life
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc) return snap;
     CloseHandle(hProc);
-    
-    // 1. Check BITS bandwidth
+
+    // 1. Check BITS bandwidth (Using new class method)
     if (g_servicesSuspended.load()) {
-        snap.bitsBandwidthMB = 0;
+        snap.bitsBandwidthMB = 0.0;
     } else {
-        snap.bitsBandwidthMB = GetBitsBandwidth();
+        snap.bitsBandwidthMB = g_serviceManager.GetBitsBandwidthMBps();
     }
-    
-    // 2. DPC Latency (from ETW)
-    snap.dpcLatencyUs = g_lastDpcLatency.load();
-    
-    // 3. CPU Load
-    snap.cpuLoad = CalculateCpuLoad();
-    
-    // ENHANCEMENT: Actually populate the memoryPressure field
+
+    // 2. DPC Latency (From 95th percentile ring buffer)
+    snap.dpcLatencyUs = g_lastDpcLatency.load(std::memory_order_relaxed);
+
+    // 3. CPU Load (From Utils)
+    snap.cpuLoad = GetCpuLoad();
+
+    // 4. Memory Pressure
     MEMORYSTATUSEX ms = { sizeof(ms) };
     if (GlobalMemoryStatusEx(&ms)) {
         snap.memoryPressure = static_cast<double>(ms.dwMemoryLoad);
     }
-    
+
     return snap;
 }
 

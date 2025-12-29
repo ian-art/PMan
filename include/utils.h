@@ -30,6 +30,9 @@ std::string GetModeDescription(DWORD val);
 
 DWORD GetCurrentPrioritySeparation();
 
+// Get Global CPU Load Percentage
+double GetCpuLoad();
+
 // RAII Wrapper for Windows HANDLEs
 struct HandleDeleter {
     void operator()(HANDLE h) const {

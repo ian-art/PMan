@@ -177,3 +177,27 @@ DWORD GetParentProcessId(DWORD pid)
     CloseHandle(hSnap);
     return 0;
 }
+
+static ULONGLONG FileTimeToULL(const FILETIME& ft) {
+    return (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+}
+
+double GetCpuLoad() {
+    static FILETIME prevIdle = {0}, prevKernel = {0}, prevUser = {0};
+    FILETIME idle, kernel, user;
+
+    if (!GetSystemTimes(&idle, &kernel, &user)) return 0.0;
+
+    ULONGLONG idleDiff = FileTimeToULL(idle) - FileTimeToULL(prevIdle);
+    ULONGLONG kernelDiff = FileTimeToULL(kernel) - FileTimeToULL(prevKernel);
+    ULONGLONG userDiff = FileTimeToULL(user) - FileTimeToULL(prevUser);
+
+    prevIdle = idle;
+    prevKernel = kernel;
+    prevUser = user;
+
+    ULONGLONG total = kernelDiff + userDiff;
+    if (total == 0) return 0.0;
+
+    return 100.0 * (1.0 - (double)idleDiff / (double)total);
+}

@@ -365,10 +365,15 @@ void SuspendBackgroundServices()
     }
     
     // Suspend all managed services
-    if (g_serviceManager.SuspendAll())
+	if (g_serviceManager.SuspendAll())
     {
         g_servicesSuspended.store(true);
         Log("[SERVICE] Background services suspended successfully");
+
+        double bw = g_serviceManager.GetBitsBandwidthMBps();
+        if (bw > 0.1) {
+            Log("[SERVICE] BITS bandwidth was active before suspension: " + std::to_string(bw) + " MB/s");
+        }
     }
     else
     {
@@ -390,34 +395,51 @@ g_serviceManager.ResumeAll();
     g_servicesSuspended.store(false);
 }
 
-double GetBitsBandwidth()
+double WindowsServiceManager::GetBitsBandwidthMBps() const
 {
-    static PDH_HQUERY query = nullptr;
-    static PDH_HCOUNTER counter = nullptr;
-    static bool initialized = false;
-    static bool available = false;
+    std::lock_guard lock(m_metricsMtx);
 
-    if (!initialized)
-    {
-        if (PdhOpenQueryW(nullptr, 0, &query) == ERROR_SUCCESS)
-        {
-            // Monitor total bytes transferred by BITS
-            if (PdhAddCounterW(query, L"\\BITS\\Total Bytes Transferred/Sec", 0, &counter) == ERROR_SUCCESS)
-            {
-                available = true;
-            }
-        }
-        initialized = true;
+    // Cache for 1 second to avoid hammering PDH
+    uint64_t now = GetTickCount64();
+    if (now - m_lastBandwidthQuery < 1000) {
+        return m_lastBitsBandwidth;
+    }
+    m_lastBandwidthQuery = now;
+
+    PDH_HQUERY query = nullptr;
+    PDH_HCOUNTER counter = nullptr;
+
+    if (PdhOpenQueryW(nullptr, 0, &query) != ERROR_SUCCESS) return 0.0;
+
+    // BITS bytes transferred/sec counter
+    // Note: Using wildcard (*) to capture total utilization
+    const wchar_t* counterPath = L"\\BITS Net Utilization(*)\\Bytes Transferred/sec";
+
+    if (PdhAddCounterW(query, counterPath, 0, &counter) != ERROR_SUCCESS) {
+        PdhCloseQuery(query);
+        return 0.0;
     }
 
-    if (!available || !query) return 0.0;
+    if (PdhCollectQueryData(query) != ERROR_SUCCESS) {
+        PdhCloseQuery(query);
+        return 0.0;
+    }
 
-    PdhCollectQueryData(query);
-    
+    Sleep(100); // Short sample window
+
+    if (PdhCollectQueryData(query) != ERROR_SUCCESS) {
+        PdhCloseQuery(query);
+        return 0.0;
+    }
+
     PDH_FMT_COUNTERVALUE value;
-    if (PdhGetFormattedCounterValue(counter, PDH_FMT_DOUBLE, nullptr, &value) == ERROR_SUCCESS)
-    {
-        return value.doubleValue / (1024.0 * 1024.0); // Convert to MB/s
+    if (PdhGetFormattedCounterValue(counter, PDH_FMT_LARGE, nullptr, &value) == ERROR_SUCCESS) {
+        m_lastBitsBandwidth = (value.largeValue / 1024.0 / 1024.0); // Bytes -> MB
     }
-    return 0.0;
+    else {
+        m_lastBitsBandwidth = 0.0;
+    }
+
+    PdhCloseQuery(query);
+    return m_lastBitsBandwidth;
 }

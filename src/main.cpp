@@ -34,12 +34,15 @@
 #include <filesystem>
 #include <iostream>
 #include <objbase.h> // Fixed: Required for CoInitialize
+#include <pdh.h>
 
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "User32.lib")
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "Ole32.lib")
 #pragma comment(lib, "Tdh.lib")
+#pragma comment(lib, "Pdh.lib") // For BITS monitoring
+
 
 static void TerminateExistingInstances()
 {
