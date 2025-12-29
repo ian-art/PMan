@@ -271,33 +271,6 @@ PerformanceGuardian::SystemSnapshot PerformanceGuardian::CaptureSnapshot(DWORD p
     return snap;
 }
 
-double PerformanceGuardian::CalculateCpuLoad() {
-    FILETIME idle, kernel, user;
-    if (!GetSystemTimes(&idle, &kernel, &user)) return 0.0;
-    
-    ULARGE_INTEGER uIdle, uKernel, uUser, pIdle, pKernel, pUser;
-    uIdle.LowPart = idle.dwLowDateTime; uIdle.HighPart = idle.dwHighDateTime;
-    uKernel.LowPart = kernel.dwLowDateTime; uKernel.HighPart = kernel.dwHighDateTime;
-    uUser.LowPart = user.dwLowDateTime; uUser.HighPart = user.dwHighDateTime;
-    
-    pIdle.LowPart = m_prevIdle.dwLowDateTime; pIdle.HighPart = m_prevIdle.dwHighDateTime;
-    pKernel.LowPart = m_prevKernel.dwLowDateTime; pKernel.HighPart = m_prevKernel.dwHighDateTime;
-    pUser.LowPart = m_prevUser.dwLowDateTime; pUser.HighPart = m_prevUser.dwHighDateTime;
-    
-    ULONGLONG idleDelta = uIdle.QuadPart - pIdle.QuadPart;
-    ULONGLONG kernelDelta = uKernel.QuadPart - pKernel.QuadPart;
-    ULONGLONG userDelta = uUser.QuadPart - pUser.QuadPart;
-    
-    m_prevIdle = idle; m_prevKernel = kernel; m_prevUser = user;
-    
-    if (pIdle.QuadPart == 0) return 0.0; // First run
-    
-    ULONGLONG total = kernelDelta + userDelta;
-    if (total == 0) return 0.0;
-    
-    return 100.0 * (1.0 - ((double)idleDelta / total));
-}
-
 void PerformanceGuardian::LogStutterData(const std::wstring& exeName, const SystemSnapshot& snap) {
     std::string msg = "[DIAGNOSTIC] Snapshot for " + WideToUtf8(exeName.c_str()) + " | ";
     msg += "BITS: " + std::to_string(snap.bitsBandwidthMB) + " MB/s | ";

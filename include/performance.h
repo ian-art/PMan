@@ -69,9 +69,6 @@ private:
     std::unordered_map<std::wstring, GameProfile> m_profiles;
     std::filesystem::path m_dbPath;
 
-    // CPU Load Tracking State
-    FILETIME m_prevIdle = {0}, m_prevKernel = {0}, m_prevUser = {0};
-
     // Core Logic
     void AnalyzeStutter(GameSession& session, DWORD pid);
     void UpdateLearning(GameSession& session);
@@ -86,7 +83,6 @@ private:
     // Diagnostic Helpers
     SystemSnapshot CaptureSnapshot(DWORD pid);
     void LogStutterData(const std::wstring& exeName, const SystemSnapshot& snap);
-    double CalculateCpuLoad();
 
     // Reporting Helpers
     void GenerateSessionReport(const GameSession& session);
