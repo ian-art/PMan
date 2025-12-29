@@ -76,8 +76,11 @@ void CheckAndReleaseSessionLock()
             if (!(g_lockedProcessIdentity == lockedIdentity)) return;
             
             DWORD lockedPid = lockedIdentity.pid;
-            Log("Session lock RELEASED - process " + std::to_string(lockedPid) + " no longer exists");
+			Log("Session lock RELEASED - process " + std::to_string(lockedPid) + " no longer exists");
             
+            // Notify Performance Guardian
+            g_perfGuardian.OnGameStop(lockedPid);
+
             // Use memory barriers for atomic consistency
             g_lockedGamePid.store(0, std::memory_order_release);
             g_sessionLocked.store(false, std::memory_order_release);
@@ -373,8 +376,12 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         
         g_lastPid.store(pid);
         
-        if (mode == 1 && g_sessionLocked.load())
+		if (mode == 1 && g_sessionLocked.load())
         {
+            // Transition profiling to new PID (Stop old launcher, start new game)
+            g_perfGuardian.OnGameStop(g_lockedGamePid.load());
+            g_perfGuardian.OnGameStart(pid, exe);
+
             g_lockedGamePid.store(pid);
             
             // Update process identity for the lock
@@ -523,11 +530,14 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         }
     
         // Session lock management (only for mode changes)
-        if (mode == 1 && modeChanged)
+		if (mode == 1 && modeChanged)
         {
             g_sessionLocked.store(true);
             g_lockedGamePid.store(pid);
             g_lockStartTime.store(std::chrono::steady_clock::now().time_since_epoch().count());
+
+            // Initialize Performance Guardian Session
+            g_perfGuardian.OnGameStart(pid, exe);
     
             // Verify if core pinning is allowed by profile
             if (!g_perfGuardian.IsOptimizationAllowed(exe, "pin")) {
@@ -554,10 +564,14 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
                 Log("[SERVICE] Service suspension disabled by config");
             }
         }
-        else
+		else
         {
             if (g_sessionLocked.load())
             {
+                // Notify Performance Guardian and generate report
+                DWORD stoppingPid = g_lockedGamePid.load();
+                if (stoppingPid != 0) g_perfGuardian.OnGameStop(stoppingPid);
+
                 g_sessionLocked.store(false);
                 g_lockedGamePid.store(0);
                 g_lockStartTime.store(0);
