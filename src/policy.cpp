@@ -272,9 +272,33 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     ProcessIdentity verifyIdentity;
     if (!GetProcessIdentity(pid, verifyIdentity)) return;
     
-    // Fix: Use pathBuf.data() because 'path' was replaced by a vector
+	// Fix: Use pathBuf.data() because 'path' was replaced by a vector
     std::wstring exe = ExeFromPath(pathBuf.data());
 	if (exe.empty()) return;
+
+    // ---------------------------------------------------------
+    // IGNORE: Windows Shell Experience Hosts
+    // These system processes often match generic "Browser" window patterns 
+    // (e.g., WebView/AppFrame) but should NEVER trigger a mode switch 
+    // or disable Explorer boosts. They are part of the "Desktop" experience.
+    // ---------------------------------------------------------
+    static const std::unordered_set<std::wstring> SHELL_PROCESSES = {
+        L"searchhost.exe",
+        L"startmenuexperiencehost.exe",
+        L"shellexperiencehost.exe",
+        L"applicationframehost.exe",
+        L"systemsettings.exe",
+        L"lockapp.exe",
+        L"textinputhost.exe",
+        L"ctfmon.exe",
+        L"smartscreen.exe",
+        L"taskmgr.exe"
+    };
+    
+    if (SHELL_PROCESSES.count(exe)) {
+        return;
+    }
+    // ---------------------------------------------------------
 
     // TIER 3 CHECK: Game Launchers (Moved to top to prevent early exit)
     bool isLauncher = GAME_LAUNCHERS.count(exe);
