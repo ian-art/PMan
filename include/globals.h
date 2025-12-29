@@ -41,8 +41,8 @@ extern ProcessIdentity g_lockedProcessIdentity;
 
 // Process Hierarchy
 extern std::shared_mutex g_hierarchyMtx;
-extern std::unordered_map<ProcessIdentity, ProcessNode, ProcessIdentityHash> g_processHierarchy;
-extern std::unordered_map<DWORD, ProcessIdentity> g_inheritedGamePids;
+extern std::unordered_map<ProcessIdentity, ProcessNode, ProcessIdentityHash> g_processHierarchy GUARDED_BY(g_hierarchyMtx);
+extern std::unordered_map<DWORD, ProcessIdentity> g_inheritedGamePids GUARDED_BY(g_hierarchyMtx);
 
 // Config Flags
 extern std::atomic<bool> g_ignoreNonInteractive;
@@ -109,16 +109,16 @@ extern DWORD_PTR g_physicalCoreMask;
 // Working Set Management
 extern std::atomic<bool> g_workingSetManagementAvailable;
 extern std::mutex g_workingSetMtx;
-extern std::unordered_map<DWORD, SIZE_T> g_originalWorkingSets;
+extern std::unordered_map<DWORD, SIZE_T> g_originalWorkingSets GUARDED_BY(g_workingSetMtx);
 extern std::mutex g_trimTimeMtx;
-extern std::unordered_map<DWORD, std::chrono::steady_clock::time_point> g_lastTrimTimes;
+extern std::unordered_map<DWORD, std::chrono::steady_clock::time_point> g_lastTrimTimes GUARDED_BY(g_trimTimeMtx);
 
 // DPC/ISR Latency Management
 extern std::atomic<bool> g_dpcLatencyAvailable;
 extern std::atomic<bool> g_timerCoalescingAvailable;
 extern std::atomic<bool> g_highResTimersActive;
 extern std::mutex g_dpcStateMtx;
-extern std::unordered_map<DWORD, bool> g_processesWithBoostDisabled;
+extern std::unordered_map<DWORD, bool> g_processesWithBoostDisabled GUARDED_BY(g_dpcStateMtx);
 
 // Policy & Shutdown
 extern std::atomic<std::chrono::steady_clock::time_point::rep> g_lastPolicyChange;

@@ -178,10 +178,7 @@ static void DetectAMDChipletTopology()
     }
     
     g_cpuInfo.ccdCount = static_cast<DWORD>(l3CacheGroups.size());
-    
-	// TODO(#104): Refactor dependency on g_physicalCoreCount which is set in DetectOSCapabilities.
-    // Currently relying on order of operations in DetectOSCapabilities.
-    
+
     // For 3D V-Cache CPUs: CCD0 has the cache, CCD1+ don't
     if (g_cpuInfo.hasAmd3DVCache && g_cpuInfo.ccdCount >= 2)
     {
@@ -207,21 +204,22 @@ static void DetectAMDChipletTopology()
                 {
                     ULONG numSets = cpuSetBufferSize / sizeof(SYSTEM_CPU_SET_INFORMATION);
                     
-					// TODO(#105): Address initialization order. g_physicalCoreCount must be set before this.
-                    
-					// Fix race condition: g_physicalCoreCount should be initialized before this function is called
-					// But add defensive check and log if still zero
+					// Validation: g_physicalCoreCount is set in DetectOSCapabilities before DetectCPUVendor is called.
+                    // We verify it here to prevent division by zero or invalid topology logic.
 					static bool topologyLogged = false;
 					DWORD coresPerCcd = 0;
-					if (g_physicalCoreCount == 0 || g_cpuInfo.ccdCount == 0) {
+					
+                    if (g_physicalCoreCount == 0 || g_cpuInfo.ccdCount == 0) {
                         if (!topologyLogged) {
-                            Log("[AMD] WARNING: Invalid topology - Physical cores: " + 
+                            Log("[AMD] WARNING: Topology detection incomplete - Physical cores: " + 
                                 std::to_string(g_physicalCoreCount) + 
-                                ", CCDs: " + std::to_string(g_cpuInfo.ccdCount));
+                                ", CCDs: " + std::to_string(g_cpuInfo.ccdCount) + 
+                                ". Skipping layout optimization.");
                             topologyLogged = true;
                         }
                         return;
                     }
+
 					// Fix: Use the accurate count we detected earlier
                     if (detectedCoresPerCcd > 0)
                     {
