@@ -123,25 +123,26 @@ void ExplorerBooster::OnGameStart(DWORD gamePid) {
 }
 
 void ExplorerBooster::OnGameStop() {
-    // CRITICAL FIX: Forcefully reset the flag and ensure state changes
+    // CRITICAL FIX: Forcefully reset the flag
     bool wasActive = m_gameOrBrowserActive.exchange(false);
     
-    // Force immediate state transition back to Default
-    // Don't wait for next tick - do it now
+    // Force immediate transition to IDLE_BOOSTED (Post-Game Recovery)
+    // We don't wait for the idle timer here. We assume if a game just closed,
+    // the user wants the desktop to be responsive IMMEDIATELY.
     std::lock_guard lock(m_mtx);
     if (m_currentState == ExplorerBoostState::LockedOut) {
-        m_currentState = ExplorerBoostState::Default;
-        // Revert any boosts immediately
+        m_currentState = ExplorerBoostState::IdleBoosted;
+        
+        // Apply boosts immediately to recover from paging lag
         for (auto& [pid, instance] : m_instances) {
-            RevertBoosts(pid);
+            ApplyBoosts(pid, ExplorerBoostState::IdleBoosted);
         }
         
-        // Log state transitions (not function calls)
-        if (m_config.debugLogging) {
-            LogState("Game/Browser stopped - reverting to Default", 0);
-        }
-    } else if (wasActive && m_config.debugLogging) {
-        // Only log if we changed state
+        // Log state transitions
+        // We force this log because it's a major state change (User Experience)
+        LogState("Game stopped - Instant Post-Game Boost ACTIVATED", 0);
+    } 
+    else if (wasActive && m_config.debugLogging) {
         LogState("Lockout released", 0);
     }
 }
