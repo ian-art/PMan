@@ -66,7 +66,7 @@ void CheckAndReleaseSessionLock()
         lockedIdentity = g_lockedProcessIdentity;
     }
 
-	// Check if process still exists (expensive operation, outside lock)
+    // Check if process still exists (expensive operation, outside lock)
     if (!IsProcessIdentityValid(lockedIdentity))
     {
         {
@@ -76,10 +76,17 @@ void CheckAndReleaseSessionLock()
             if (!(g_lockedProcessIdentity == lockedIdentity)) return;
             
             DWORD lockedPid = lockedIdentity.pid;
-			Log("Session lock RELEASED - process " + std::to_string(lockedPid) + " no longer exists");
+            Log("Session lock RELEASED - process " + std::to_string(lockedPid) + " no longer exists");
             
             // Notify Performance Guardian
             g_perfGuardian.OnGameStop(lockedPid);
+            
+            // ---------------------------------------------------------
+            // CRITICAL FIX: Trigger Post-Game Boost immediately
+            // Since the game is gone, we must restore the Desktop UI now.
+            // ---------------------------------------------------------
+            g_explorerBooster.OnGameStop(); 
+            // ---------------------------------------------------------
 
             // Use memory barriers for atomic consistency
             g_lockedGamePid.store(0, std::memory_order_release);
