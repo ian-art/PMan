@@ -278,6 +278,7 @@ void ExplorerBooster::ApplyBoosts(DWORD pid, ExplorerBoostState state) {
     if (it == m_instances.end() || !it->second.handle) return;
     
     HANDLE hProc = it->second.handle.get();
+    bool logSuccess = m_config.debugLogging; // Only detailed logs if debug is on
 
     // 1. Disable Power Throttling (EcoQoS)
     if (m_config.disablePowerThrottling) {
@@ -287,8 +288,13 @@ void ExplorerBooster::ApplyBoosts(DWORD pid, ExplorerBoostState state) {
         PowerThrottling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
         PowerThrottling.StateMask = 0; // 0 = Disable Throttling (Boost)
         
-        SetProcessInformation(hProc, ProcessPowerThrottling, 
-                              &PowerThrottling, sizeof(PowerThrottling));
+        if (SetProcessInformation(hProc, ProcessPowerThrottling, 
+                              &PowerThrottling, sizeof(PowerThrottling))) {
+            if (logSuccess) Log("[EXPLORER] EcoQoS Disabled (Boosted) for PID " + std::to_string(pid));
+        } else {
+             Log("[EXPLORER] Failed to disable EcoQoS for PID " + std::to_string(pid) + 
+                 " Error: " + std::to_string(GetLastError()));
+        }
     }
 
     // 2. I/O Priority
@@ -302,6 +308,35 @@ void ExplorerBooster::ApplyBoosts(DWORD pid, ExplorerBoostState state) {
     }
     
     it->second.state = state;
+}
+
+void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
+    if (!m_config.preventShellPaging) return;
+    
+    auto it = m_instances.find(pid);
+    if (it == m_instances.end()) return;
+    HANDLE hProcess = it->second.handle.get();
+
+    PROCESS_MEMORY_COUNTERS pmc;
+    if (!GetProcessMemoryInfo(hProcess, &pmc, sizeof(pmc))) return;
+    
+    SIZE_T currentWS = pmc.WorkingSetSize;
+    // Don't let it shrink below 64MB, or current size if larger
+    SIZE_T minWS = (currentWS > 64 * 1024 * 1024) ? currentWS : 64 * 1024 * 1024;
+    // Allow some growth
+    SIZE_T maxWS = minWS + 128 * 1024 * 1024;
+    
+    // QUOTA_LIMITS_HARDWS_MIN_ENABLE (0x1) | QUOTA_LIMITS_HARDWS_MAX_DISABLE (0x8)
+    DWORD flags = 0x00000001 | 0x00000008; 
+    
+    if (SetProcessWorkingSetSizeEx(hProcess, minWS, maxWS, flags)) {
+        // SUCCESS: Do nothing. (Silence the spam)
+        // We verified this works via previous debug logs.
+    } else {
+        // FAILURE: Log this, as it indicates a problem (e.g. permission loss)
+        Log("[EXPLORER] Memory Guard FAILED for PID " + std::to_string(pid) + 
+            " Error: " + std::to_string(GetLastError()));
+    }
 }
 
 void ExplorerBooster::RevertBoosts(DWORD pid) {
@@ -329,31 +364,6 @@ void ExplorerBooster::RevertBoosts(DWORD pid) {
     ReleaseMemoryGuard(pid);
 
     it->second.state = ExplorerBoostState::Default;
-}
-
-void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
-    if (!m_config.preventShellPaging) return;
-    
-    // We need a fresh handle with PROCESS_SET_QUOTA if the stored one doesn't have it, 
-    // but we requested it in ScanShellProcesses.
-    auto it = m_instances.find(pid);
-    if (it == m_instances.end()) return;
-    HANDLE hProcess = it->second.handle.get();
-
-    PROCESS_MEMORY_COUNTERS pmc;
-    if (!GetProcessMemoryInfo(hProcess, &pmc, sizeof(pmc))) return;
-    
-    SIZE_T currentWS = pmc.WorkingSetSize;
-    // Don't let it shrink below 64MB, or current size if larger
-    SIZE_T minWS = (currentWS > 64 * 1024 * 1024) ? currentWS : 64 * 1024 * 1024;
-    // Allow some growth
-    SIZE_T maxWS = minWS + 128 * 1024 * 1024;
-    
-    // QUOTA_LIMITS_HARDWS_MIN_ENABLE (0x1) | QUOTA_LIMITS_HARDWS_MAX_DISABLE (0x8)
-    DWORD flags = 0x00000001 | 0x00000008; 
-    
-    // Note: SetProcessWorkingSetSizeEx might fail if we don't have enough privileges or RAM
-    SetProcessWorkingSetSizeEx(hProcess, minWS, maxWS, flags);
 }
 
 void ExplorerBooster::ReleaseMemoryGuard(DWORD pid) {
