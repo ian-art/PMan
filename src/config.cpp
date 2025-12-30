@@ -17,6 +17,31 @@ static std::filesystem::path GetConfigPath()
 // Forward declaration to fix compiler error C3861
 static bool IsValidExecutableName(const std::wstring& name);
 
+static constexpr const char* DEFAULT_IGNORE_LIST = R"(; Priority Manager - Shell Process Exclusion List (ignore_processes.txt)
+; These system processes are part of the Desktop Experience.
+; They should NEVER be treated as Browsers or Games.
+; Add one process per line (lowercase).
+
+searchhost.exe
+startmenuexperiencehost.exe
+shellexperiencehost.exe
+applicationframehost.exe
+systemsettings.exe
+lockapp.exe
+textinputhost.exe
+ctfmon.exe
+smartscreen.exe
+taskmgr.exe
+cmd.exe
+powershell.exe
+pwsh.exe
+conhost.exe
+explorer.exe
+werfault.exe
+dllhost.exe
+sihost.exe
+)";
+
 static void LoadCustomLaunchers(std::unordered_set<std::wstring>& outSet)
 {
     std::filesystem::path path = GetLogPath() / CUSTOM_LAUNCHERS_FILENAME;
@@ -51,6 +76,42 @@ static void LoadCustomLaunchers(std::unordered_set<std::wstring>& outSet)
 
         asciiLower(exe);
         // Reuse existing validation
+        if (IsValidExecutableName(exe))
+{
+            outSet.insert(exe);
+        }
+    }
+}
+
+static void LoadIgnoredProcesses(std::unordered_set<std::wstring>& outSet)
+{
+    std::filesystem::path path = GetLogPath() / IGNORED_PROCESSES_FILENAME;
+
+    // Create default file if missing using the DEFAULT_IGNORE_LIST
+    if (!std::filesystem::exists(path))
+    {
+        std::ofstream f(path);
+        if (f)
+        {
+            f << DEFAULT_IGNORE_LIST;
+            f.close();
+        }
+    }
+
+    std::wifstream f(path);
+    if (!f) return;
+
+    std::wstring line;
+    while (std::getline(f, line))
+    {
+        size_t first = line.find_first_not_of(L" \t\r\n");
+        if (first == std::wstring::npos) continue;
+        size_t last = line.find_last_not_of(L" \t\r\n");
+        std::wstring exe = line.substr(first, last - first + 1);
+
+        if (exe.empty() || exe[0] == L';' || exe[0] == L'#') continue;
+
+        asciiLower(exe);
         if (IsValidExecutableName(exe))
         {
             outSet.insert(exe);
@@ -303,11 +364,12 @@ void LoadConfig()
 	try
     {
         std::filesystem::path configPath = GetConfigPath();
-        std::unordered_set<std::wstring> games, browsers, gameWindows, browserWindows, customLaunchers;
+        std::unordered_set<std::wstring> games, browsers, gameWindows, browserWindows, customLaunchers, ignoredProcesses;
         bool ignoreNonInteractive = true;
         bool restoreOnExit = true;
 
         // Load custom launchers
+		LoadIgnoredProcesses(ignoredProcesses);
         LoadCustomLaunchers(customLaunchers);
         bool lockPolicy = false;
         
@@ -556,9 +618,10 @@ void LoadConfig()
             std::unique_lock lg(g_setMtx);
             g_games = std::move(games);
             g_browsers = std::move(browsers);
-            g_gameWindows = std::move(gameWindows);
+			g_gameWindows = std::move(gameWindows);
             g_browserWindows = std::move(browserWindows);
             g_customLaunchers = std::move(customLaunchers);
+            g_ignoredProcesses = std::move(ignoredProcesses);
         }
         
 		g_ignoreNonInteractive.store(ignoreNonInteractive);
@@ -583,6 +646,7 @@ void LoadConfig()
         
 		Log("Config loaded: " + std::to_string(g_games.size()) + " games, " +
             std::to_string(g_browsers.size()) + " browsers, " +
+            std::to_string(g_ignoredProcesses.size()) + " ignored, " +
             std::to_string(g_customLaunchers.size()) + " custom launchers, " +
             std::to_string(g_gameWindows.size()) + " game windows, " +
             std::to_string(g_browserWindows.size()) + " browser windows | " +

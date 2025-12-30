@@ -8,6 +8,7 @@
 // Config
 static constexpr wchar_t CONFIG_FILENAME[] = L"config.ini";
 static constexpr wchar_t CUSTOM_LAUNCHERS_FILENAME[] = L"custom_launchers.txt";
+static constexpr wchar_t IGNORED_PROCESSES_FILENAME[] = L"ignore_processes.txt";
 static constexpr int CONFIG_VERSION = 2; // Increment when config structure changes
 
 // Registry Values

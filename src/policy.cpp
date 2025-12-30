@@ -283,6 +283,12 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     std::wstring exe = ExeFromPath(pathBuf.data());
 	if (exe.empty()) return;
 
+    // FIX: Normalize to lowercase for consistent lookups (Ignore List, Games, Browsers)
+    asciiLower(exe);
+
+    int mode = 0; // FIX: Declare mode early so it can be used by goto logic
+    bool isLauncher = false; // FIX: Declare variable early to avoid C2362 error with goto
+	
     // ---------------------------------------------------------
     // IGNORE: Windows Shell Experience Hosts
     // These system processes often match generic "Browser" window patterns 
@@ -302,13 +308,19 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         L"taskmgr.exe"
     };
     
-    if (SHELL_PROCESSES.count(exe)) {
-        return;
+	// Check global ignore list
+    // FIX: If ignored, force Desktop Mode (0) and skip detection, 
+    // but proceed to Apply Policy so we can release locks.
+    {
+        std::shared_lock lg(g_setMtx);
+        if (g_ignoredProcesses.count(exe)) {
+            mode = 0;
+            goto apply_policy;
+        }
     }
-    // ---------------------------------------------------------
 
-    // TIER 3 CHECK: Game Launchers (Moved to top to prevent early exit)
-    bool isLauncher = GAME_LAUNCHERS.count(exe);
+	// TIER 3 CHECK: Game Launchers (Moved to top to prevent early exit)
+    isLauncher = GAME_LAUNCHERS.count(exe);
     if (!isLauncher)
     {
         std::shared_lock lg(g_setMtx);
@@ -345,8 +357,6 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         return; // Skip standard game/browser logic
     }
 
-    int mode = 0;
-    
     if (hwnd)
     {
         mode = DetectWindowType(hwnd);
@@ -374,7 +384,15 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
         }
     }
     
-    if (mode == 0) return;
+apply_policy: // FIX: Label for the goto jump
+    // FIX: Allow transition to Desktop (Mode 0) to release locks.
+    // We only return if we are ALREADY in desktop mode.
+    if (mode == 0)
+    {
+        // If we were previously in Game/Browser mode (lastMode != 0), 
+        // we MUST proceed to call OnGameStop().
+        if (!hwnd || g_lastMode.load() == 0) return;
+    }
     
     if (ShouldIgnoreDueToSessionLock(mode, pid))
     {

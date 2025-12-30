@@ -72,6 +72,7 @@ extern std::unordered_set<std::wstring> g_browsers GUARDED_BY(g_setMtx);
 extern std::unordered_set<std::wstring> g_gameWindows GUARDED_BY(g_setMtx);
 extern std::unordered_set<std::wstring> g_browserWindows GUARDED_BY(g_setMtx);
 extern std::unordered_set<std::wstring> g_customLaunchers GUARDED_BY(g_setMtx);
+extern std::unordered_set<std::wstring> g_ignoredProcesses GUARDED_BY(g_setMtx);
 
 // Event Handles & Synchronization
 extern HANDLE  g_hIocp;

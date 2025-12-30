@@ -542,8 +542,9 @@ void IocpConfigWatcher()
                     while (true)
                     {
                         std::wstring fileName(info->FileName, info->FileNameLength / sizeof(wchar_t));
-                        if (ContainsIgnoreCase(fileName, CONFIG_FILENAME) || 
-                            ContainsIgnoreCase(fileName, CUSTOM_LAUNCHERS_FILENAME))
+						if (ContainsIgnoreCase(fileName, CONFIG_FILENAME) || 
+                            ContainsIgnoreCase(fileName, CUSTOM_LAUNCHERS_FILENAME) ||
+                            ContainsIgnoreCase(fileName, IGNORED_PROCESSES_FILENAME))
                         {
                             configChanged = true;
                             break;
