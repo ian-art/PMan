@@ -63,10 +63,11 @@ private:
     // Configuration
     ExplorerConfig m_config;
     
-    // State tracking
+// State tracking
     std::atomic<uint64_t> m_lastUserActivityMs{0};
-    std::atomic<uint64_t> m_lastScanMs{0};
+	std::atomic<uint64_t> m_lastScanMs{0};
     std::atomic<bool> m_gameOrBrowserActive{false};
+    std::atomic<bool> m_isGameSession{false}; // Track if the active session is a Game (true) or Browser (false)
     uint32_t m_currentPollIntervalMs{2000};  // Adaptive polling
     
     // Worker methods

@@ -110,6 +110,7 @@ void ExplorerBooster::OnTick() {
 
 void ExplorerBooster::OnGameStart(DWORD gamePid) {
     m_gameOrBrowserActive = true;
+    m_isGameSession = true; // Mark as Game Session (High Priority Resume)
     
     // Immediate pre-emptive revert
     std::lock_guard lock(m_mtx);
@@ -128,21 +129,32 @@ void ExplorerBooster::OnGameStop() {
     
     std::lock_guard lock(m_mtx);
     
-    // 2. LOGIC FIX: If we were active (Game/Browser), we ALWAYS boost recovery.
-    // We do NOT check 'm_currentState == LockedOut' anymore, because OnTick()
-    // might have overwritten the state to 'Default' during the game session.
+    // 2. LOGIC FIX: Check Session Type for Resume Strategy
     if (wasActive || m_currentState == ExplorerBoostState::LockedOut) {
         
-        m_currentState = ExplorerBoostState::IdleBoosted;
-        
-        // Apply boosts immediately to recover from paging lag
-        for (auto& [pid, instance] : m_instances) {
-            ApplyBoosts(pid, ExplorerBoostState::IdleBoosted);
+        if (m_isGameSession) {
+            // CASE A: GAMING SESSION ENDED
+            // Action: Boost IMMEDIATELY. Games heavily page out Explorer; we need to snap it back.
+            m_currentState = ExplorerBoostState::IdleBoosted;
+            
+            for (auto& [pid, instance] : m_instances) {
+                ApplyBoosts(pid, ExplorerBoostState::IdleBoosted);
+            }
+            Log("[EXPLORER] Game stopped - Instant Post-Game Boost ACTIVATED");
+        } 
+        else {
+            // CASE B: BROWSER SESSION ENDED
+            // Action: Reset to DEFAULT. Do NOT boost immediately.
+            // Let OnTick() wait for the natural 'idle_threshold' before boosting.
+            m_currentState = ExplorerBoostState::Default;
+            
+            // Ensure no boosts are stuck active
+            for (auto& [pid, instance] : m_instances) {
+                RevertBoosts(pid);
+            }
+            Log("[EXPLORER] Browser stopped - Returning to IDLE WAIT state (Standard Resume)");
         }
-        
-        // Force log for visibility
-        Log("[EXPLORER] Game stopped - Instant Post-Game Boost ACTIVATED");
-    } 
+    }
     else if (m_config.debugLogging) {
         // This branch should rarely hit now, but kept for safety
         LogState("No active session detected during stop", 0);
@@ -152,7 +164,17 @@ void ExplorerBooster::OnGameStop() {
 void ExplorerBooster::OnBrowserStart(DWORD browserPid) {
     // Treat browser similar to game (no boosts) to prevent resource contention
     m_gameOrBrowserActive = true; 
-    OnGameStart(browserPid);
+    m_isGameSession = false; // Mark as Browser Session (Standard Resume)
+    
+    // Immediate pre-emptive revert
+    std::lock_guard lock(m_mtx);
+    if (m_currentState != ExplorerBoostState::LockedOut) {
+        LogState("Browser Start detected - Instant Revert", browserPid);
+        m_currentState = ExplorerBoostState::LockedOut;
+        for (auto& [pid, instance] : m_instances) {
+            RevertBoosts(pid);
+        }
+    }
 }
 
 void ExplorerBooster::OnUserActivity() {
