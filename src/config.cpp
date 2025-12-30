@@ -657,6 +657,12 @@ void LoadConfig()
             "(" + std::to_string(g_idleTimeoutMs.load() / 1000) + "s) | " +
             "suspend_updates=" + (g_suspendUpdatesDuringGames.load() ? "true" : "false") + " | " +
             "smart_explorer=" + (explorerConfig.enabled ? "true" : "false"));
+			
+        // Debug log ignored processes
+        Log("[CONFIG] Ignored processes list (" + std::to_string(g_ignoredProcesses.size()) + "):");
+        for (const auto& proc : g_ignoredProcesses) {
+            Log("  - " + WideToUtf8(proc.c_str()));
+        }
     }
     catch (const std::exception& e)
     { 
