@@ -293,7 +293,15 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     {
         std::shared_lock lg(g_setMtx);
         if (g_ignoredProcesses.count(exe)) {
+            Log("Ignored process detected: " + WideToUtf8(exe.c_str()) + " - forcing desktop mode");
             mode = 0;
+            
+            // CRITICAL: Set a flag to prevent window detection from overriding
+            // This ensures cmd.exe/explorer.exe windows don't get misclassified
+            isLauncher = false; // Ensure it's not treated as a launcher
+            
+            // Jump directly to policy application
+            // This will properly release session locks and boost Explorer
             goto apply_policy;
         }
     }
@@ -351,13 +359,21 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     // ---------------------------------------------------------
     // STEP 4: WINDOW DETECTION (Only if mode not yet determined)
     // ---------------------------------------------------------
+    // Skip window detection for processes we know should be ignored
+    // This prevents cmd.exe/explorer.exe windows from being misclassified
     if (mode == 0 && hwnd)
     {
-        mode = DetectWindowType(hwnd);
-        if (mode != 0)
+        // Double-check: if exe is in ignore list, skip window detection entirely
         {
-            Log("Window detection: " + WideToUtf8(exe.c_str()) + " detected via window " + 
-                (mode == 1 ? "(GAME)" : "(BROWSER)"));
+            std::shared_lock lg(g_setMtx);
+            if (!g_ignoredProcesses.count(exe)) {
+                mode = DetectWindowType(hwnd);
+                if (mode != 0)
+                {
+                    Log("Window detection: " + WideToUtf8(exe.c_str()) + " detected via window " + 
+                        (mode == 1 ? "(GAME)" : "(BROWSER)"));
+                }
+            }
         }
     }
     

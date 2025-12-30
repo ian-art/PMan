@@ -133,8 +133,7 @@ void ExplorerBooster::OnGameStop() {
     if (wasActive || m_currentState == ExplorerBoostState::LockedOut) {
         
         if (m_isGameSession) {
-            // CASE A: GAMING SESSION ENDED
-            // Action: Boost IMMEDIATELY. Games heavily page out Explorer; we need to snap it back.
+            // CASE A: GAMING SESSION ENDED - Boost IMMEDIATELY
             m_currentState = ExplorerBoostState::IdleBoosted;
             
             for (auto& [pid, instance] : m_instances) {
@@ -144,19 +143,17 @@ void ExplorerBooster::OnGameStop() {
         } 
         else {
             // CASE B: BROWSER SESSION ENDED
-            // Action: Reset to DEFAULT. Do NOT boost immediately.
-            // Let OnTick() wait for the natural 'idle_threshold' before boosting.
-            m_currentState = ExplorerBoostState::Default;
+            // FIX: Also boost immediately when browser stops
+            // User minimized browser to use desktop, so boost desktop!
+            m_currentState = ExplorerBoostState::IdleBoosted;
             
-            // Ensure no boosts are stuck active
             for (auto& [pid, instance] : m_instances) {
-                RevertBoosts(pid);
+                ApplyBoosts(pid, ExplorerBoostState::IdleBoosted);
             }
-            Log("[EXPLORER] Browser stopped - Returning to IDLE WAIT state (Standard Resume)");
+            Log("[EXPLORER] Browser stopped - Instant Desktop Boost");
         }
     }
     else if (m_config.debugLogging) {
-        // This branch should rarely hit now, but kept for safety
         LogState("No active session detected during stop", 0);
     }
 }
