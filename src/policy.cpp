@@ -283,7 +283,8 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     // FIX: Normalize to lowercase for consistent lookups (Ignore List, Games, Browsers)
     asciiLower(exe);
 
-    int mode = 0; // FIX: Declare mode early so it can be used by goto logic
+	int mode = 0; // FIX: Declare mode early so it can be used by goto logic
+    bool forceOverride = false;
     bool isLauncher = false; // FIX: Declare variable early to avoid C2362 error with goto
 
     // ---------------------------------------------------------
@@ -296,8 +297,9 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
                 
                 // SPECIAL CASE: Force Game Mode for Old/DX9 Games
                 // These games often have "Launcher" in their window title or lack standard game windows
-                if (g_oldGames.count(exe)) {
+					if (g_oldGames.count(exe)) {
                     mode = 1; 
+                    forceOverride = true;
                     Log("Force-enabling GAME mode for Legacy/DX9 title: " + WideToUtf8(exe.c_str()));
                     // Jump to policy application to skip generic heuristics
                     goto apply_policy;
@@ -416,8 +418,8 @@ apply_policy:  // FIX: Label for the goto jump
         g_explorerBooster.OnBrowserStart(pid);
     }
     
-    // Check cooldown
-    if (!IsPolicyChangeAllowed(mode)) return;
+	// Check cooldown
+    if (!forceOverride && !IsPolicyChangeAllowed(mode)) return;
     
     // 1. Exact same process and mode - skip entirely
     if (mode == lastMode && pid == lastPid)
