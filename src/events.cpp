@@ -16,17 +16,14 @@ static constexpr int MAX_IOCP_QUEUE_SIZE = 1000;
 
 bool PostIocp(JobType t, DWORD pid, HWND hwnd)
 {
-// Check queue limit before allocation
-    // Fix: Use correct memory ordering for producer-consumer synchronization
-    int currentSize = g_iocpQueueSize.load(std::memory_order_acquire);
-    if (currentSize >= MAX_IOCP_QUEUE_SIZE) {
-        static std::atomic<int> overflowLogCount{0};
-        if (overflowLogCount.fetch_add(1, std::memory_order_relaxed) % 100 == 0) {
-            Log("[IOCP] WARNING: Queue overflow (" + std::to_string(currentSize) + 
-                " items), dropping jobs. System may be overloaded.");
-        }
-        return false;
+	// Check queue limit before allocation
+	// FIX: Backpressure mechanism - Wait for queue to drain instead of dropping events
+    while (g_iocpQueueSize.load(std::memory_order_acquire) >= MAX_IOCP_QUEUE_SIZE && g_running) {
+        Sleep(1);
     }
+    
+    // Double check running state after wait
+    if (!g_running) return false;
     
     if (!g_hIocp || g_hIocp == INVALID_HANDLE_VALUE) return false;
     
