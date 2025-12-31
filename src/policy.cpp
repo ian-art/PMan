@@ -235,8 +235,8 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
 
     CheckAndReleaseSessionLock();
     
-	HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!h)
+	HANDLE hRaw = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hRaw)
     {
 #ifdef _DEBUG
         DWORD err = GetLastError();
@@ -245,21 +245,21 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
 #endif
         return;
     }
+    // FIX: Wrap handle immediately to prevent leak if vector allocation throws
+    UniqueHandle hGuard(hRaw);
     
 	// Fix Support paths longer than MAX_PATH (260 chars)
     DWORD sz = MAX_PATH;
     std::vector<wchar_t> pathBuf(sz);
-    BOOL success = QueryFullProcessImageNameW(h, 0, pathBuf.data(), &sz);
+    BOOL success = QueryFullProcessImageNameW(hGuard.get(), 0, pathBuf.data(), &sz);
     
 	if (!success && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
     {
         pathBuf.resize(sz + 1); // Resize to required length + null terminator
-        success = QueryFullProcessImageNameW(h, 0, pathBuf.data(), &sz);
+        success = QueryFullProcessImageNameW(hGuard.get(), 0, pathBuf.data(), &sz);
     }
 
 	DWORD err = GetLastError();
-    // Fix: Keep handle open (RAII) to prevent PID reuse during evaluation
-    UniqueHandle hGuard(h); 
     
     if (!success)
     {
@@ -327,16 +327,17 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
             SetPriorityClass(hProc, IDLE_PRIORITY_CLASS);  // Never preempt game
 			// 2. Deprioritize I/O (Using existing helper which takes PID and Mode 2=Low)																				 
             SetProcessIoPriority(pid, 2);   
-			// 3. Pin to Core 0 only (Efficiency Core on Intel, or weakest thread)																	  
-            SetProcessAffinityMask(hProc, 1);             
+			// 3. Pin to all cores EXCEPT Core 0 (Leave Core 0 for OS/critical tasks)
+            // FIX: Core 0 is often the most contended. Pining heavy launchers here causes lag.
+            SetProcessAffinityMask(hProc, g_physicalCoreMask & ~0x1);             
             
-			// 4. Aggressive Memory Trimming								
+			// 4. Moderate Memory Trimming								
 			// Special case: Don't freeze anti-cheat services if they mistakenly ended up in this list																						  
             if (exe != L"riot-vanguard.exe" && exe != L"easyanticheat.exe" && 
                 exe != L"beservice.exe" && exe != L"navapsvc.exe") 
             {
-				// Aggressive trim to 50MB-100MB								
-                SetProcessWorkingSetSize(hProc, 50 * 1024 * 1024, 100 * 1024 * 1024); 
+				// FIX: Moderate trim to 200MB-500MB to prevent UI hangs/crashes								
+                SetProcessWorkingSetSize(hProc, 200 * 1024 * 1024, 500 * 1024 * 1024); 
             }
             CloseHandle(hProc);
         }
