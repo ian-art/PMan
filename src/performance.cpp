@@ -178,11 +178,14 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
         uint64_t deltaTime = now - session.lastCpuTimestamp;
         
         if (deltaTime > 0) {
-            // Estimate: Assume game uses 80% of CPU during rendering
+			// Estimate: Assume game uses 80% of CPU during rendering
             double cpuMs = deltaCpu / 10000.0;
             double realMs = static_cast<double>(deltaTime);
-            double estimatedFrameTime = cpuMs / (realMs * 0.8) * 16.67;
             
+            // FIX: Correctly calculate based on total CPU load percentage
+            double cpuUsagePercent = (cpuMs / realMs) * 100.0; 
+            double estimatedFrameTime = (cpuUsagePercent > 0.1) ? (16.67 / (cpuUsagePercent / 80.0)) : 16.67;
+
             if (estimatedFrameTime < 5.0) estimatedFrameTime = 5.0;
             if (estimatedFrameTime > 100.0) estimatedFrameTime = 100.0;
             
