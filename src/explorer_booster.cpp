@@ -220,10 +220,15 @@ void ExplorerBooster::ScanShellProcesses() {
 
 void ExplorerBooster::UpdateBoostState() {
     // Verbosity CONTROL: Only log state changes, not every tick
-    bool shouldBoost = ShouldBoostNow();
+    bool shouldBoost = false;
+    {
+        // FIX: Lock mutex to prevent race condition when reading config in ShouldBoostNow
+        std::lock_guard lock(m_mtx);
+        shouldBoost = ShouldBoostNow();
+    }
     ExplorerBoostState targetState = shouldBoost ? ExplorerBoostState::IdleBoosted : ExplorerBoostState::Default;
 
-// CRITICAL: Check if we need to transition states
+	// CRITICAL: Check if we need to transition states
     if (m_currentState != targetState) {
         std::lock_guard lock(m_mtx);
         
