@@ -25,6 +25,18 @@ void PerformanceGuardian::LoadProfiles() {
     std::ifstream f(m_dbPath, std::ios::binary);
     if (!f) return;
     
+    // FIX: Verify Header Magic and Version to prevent reading corrupt data
+    uint32_t magic = 0;
+    uint32_t version = 0;
+    f.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    f.read(reinterpret_cast<char*>(&version), sizeof(version));
+
+    if (magic != 0x504D414E) { // 'PMAN'
+        Log("[PERF] Corrupt or invalid profile database. Resetting.");
+        f.close();
+        return; 
+    }
+
     size_t count = 0;
     f.read(reinterpret_cast<char*>(&count), sizeof(count));
     
@@ -70,6 +82,12 @@ void PerformanceGuardian::SaveProfile(const GameProfile& profile) {
     std::ofstream f(m_dbPath, std::ios::binary | std::ios::trunc);
     if (!f) return;
     
+    // FIX: Write Header Magic and Version
+    uint32_t magic = 0x504D414E; // 'PMAN'
+    uint32_t version = 1;
+    f.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+    f.write(reinterpret_cast<const char*>(&version), sizeof(version));
+
     size_t count = m_profiles.size();
     f.write(reinterpret_cast<const char*>(&count), sizeof(count));
     
