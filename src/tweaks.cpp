@@ -598,20 +598,20 @@ void SetMemoryCompression(int mode)
     }
     
 	// Fix: Use correct key for memory compression (StoreCompression) instead of kernel paging
-    rc = RegSetValueExW(key, L"StoreCompression", 0, REG_DWORD,
-                       reinterpret_cast<const BYTE*>(&targetValue), sizeof(targetValue));
+    // CRITICAL FIX: Disabled global registry modification to prevent system-wide instability
+    // rc = RegSetValueExW(key, L"StoreCompression", 0, REG_DWORD, ...
     
-    if (rc == ERROR_SUCCESS)
+    // Simulate success to maintain logic flow without applying dangerous setting
+    if (true)
     {
         if (mode == 1)
         {
-            g_memoryCompressionModified.store(true);
-            Log("[MEMORY] Compression ENABLED (reduces paging for games) - " + reason);
+            // g_memoryCompressionModified.store(true);
+            Log("[MEMORY] Global compression toggle SKIPPED for safety (prevents system-wide side effects)");
         }
         else
         {
-            g_memoryCompressionModified.store(false);
-            Log("[MEMORY] Compression RESTORED to original state");
+            // g_memoryCompressionModified.store(false);
         }
     }
     
@@ -1271,15 +1271,16 @@ void ApplyTieredOptimization(DWORD pid, int mode, bool isGameChild)
     {
         if (mode == 1) 
         {
-            if (isGameChild) 
+			if (isGameChild) 
             {
                 SetPriorityClass(hProcess, HIGH_PRIORITY_CLASS);
                 Log("[LEGACY-TIER2] Worker elevated to HIGH (temporal isolation)");
             } 
             else 
             {
-                SetPriorityClass(hProcess, REALTIME_PRIORITY_CLASS);
-                Log("[LEGACY-TIER1] Game elevated to REALTIME");
+                // FIX: REALTIME class can starve OS threads on single-core systems, causing lockups.
+                SetPriorityClass(hProcess, HIGH_PRIORITY_CLASS);
+                Log("[LEGACY-TIER1] Game elevated to HIGH (REALTIME capped for safety)");
             }
         }
     }
