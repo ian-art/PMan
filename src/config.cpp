@@ -178,6 +178,7 @@ static std::string BuildConfigOption(const std::string& comment, const std::stri
 static void WriteConfigurationFile(const std::filesystem::path& path, 
                                    const std::unordered_set<std::wstring>& games,
                                    const std::unordered_set<std::wstring>& browsers,
+                                   const std::unordered_set<std::wstring>& oldGames, // New parameter
                                    const std::unordered_set<std::wstring>& gameWindows,
                                    const std::unordered_set<std::wstring>& browserWindows,
                                    bool ignoreNonInteractive,
@@ -290,11 +291,17 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
     }
     buffer << BuildConfigSection("games", gamesSection.str());
     
-    std::ostringstream browsersSection;
+	std::ostringstream browsersSection;
     for (const auto& s : browsers) {
         browsersSection << WideToUtf8(s.c_str()) << "\n";
     }
     buffer << BuildConfigSection("browsers", browsersSection.str());
+
+    std::ostringstream oldGamesSection;
+    for (const auto& s : oldGames) {
+        oldGamesSection << WideToUtf8(s.c_str()) << "\n";
+    }
+    buffer << BuildConfigSection("old_games", oldGamesSection.str());
     
     std::ostringstream gameWindowsSection;
     for (const auto& s : gameWindows) {
@@ -365,7 +372,7 @@ void LoadConfig()
 	try
     {
         std::filesystem::path configPath = GetConfigPath();
-        std::unordered_set<std::wstring> games, browsers, gameWindows, browserWindows, customLaunchers, ignoredProcesses;
+        std::unordered_set<std::wstring> games, browsers, oldGames, gameWindows, browserWindows, customLaunchers, ignoredProcesses;
         bool ignoreNonInteractive = true;
         bool restoreOnExit = true;
 
@@ -388,10 +395,10 @@ void LoadConfig()
         }
         
         // Explorer config
-        ExplorerConfig explorerConfig;
+		ExplorerConfig explorerConfig;
         
         std::wstring line;
-        enum Sect { NONE, META, GLOBAL, EXPLORER, G, B, GW, BW } sect = NONE;
+        enum Sect { NONE, META, GLOBAL, EXPLORER, G, B, OLD_G, GW, BW } sect = NONE;
         int lineNum = 0;
         int configVersion = 0;
         
@@ -415,9 +422,10 @@ void LoadConfig()
                 
                 if (secName == L"global") sect = GLOBAL;
 				else if (secName == L"explorer") sect = EXPLORER;
-                else if (secName == L"meta") sect = META;
+				else if (secName == L"meta") sect = META;
                 else if (secName == L"games") sect = G;
                 else if (secName == L"browsers") sect = B;
+                else if (secName == L"old_games") sect = OLD_G;
                 else if (secName == L"game_windows") sect = GW;
                 else if (secName == L"browser_windows") sect = BW;
                 else sect = NONE;
@@ -555,9 +563,9 @@ void LoadConfig()
                 continue;
             }
             
-            asciiLower(item);
+			asciiLower(item);
             
-            if (!IsValidExecutableName(item) && (sect == G || sect == B))
+            if (!IsValidExecutableName(item) && (sect == G || sect == B || sect == OLD_G))
             {
                 if (!item.empty())
                     Log("[CFG] Skipped unsafe/invalid entry: " + WideToUtf8(item.c_str()));
@@ -566,6 +574,7 @@ void LoadConfig()
 
             if (sect == G && !item.empty()) games.insert(item);
             if (sect == B && !item.empty()) browsers.insert(item);
+            if (sect == OLD_G && !item.empty()) oldGames.insert(item);
             if (sect == GW && !item.empty()) gameWindows.insert(item);
             if (sect == BW && !item.empty()) browserWindows.insert(item);
         }
@@ -596,8 +605,8 @@ void LoadConfig()
             }
             
 			// Write upgraded configuration
-            // Note: explorerConfig contains defaults at this point, which is exactly what we want for a fresh section
-			WriteConfigurationFile(configPath, games, browsers, gameWindows, browserWindows,
+			// Note: explorerConfig contains defaults at this point, which is exactly what we want for a fresh section
+			WriteConfigurationFile(configPath, games, browsers, oldGames, gameWindows, browserWindows,
                                   ignoreNonInteractive, restoreOnExit, lockPolicy, 
                                   g_suspendUpdatesDuringGames.load(),
                                   g_idleRevertEnabled.load(),
@@ -616,9 +625,10 @@ void LoadConfig()
         }
 
 {
-            std::unique_lock lg(g_setMtx);
+			std::unique_lock lg(g_setMtx);
             g_games = std::move(games);
             g_browsers = std::move(browsers);
+            g_oldGames = std::move(oldGames);
 			g_gameWindows = std::move(gameWindows);
             g_browserWindows = std::move(browserWindows);
             g_customLaunchers = std::move(customLaunchers);
@@ -647,6 +657,7 @@ void LoadConfig()
         
 		Log("Config loaded: " + std::to_string(g_games.size()) + " games, " +
             std::to_string(g_browsers.size()) + " browsers, " +
+            std::to_string(g_oldGames.size()) + " legacy games, " +
             std::to_string(g_ignoredProcesses.size()) + " ignored, " +
             std::to_string(g_customLaunchers.size()) + " custom launchers, " +
             std::to_string(g_gameWindows.size()) + " game windows, " +

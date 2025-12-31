@@ -291,18 +291,18 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     // ---------------------------------------------------------
     // If ignored, force Desktop Mode (0) and skip all detection.
     {
-        std::shared_lock lg(g_setMtx);
-        if (g_ignoredProcesses.count(exe)) {
-            Log("Ignored process detected: " + WideToUtf8(exe.c_str()) + " - forcing desktop mode");
-            mode = 0;
-            
-            // CRITICAL: Set a flag to prevent window detection from overriding
-            // This ensures cmd.exe/explorer.exe windows don't get misclassified
-            isLauncher = false; // Ensure it's not treated as a launcher
-            
-            // Jump directly to policy application
-            // This will properly release session locks and boost Explorer
-            goto apply_policy;
+	std::shared_lock lg(g_setMtx);
+            if (!g_ignoredProcesses.count(exe)) {
+                
+                // SPECIAL CASE: Force Game Mode for Old/DX9 Games
+                // These games often have "Launcher" in their window title or lack standard game windows
+                if (g_oldGames.count(exe)) {
+                    mode = 1; 
+                    Log("Force-enabling GAME mode for Legacy/DX9 title: " + WideToUtf8(exe.c_str()));
+                    // Jump to policy application to skip generic heuristics
+                    goto apply_policy;
+                }
+                mode = DetectWindowType(hwnd);
         }
     }
 
