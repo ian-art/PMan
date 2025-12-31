@@ -397,13 +397,15 @@ apply_policy:  // FIX: Label for the goto jump
         if (!hwnd || g_lastMode.load() == 0) return;
     }
     
-    if (ShouldIgnoreDueToSessionLock(mode, pid))
+	if (ShouldIgnoreDueToSessionLock(mode, pid))
     {
         return;
     }
     
-    int lastMode = g_lastMode.load();
-	DWORD lastPid = g_lastPid.load();
+    // Fix: Atomic snapshot of policy state to prevent torn reads
+    uint64_t state = g_policyState.load();
+    DWORD lastPid = static_cast<DWORD>(state >> 32);
+    int lastMode = static_cast<int>(state & 0xFFFFFFFF);
     
     // CRITICAL: Revert Explorer BEFORE game mode applies to prevent conflict
     if (mode == 1) {

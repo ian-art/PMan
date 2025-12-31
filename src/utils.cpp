@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cwctype>
 #include <tlhelp32.h>
+#include <mutex> // Fix: Added for thread safety
 
 std::string WideToUtf8(const wchar_t* wstr)
 {
@@ -183,6 +184,10 @@ static ULONGLONG FileTimeToULL(const FILETIME& ft) {
 }
 
 double GetCpuLoad() {
+    // Fix: Protect static state with mutex
+    static std::mutex mtx;
+    std::lock_guard lock(mtx);
+
     static FILETIME prevIdle = {0}, prevKernel = {0}, prevUser = {0};
     FILETIME idle, kernel, user;
 
