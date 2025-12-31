@@ -169,14 +169,13 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
     kernelTime.LowPart = kernel.dwLowDateTime; kernelTime.HighPart = kernel.dwHighDateTime;
     userTime.LowPart = user.dwLowDateTime; userTime.HighPart = user.dwHighDateTime;
     
-    uint64_t totalCpuTime100ns = kernelTime.QuadPart + userTime.QuadPart;
-    static std::unordered_map<DWORD, uint64_t> prevCpuTime;
-    static std::unordered_map<DWORD, uint64_t> prevTimestamp;
+	uint64_t totalCpuTime100ns = kernelTime.QuadPart + userTime.QuadPart;
     uint64_t now = GetTickCount64();
     
-    if (prevCpuTime.find(pid) != prevCpuTime.end()) {
-        uint64_t deltaCpu = totalCpuTime100ns - prevCpuTime[pid];
-        uint64_t deltaTime = now - prevTimestamp[pid];
+    // Fix: Use per-session tracking instead of static maps
+    if (session.lastCpuTimestamp != 0) {
+        uint64_t deltaCpu = totalCpuTime100ns - session.lastCpuTime;
+        uint64_t deltaTime = now - session.lastCpuTimestamp;
         
         if (deltaTime > 0) {
             // Estimate: Assume game uses 80% of CPU during rendering
@@ -192,8 +191,8 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
             if (session.frameHistory.size() > 600) session.frameHistory.pop_front();
         }
     }
-    prevCpuTime[pid] = totalCpuTime100ns;
-    prevTimestamp[pid] = now;
+	session.lastCpuTime = totalCpuTime100ns;
+    session.lastCpuTimestamp = now;
 }
 
 void PerformanceGuardian::OnPerformanceTick() {
@@ -371,9 +370,10 @@ void PerformanceGuardian::TriggerEmergencyBoost(DWORD pid) {
     // This runs on the IOCP thread
     Log("[PERF] >>> EMERGENCY BOOST ACTIVATED for PID " + std::to_string(pid) + " <<<");
     
-    HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
+	HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
     if (hProc) {
-        SetPriorityClass(hProc, REALTIME_PRIORITY_CLASS);
+        // Fix: Use HIGH instead of REALTIME to prevent system lockup
+        SetPriorityClass(hProc, HIGH_PRIORITY_CLASS);
         
         PROCESS_MEMORY_COUNTERS pmc;
         if (GetProcessMemoryInfo(hProc, &pmc, sizeof(pmc))) {

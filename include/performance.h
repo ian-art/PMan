@@ -53,6 +53,10 @@ private:
         // Session Reporting
         uint64_t sessionStartTime = 0;
         uint32_t sessionStutterCount = 0;
+		
+		// Fix: Per-session CPU tracking (Moved from static function variables)
+        uint64_t lastCpuTime = 0;
+        uint64_t lastCpuTimestamp = 0;
     };
 
     // Root Cause Correlation
