@@ -586,7 +586,14 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         }
     }
     
-    if (hook) UnhookWinEvent(hook);
+	if (hook) UnhookWinEvent(hook);
+    
+    // FIX: Explicitly unregister raw input devices (Renamed to RidCleanup to avoid redefinition error)
+    RAWINPUTDEVICE RidCleanup[2] = {};
+    RidCleanup[0].usUsagePage = 0x01; RidCleanup[0].usUsage = 0x06; RidCleanup[0].dwFlags = RIDEV_REMOVE; RidCleanup[0].hwndTarget = nullptr;
+    RidCleanup[1].usUsagePage = 0x01; RidCleanup[1].usUsage = 0x02; RidCleanup[1].dwFlags = RIDEV_REMOVE; RidCleanup[1].hwndTarget = nullptr;
+    RegisterRawInputDevices(RidCleanup, 2, sizeof(RAWINPUTDEVICE));
+
     UnregisterPowerNotifications();
     if (hwnd) DestroyWindow(hwnd);
     UnregisterClassW(wc.lpszClassName, nullptr);

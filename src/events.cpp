@@ -638,11 +638,13 @@ void IocpConfigWatcher()
     ULONG_PTR key = 0;
     LPOVERLAPPED pov = nullptr;
     
-    while (GetQueuedCompletionStatus(g_hIocp, &bytes, &key, &pov, 0))
+	while (GetQueuedCompletionStatus(g_hIocp, &bytes, &key, &pov, 0))
     {
         if (pov && pov != &ov)
         {
             delete reinterpret_cast<IocpJob*>(pov);
+            // FIX: Decrement queue size when draining to prevent count skew
+            g_iocpQueueSize.fetch_sub(1, std::memory_order_relaxed);
             drainedJobs++;
         }
     }
