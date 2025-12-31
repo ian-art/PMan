@@ -97,6 +97,10 @@ public:
     void OnGameStop(DWORD pid);
     void OnPresentEvent(DWORD pid, uint64_t timestamp);
     
+    // FIX: CPU Fallback & Heartbeat for DX9 games
+    void EstimateFrameTimeFromCPU(DWORD pid);
+    void OnPerformanceTick();
+    
     // Returns true if specific optimization is allowed based on learned profile
     bool IsOptimizationAllowed(const std::wstring& exeName, const std::string& feature);
     

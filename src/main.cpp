@@ -576,9 +576,11 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                                    idleDurationMs > (thresholdMs - 5000));
             uint32_t pollIntervalMs = approachingIdle ? 250 : 2000;
 
-            // Rate limit the tick calls to prevent CPU spinning
+			// Rate limit the tick calls to prevent CPU spinning
             if ((now - g_lastExplorerPollMs) >= pollIntervalMs) {
                 g_explorerBooster.OnTick();
+                // FIX: Drive Performance Guardian for non-ETW games (DX9)
+                g_perfGuardian.OnPerformanceTick();
                 g_lastExplorerPollMs = now;
             }
         }

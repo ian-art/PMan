@@ -139,6 +139,90 @@ void PerformanceGuardian::ApplyProfile(DWORD pid, const GameProfile& profile) {
     if (profile.useTimerCoalescing) SetTimerCoalescingControl(1);
 }
 
+// NOTE: Caller must hold m_mtx
+void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
+    // REMOVED std::lock_guard to prevent deadlock (caller holds lock)
+    auto it = m_sessions.find(pid);
+    if (it == m_sessions.end()) return;
+    
+    GameSession& session = it->second;
+    
+    // FIX: Allow fallback if data is stale (>150ms), not just if empty
+    // This ensures continuous fallback updates if ETW stops
+    if (!session.frameHistory.empty()) {
+        uint64_t lastFrameTime = session.frameHistory.back().timestamp;
+        uint64_t now100ns = GetTickCount64() * 10000;
+        if ((now100ns - lastFrameTime) < 1500000) return; // Data is fresh (<150ms), skip CPU fallback
+    }
+    
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc) return;
+    
+    FILETIME creation, exit, kernel, user;
+    if (!GetProcessTimes(hProc, &creation, &exit, &kernel, &user)) {
+        CloseHandle(hProc);
+        return;
+    }
+    CloseHandle(hProc);
+    
+    ULARGE_INTEGER kernelTime, userTime;
+    kernelTime.LowPart = kernel.dwLowDateTime; kernelTime.HighPart = kernel.dwHighDateTime;
+    userTime.LowPart = user.dwLowDateTime; userTime.HighPart = user.dwHighDateTime;
+    
+    uint64_t totalCpuTime100ns = kernelTime.QuadPart + userTime.QuadPart;
+    static std::unordered_map<DWORD, uint64_t> prevCpuTime;
+    static std::unordered_map<DWORD, uint64_t> prevTimestamp;
+    uint64_t now = GetTickCount64();
+    
+    if (prevCpuTime.find(pid) != prevCpuTime.end()) {
+        uint64_t deltaCpu = totalCpuTime100ns - prevCpuTime[pid];
+        uint64_t deltaTime = now - prevTimestamp[pid];
+        
+        if (deltaTime > 0) {
+            // Estimate: Assume game uses 80% of CPU during rendering
+            double cpuMs = deltaCpu / 10000.0;
+            double realMs = static_cast<double>(deltaTime);
+            double estimatedFrameTime = cpuMs / (realMs * 0.8) * 16.67;
+            
+            if (estimatedFrameTime < 5.0) estimatedFrameTime = 5.0;
+            if (estimatedFrameTime > 100.0) estimatedFrameTime = 100.0;
+            
+            // Add synthetic frame data
+            session.frameHistory.push_back({now * 10000, estimatedFrameTime});
+            if (session.frameHistory.size() > 600) session.frameHistory.pop_front();
+        }
+    }
+    prevCpuTime[pid] = totalCpuTime100ns;
+    prevTimestamp[pid] = now;
+}
+
+void PerformanceGuardian::OnPerformanceTick() {
+    std::lock_guard lock(m_mtx);
+    uint64_t now = GetTickCount64();
+
+    for (auto& pair : m_sessions) {
+        GameSession& session = pair.second;
+        
+        // 1. Force Fallback if ETW is silent
+        // If history is empty OR last frame is older than 1 second
+        bool isSilent = session.frameHistory.empty() || 
+                       (now * 10000 - session.frameHistory.back().timestamp > 10000000); 
+
+        if (isSilent) {
+            EstimateFrameTimeFromCPU(session.pid);
+        }
+
+        // 2. Drive the Learning Loop manually
+        if (now - session.lastAnalysisTime > 2000) {
+            if (!session.frameHistory.empty()) {
+                AnalyzeStutter(session, session.pid);
+                if (session.learningMode) UpdateLearning(session);
+                session.lastAnalysisTime = now;
+            }
+        }
+    }
+}
+
 void PerformanceGuardian::OnGameStop(DWORD pid) {
     std::lock_guard lock(m_mtx);
     auto it = m_sessions.find(pid);
@@ -174,17 +258,21 @@ void PerformanceGuardian::OnPresentEvent(DWORD pid, uint64_t timestamp) {
         // Filter outliers (alt-tab pauses)
         if (deltaMs > 0.1 && deltaMs < 1000.0) {
             session.frameHistory.push_back({timestamp, deltaMs});
+            
+            // Diagnostic logging for C&C3 verification
+            static int frameCount = 0;
+            if (++frameCount % 300 == 0) {
+                 Log("[PERF-DEBUG] Captured " + std::to_string(frameCount) + " frames for " + WideToUtf8(session.exeName.c_str()));
+            }
         }
     } else {
         session.frameHistory.push_back({timestamp, 0.0});
     }
     
-    // Keep last 600 frames (~10s at 60fps)
     if (session.frameHistory.size() > 600) {
         session.frameHistory.pop_front();
     }
     
-    // Analyze every 2 seconds
     uint64_t now = GetTickCount64();
     if (now - session.lastAnalysisTime > 2000) {
         AnalyzeStutter(session, pid);
@@ -303,6 +391,12 @@ void PerformanceGuardian::UpdateLearning(GameSession& session) {
     if (!session.learningMode || session.testPhase > 4) return;
     
     uint64_t now = GetTickCount64();
+    
+    // FIX: Fallback to CPU estimation if ETW fails (for >5s with no frames)
+    if (session.frameHistory.empty() && (now - session.sessionStartTime) > 5000) {
+        EstimateFrameTimeFromCPU(session.pid);
+    }
+    
     const uint64_t PHASE_DURATION_MS = 30000; // 30 seconds per phase
     
     if (now - session.testStartTime < 5000) return; // Buffer
@@ -478,6 +572,15 @@ void PerformanceGuardian::GenerateSessionReport(const GameSession& session) {
     report += "Game: " + WideToUtf8(session.exeName.c_str()) + "\n";
     report += "Duration: " + FormatDuration(session.sessionStartTime) + "\n";
     
+    bool hasFrameData = !session.frameHistory.empty();
+    bool hasBaselineData = !session.baselineStats.empty();
+    
+    if (!hasFrameData && !hasBaselineData) {
+        report += "\nWARNING: NO PERFORMANCE DATA CAPTURED\n";
+        report += "Reason: ETW Present events not detected (DX9/Vulkan/OpenGL)\n";
+        report += "Troubleshooting: CPU Fallback logic may be disabled or blocked.\n\n";
+    }
+
     if (session.learningMode) {
         report += "Status: LEARNING MODE (Calibrating System)\n";
         report += "Note: Optimizations were toggled for testing.\n";
@@ -486,33 +589,44 @@ void PerformanceGuardian::GenerateSessionReport(const GameSession& session) {
         report += "Active Tweaks: " + GetActiveOptimizations(session.exeName) + "\n";
     }
 
-    double avgFrameTime = session.baselineStats.empty() ? 0.0 : session.baselineStats[0];
-    report += "Avg Frame Time: " + std::to_string(avgFrameTime) + " ms\n";
+    double avgFrameTime = 0.0;
+    std::string dataSource = "Unknown";
+    
+    if (hasBaselineData) {
+        avgFrameTime = session.baselineStats[0];
+        dataSource = "Baseline (ETW)";
+    } else if (hasFrameData) {
+        // Fallback calculation
+        std::vector<double> currentStats = const_cast<PerformanceGuardian*>(this)->CalculateStats(session.frameHistory);
+        if (!currentStats.empty()) {
+            avgFrameTime = currentStats[0];
+            dataSource = "Session Average (Fallback)";
+        }
+    }
+
+    if (avgFrameTime > 0.0) {
+        report += "Avg Frame Time: " + std::to_string(avgFrameTime) + " ms (" + dataSource + ")\n";
+        report += "Equivalent FPS: " + std::to_string(static_cast<int>(1000.0 / avgFrameTime)) + " FPS\n";
+    } else {
+        report += "Avg Frame Time: N/A\n";
+    }
+    
     report += "Stutter Events Detected: " + std::to_string(session.sessionStutterCount) + "\n";
-    
-    int score = CalculatePerformanceScore(session);
-    report += "Stability Score: " + std::to_string(score) + "/100\n";
-    
+    report += "Stability Score: " + std::to_string(CalculatePerformanceScore(session)) + "/100\n";
     report += "==========================================\n";
 
-	// Log to console/debug
     Log(report);
 
-    // ENHANCEMENT: Use secure _dupenv_s instead of getenv to fix C4996
     char* buf = nullptr;
     size_t sz = 0;
     std::filesystem::path reportPath;
-
-    // _dupenv_s allocates memory for the variable value automatically
     if (_dupenv_s(&buf, &sz, "ProgramData") == 0 && buf != nullptr) {
         reportPath = std::filesystem::path(buf) / "PriorityMgr" / "last_session_report.txt";
-        free(buf); // We must free the buffer allocated by _dupenv_s
+        free(buf);
     } else {
-        // Safe fallback if ProgramData environment variable is missing
         reportPath = "C:\\ProgramData\\PriorityMgr\\last_session_report.txt";
     }
     
-    // Ensure directory exists
     std::error_code ec;
     if (!std::filesystem::exists(reportPath.parent_path(), ec)) {
         std::filesystem::create_directories(reportPath.parent_path(), ec);
