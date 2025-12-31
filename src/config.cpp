@@ -21,7 +21,7 @@ static constexpr const char* DEFAULT_IGNORE_LIST = R"(; Priority Manager - Shell
 ; These system processes are part of the Desktop Experience.
 ; They should NEVER be treated as Browsers or Games.
 ; Add one process per line (lowercase).
-
+mintty.exe
 searchhost.exe
 startmenuexperiencehost.exe
 shellexperiencehost.exe
@@ -52,10 +52,14 @@ static void LoadCustomLaunchers(std::unordered_set<std::wstring>& outSet)
         std::ofstream f(path);
         if (f)
         {
-            f << "; Custom Launchers Configuration\n";
-            f << "; Add executable names here to force them into Tier 3 (Launcher/Background Mode)\n";
-            f << "; One per line. Example:\n";
-			f << "; my_custom_launcher.exe\n";
+			f << "; Custom Launchers Configuration\n";
+            f << "; List game launchers here to prevent them from being mistaken for games.\n";
+            f << "; These apps will be set to Low Priority to save CPU/GPU for your actual game.\n";
+            f << ";\n";
+            f << "; Add one .exe name per line (lowercase). Examples:\n";
+            f << "steam.exe\n";
+            f << "epicgameslauncher.exe\n";
+            f << "battle.net.exe\n";
             f.close();
         }
         // Fix: Do not return; continue to load the newly created file
