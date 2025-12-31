@@ -525,14 +525,18 @@ void SetMemoryCompression(int mode)
         shouldCompress = (mode == 1); 
         reason = "System has " + std::to_string(totalGB) + "GB RAM - compression beneficial";
     }
-    else
+	else
     {
-        // For >32GB, compression is rarely needed, but we won't force disable it if the user wants it.
-        // We just won't actively manage it.
+        // For >32GB, compression is rarely needed.
         shouldCompress = false;
         reason = "System has " + std::to_string(totalGB) + "GB RAM - compression unnecessary (high capacity)";
-        Log("[MEMORY] " + reason);
-        return;
+        
+        // Fix: Only return early if we are NOT trying to restore (mode 2).
+        // If mode is 2, we must proceed to restore original settings if modified.
+        if (mode != 2) {
+            Log("[MEMORY] " + reason);
+            return;
+        }
     }
     
     HKEY key = nullptr;

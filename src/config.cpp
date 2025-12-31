@@ -55,10 +55,10 @@ static void LoadCustomLaunchers(std::unordered_set<std::wstring>& outSet)
             f << "; Custom Launchers Configuration\n";
             f << "; Add executable names here to force them into Tier 3 (Launcher/Background Mode)\n";
             f << "; One per line. Example:\n";
-            f << "; my_custom_launcher.exe\n";
+			f << "; my_custom_launcher.exe\n";
             f.close();
         }
-        return;
+        // Fix: Do not return; continue to load the newly created file
     }
 
     std::wifstream f(path);
@@ -93,9 +93,10 @@ static void LoadIgnoredProcesses(std::unordered_set<std::wstring>& outSet)
         std::ofstream f(path);
         if (f)
         {
-            f << DEFAULT_IGNORE_LIST;
+		f << DEFAULT_IGNORE_LIST;
             f.close();
         }
+        // Fix: Ensure we fall through to load the file
     }
 
     std::wifstream f(path);
