@@ -211,9 +211,11 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
             }
 
             if (estimatedFrameTime < 5.0) estimatedFrameTime = 5.0;
-            if (estimatedFrameTime > 100.0) estimatedFrameTime = 100.0;
+			if (estimatedFrameTime > 100.0) estimatedFrameTime = 100.0;
             
-            // Log fallback for debugging
+            // Fix: Silence debug log for dormant wrappers (0% CPU) to prevent spam
+            // The actual game process running as a child will have its own session/logs.
+            /*
             static uint32_t lastLog = 0;
             if (GetTickCount() - lastLog > 5000) {
                 Log("[PERF-FALLBACK] PID " + std::to_string(pid) + " using CPU estimation: " + 
@@ -221,6 +223,7 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
                     std::to_string(cpuTimePerFrame) + "%)");
                 lastLog = GetTickCount();
             }
+            */
 
             // Add synthetic frame data
             session.frameHistory.push_back({now * 10000, estimatedFrameTime});
