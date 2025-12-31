@@ -195,18 +195,33 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
         uint64_t deltaCpu = totalCpuTime100ns - session.lastCpuTime;
         uint64_t deltaTime = now - session.lastCpuTimestamp;
         
-        if (deltaTime > 0) {
-			// Estimate: Assume game uses 80% of CPU during rendering
-            double cpuMs = deltaCpu / 10000.0;
-            double realMs = static_cast<double>(deltaTime);
+		if (deltaTime > 0) {
+            // CORRECT FORMULA: CPU usage per frame, not total CPU time
+            double cpuTimePerFrame = (deltaCpu / 10000.0) / (static_cast<double>(deltaTime) / 16.67);  // ms of CPU per 16.67ms frame
+            double estimatedFrameTime = 16.67 * (cpuTimePerFrame / 100.0);  // Scale by CPU usage
             
-            // FIX: Correctly calculate based on total CPU load percentage
-            double cpuUsagePercent = (cpuMs / realMs) * 100.0; 
-            double estimatedFrameTime = (cpuUsagePercent > 0.1) ? (16.67 / (cpuUsagePercent / 80.0)) : 16.67;
+            // If CPU usage is low (<50%), assume GPU-bound and cap at 33ms (30 FPS)
+            if (cpuTimePerFrame < 50.0) {
+                estimatedFrameTime = 33.33;  // GPU-bound games typically 30 FPS min
+            }
+
+            // If CPU usage is very high (>150%), assume 60 FPS target
+            if (cpuTimePerFrame > 150.0) {
+                estimatedFrameTime = 16.67;
+            }
 
             if (estimatedFrameTime < 5.0) estimatedFrameTime = 5.0;
             if (estimatedFrameTime > 100.0) estimatedFrameTime = 100.0;
             
+            // Log fallback for debugging
+            static uint32_t lastLog = 0;
+            if (GetTickCount() - lastLog > 5000) {
+                Log("[PERF-FALLBACK] PID " + std::to_string(pid) + " using CPU estimation: " + 
+                    std::to_string(estimatedFrameTime) + "ms (CPU: " + 
+                    std::to_string(cpuTimePerFrame) + "%)");
+                lastLog = GetTickCount();
+            }
+
             // Add synthetic frame data
             session.frameHistory.push_back({now * 10000, estimatedFrameTime});
             if (session.frameHistory.size() > 600) session.frameHistory.pop_front();
@@ -269,9 +284,9 @@ void PerformanceGuardian::OnPresentEvent(DWORD pid, uint64_t timestamp) {
     auto it = m_sessions.find(pid);
     if (it == m_sessions.end()) return;
     
-    GameSession& session = it->second;
+	GameSession& session = it->second;
     
-    if (!session.frameHistory.empty()) {
+    if (!session.frameHistory.empty() && session.frameHistory.back().durationMs > 0.0) {
         uint64_t prev = session.frameHistory.back().timestamp;
         double deltaMs = (timestamp - prev) / 10000.0; // 100ns units to ms
         

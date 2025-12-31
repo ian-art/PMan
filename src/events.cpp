@@ -159,12 +159,32 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
         return;
     }
 
-    // FIX: DirectX 9 Provider (Microsoft-Windows-Direct3D9)
+	// CRITICAL: Handle DirectX 9 Present Events (more event IDs)
     static const GUID D3D9Guid = { 0x783ACA0A, 0x790E, 0x4d7f, { 0x8A, 0x51, 0xC4, 0x15, 0x1E, 0x9F, 0x6F, 0xD3 } };
     if (IsEqualGUID(rec->EventHeader.ProviderId, D3D9Guid))
     {
-        // Event 1 = D3D9 Present
-        if (rec->EventHeader.EventDescriptor.Id == 1) {
+        // D3D9 has multiple present event IDs depending on presentation mode
+        USHORT eventId = rec->EventHeader.EventDescriptor.Id;
+        // 1 = D3D9Present, 2 = D3D9PresentEx, 3 = D3D9SwapPresent
+        if (eventId >= 1 && eventId <= 3) {
+            g_perfGuardian.OnPresentEvent(rec->EventHeader.ProcessId, rec->EventHeader.TimeStamp.QuadPart);
+            static int dx9FrameCount = 0;
+            if (++dx9FrameCount % 300 == 0) {
+                Log("[PERF-DEBUG] DX9 Frame captured for PID " + 
+                    std::to_string(rec->EventHeader.ProcessId) + " (Event ID: " + 
+                    std::to_string(eventId) + ")");
+            }
+        }
+        return;
+    }
+
+    // CRITICAL: Handle DirectX 10/11 Present Events
+    static const GUID D3D10Guid = { 0x9B7E4C8F, 0x342C, 0x4106, { 0xA1, 0x9F, 0x4F, 0x27, 0x04, 0xF6, 0x89, 0xF0 } };
+    if (IsEqualGUID(rec->EventHeader.ProviderId, D3D10Guid))
+    {
+        // D3D10/11 present event IDs: 8 = Present, 10 = PresentMultiplaneOverlay
+        USHORT eventId = rec->EventHeader.EventDescriptor.Id;
+        if (eventId == 8 || eventId == 10) {
             g_perfGuardian.OnPresentEvent(rec->EventHeader.ProcessId, rec->EventHeader.TimeStamp.QuadPart);
         }
         return;
@@ -400,15 +420,15 @@ void EtwThread()
 	EnableTraceEx2(hSession, &DxgKrnlGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
                    TRACE_LEVEL_INFORMATION, 0x1, 0, 0, nullptr);
 
-    // FIX: Enable DirectX 9 Provider for older games (C&C3, WoW Classic, etc.)
+	// CRITICAL: Enable DirectX 9 Provider (for old games like C&C3)
     static const GUID D3D9Guid = { 0x783ACA0A, 0x790E, 0x4d7f, { 0x8A, 0x51, 0xC4, 0x15, 0x1E, 0x9F, 0x6F, 0xD3 } };
     EnableTraceEx2(hSession, &D3D9Guid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
-                   TRACE_LEVEL_INFORMATION, 0xFF, 0, 0, nullptr);
+                   TRACE_LEVEL_VERBOSE, 0x1, 0, 0, nullptr); // 0x1 = Present only
 
-    // FIX: Enable DirectX 10 Provider
+    // CRITICAL: Enable DirectX 10 Provider (hybrid DX10/11)
     static const GUID D3D10Guid = { 0x9B7E4C8F, 0x342C, 0x4106, { 0xA1, 0x9F, 0x4F, 0x27, 0x04, 0xF6, 0x89, 0xF0 } };
     EnableTraceEx2(hSession, &D3D10Guid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
-                   TRACE_LEVEL_INFORMATION, 0xFF, 0, 0, nullptr);
+                   TRACE_LEVEL_VERBOSE, 0x1, 0, 0, nullptr); // 0x1 = Present only
 
 	// Enable DPC & ISR Providers (Verbose for duration data))
     status = EnableTraceEx2(hSession, &DPCGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
