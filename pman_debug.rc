@@ -3,8 +3,8 @@
 //101 ICON "pman.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 2,2,0,2025
-PRODUCTVERSION 2,2025
+FILEVERSION 2,2,1,2026
+PRODUCTVERSION 2,2026
 FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
 FILEFLAGS 0x1L
@@ -22,24 +22,24 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Ian Anthony Tancinco\0"
             VALUE "FileDescription", "Windows Priority Manager\0"
-            VALUE "FileVersion", "2.2.0.2025\0"
+            VALUE "FileVersion", "2.2.1.2026\0"
             VALUE "InternalName", "pman_debug\0"
-            VALUE "LegalCopyright", "Copyright \251 2025 Ian Anthony Tancinco\0"
+            VALUE "LegalCopyright", "Copyright \251 2025-2025 Ian Anthony Tancinco\0"
             VALUE "OriginalFilename", "pman_debug.exe\0"
             VALUE "ProductName", "Microsoft Windows\0"
-            VALUE "ProductVersion", "2.2025\0"
+            VALUE "ProductVersion", "2.2026\0"
         END
 
         BLOCK "04090000"   // ANSI/MBCS fallback
         BEGIN
             VALUE "CompanyName", "Ian Anthony Tancinco\0"
             VALUE "FileDescription", "Windows Priority Manager\0"
-            VALUE "FileVersion", "2.2.0.2025\0"
+            VALUE "FileVersion", "2.2.1.2026\0"
             VALUE "InternalName", "pman_debug\0"
-            VALUE "LegalCopyright", "Copyright \251 2025 Ian Anthony Tancinco\0"
+            VALUE "LegalCopyright", "Copyright \251 2025-2026 Ian Anthony Tancinco\0"
             VALUE "OriginalFilename", "pman_debug.exe\0"
             VALUE "ProductName", "Microsoft Windows\0"
-            VALUE "ProductVersion", "2.2025\0"
+            VALUE "ProductVersion", "2.2026\0"
         END
     END
 
