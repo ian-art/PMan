@@ -321,18 +321,11 @@ void SetProcessIoPriority(DWORD pid, int mode)
     
     bool ioPrioritySet = false;
     
-    // Method 1: Try NtSetInformationProcess (most compatible)
-    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    if (ntdll)
-    {
-        typedef NTSTATUS (NTAPI *NtSetInformationProcessPtr)(
-            HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG);
-        
-        auto pNtSetInformationProcess = 
-            reinterpret_cast<NtSetInformationProcessPtr>(
-                GetProcAddress(ntdll, "NtSetInformationProcess"));
-        
-        if (pNtSetInformationProcess)
+	// Method 1: Try NtSetInformationProcess (most compatible)
+    typedef NTSTATUS (NTAPI *NtSetInformationProcessPtr)(HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG);
+    auto pNtSetInformationProcess = reinterpret_cast<NtSetInformationProcessPtr>(GetNtProc("NtSetInformationProcess"));
+    
+    if (pNtSetInformationProcess)
         {
             ULONG ioPriority;
             if (mode == 1) 
