@@ -42,27 +42,18 @@ dllhost.exe
 sihost.exe
 )";
 
-static void LoadCustomLaunchers(std::unordered_set<std::wstring>& outSet)
+// Generic Loader (Fixes Duplication #3)
+static void LoadProcessList(const std::filesystem::path& path, 
+                            const std::string& defaultContent,
+                            std::unordered_set<std::wstring>& outSet)
 {
-    std::filesystem::path path = GetLogPath() / CUSTOM_LAUNCHERS_FILENAME;
-
-    // Create default file if missing
     if (!std::filesystem::exists(path))
     {
         std::ofstream f(path);
-        if (f)
-        {
-			f << "; Custom Launchers Configuration\n";
-            f << "; List game launchers here to prevent them from being mistaken for games.\n";
-            f << "; These apps will be set to Low Priority to save CPU/GPU for your actual game.\n";
-            f << ";\n";
-            f << "; Add one .exe name per line (lowercase). Examples:\n";
-            f << "steam.exe\n";
-            f << "epicgameslauncher.exe\n";
-            f << "battle.net.exe\n";
+        if (f) {
+            f << defaultContent;
             f.close();
         }
-        // Fix: Do not return; continue to load the newly created file
     }
 
     std::wifstream f(path);
@@ -79,49 +70,30 @@ static void LoadCustomLaunchers(std::unordered_set<std::wstring>& outSet)
         if (exe.empty() || exe[0] == L';' || exe[0] == L'#') continue;
 
         asciiLower(exe);
-        // Reuse existing validation
-        if (IsValidExecutableName(exe))
-{
+        if (IsValidExecutableName(exe)) {
             outSet.insert(exe);
         }
     }
 }
 
+static void LoadCustomLaunchers(std::unordered_set<std::wstring>& outSet)
+{
+    std::string defaults = 
+        "; Custom Launchers Configuration\n"
+        "; List game launchers here to prevent them from being mistaken for games.\n"
+        "; These apps will be set to Low Priority to save CPU/GPU for your actual game.\n"
+        ";\n"
+        "; Add one .exe name per line (lowercase).\n"
+        "steam.exe\n"
+        "epicGameslauncher.exe\n"
+        "battle.net.exe\n";
+
+    LoadProcessList(GetLogPath() / CUSTOM_LAUNCHERS_FILENAME, defaults, outSet);
+}
+
 static void LoadIgnoredProcesses(std::unordered_set<std::wstring>& outSet)
 {
-    std::filesystem::path path = GetLogPath() / IGNORED_PROCESSES_FILENAME;
-
-    // Create default file if missing using the DEFAULT_IGNORE_LIST
-    if (!std::filesystem::exists(path))
-    {
-        std::ofstream f(path);
-        if (f)
-        {
-		f << DEFAULT_IGNORE_LIST;
-            f.close();
-        }
-        // Fix: Ensure we fall through to load the file
-    }
-
-    std::wifstream f(path);
-    if (!f) return;
-
-    std::wstring line;
-    while (std::getline(f, line))
-    {
-        size_t first = line.find_first_not_of(L" \t\r\n");
-        if (first == std::wstring::npos) continue;
-        size_t last = line.find_last_not_of(L" \t\r\n");
-        std::wstring exe = line.substr(first, last - first + 1);
-
-        if (exe.empty() || exe[0] == L';' || exe[0] == L'#') continue;
-
-        asciiLower(exe);
-        if (IsValidExecutableName(exe))
-        {
-            outSet.insert(exe);
-        }
-    }
+    LoadProcessList(GetLogPath() / IGNORED_PROCESSES_FILENAME, DEFAULT_IGNORE_LIST, outSet);
 }
 
 // Input Validation Helper
