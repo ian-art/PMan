@@ -1,6 +1,7 @@
 #include "restore.h"
 #include "logger.h"
 #include "globals.h" // For g_caps
+#include "utils.h"   // For UniqueRegKey
 #include <windows.h>
 #include <srrestoreptapi.h>
 #include <string>
@@ -14,16 +15,16 @@ typedef BOOL (WINAPI *SRSetRestorePointWPtr)(PRESTOREPOINTINFOW, PSTATEMGRSTATUS
 
 static bool HasRestorePointBeenCreated()
 {
-    HKEY hKey;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, REG_KEY_PATH, 0, KEY_QUERY_VALUE, &hKey) != ERROR_SUCCESS)
+    HKEY rawKey;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, REG_KEY_PATH, 0, KEY_QUERY_VALUE, &rawKey) != ERROR_SUCCESS)
     {
         return false;
     }
+    UniqueRegKey hKey(rawKey);
 
     DWORD val = 0;
     DWORD size = sizeof(val);
-    LONG result = RegQueryValueExW(hKey, REG_VALUE_NAME, nullptr, nullptr, reinterpret_cast<BYTE*>(&val), &size);
-    RegCloseKey(hKey);
+    LONG result = RegQueryValueExW(hKey.get(), REG_VALUE_NAME, nullptr, nullptr, reinterpret_cast<BYTE*>(&val), &size);
 
     return (result == ERROR_SUCCESS && val == 1);
 }
