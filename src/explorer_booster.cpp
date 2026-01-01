@@ -39,6 +39,11 @@ void ExplorerBooster::UpdateConfig(const ExplorerConfig& cfg) {
     m_config = cfg;
 }
 
+uint32_t ExplorerBooster::GetIdleThreshold() const {
+    std::lock_guard<std::mutex> lock(m_mtx);
+    return m_config.idleThresholdMs;
+}
+
 void ExplorerBooster::OnTick() {
     // CAPTURE CONFIG SAFELY AT START OF TICK
     bool enabled = false;

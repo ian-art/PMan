@@ -50,15 +50,15 @@ public:
     
     // State queries
     bool IsBoostActive() const { return m_active; }
-    bool IsIdle() const { return m_currentState == ExplorerBoostState::IdleBoosted; }
+	bool IsIdle() const { return m_currentState == ExplorerBoostState::IdleBoosted; }
     uint64_t GetLastUserActivity() const { return m_lastUserActivityMs.load(); }
-    uint32_t GetIdleThreshold() const { return m_config.idleThresholdMs; }
+    uint32_t GetIdleThreshold() const;
 
 private:
     std::atomic<bool> m_active{false};
     std::atomic<ExplorerBoostState> m_currentState{ExplorerBoostState::Default};
-    std::unordered_map<DWORD, ShellInstance> m_instances;
-    std::mutex m_mtx;
+	std::unordered_map<DWORD, ShellInstance> m_instances;
+    mutable std::mutex m_mtx;
     
     // Configuration
     ExplorerConfig m_config;
