@@ -27,12 +27,16 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
     
     if (!g_hIocp || g_hIocp == INVALID_HANDLE_VALUE) return false;
     
-    // Use nothrow to prevent crashes on OOM
-    IocpJob* job = new (std::nothrow) IocpJob{ t, pid, hwnd };
+	// Use nothrow to prevent crashes on OOM
+    // FIX: Split allocation and initialization to satisfy static analysis (C28182)
+    IocpJob* job = new (std::nothrow) IocpJob();
     if (!job) {
         Log("[IOCP] Failed to allocate job - out of memory");
         return false;
     }
+    job->type = t;
+    job->pid = pid;
+    job->hwnd = hwnd;
     
 	// Increment queue size BEFORE posting
     // Fix: Ensure strict ordering (acq_rel) so increment is visible before job is processed
@@ -361,7 +365,10 @@ static void ForceStopEtwSession()
 void EtwThread()
 {
     g_threadCount++;
-    CoInitialize(nullptr);
+    // FIX: Check return value (C6031)
+    if (FAILED(CoInitialize(nullptr))) {
+        Log("[ETW] CoInitialize failed");
+    }
 
     static const wchar_t* SESSION_NAME = L"PriorityMgrPrivateSession";
     
@@ -768,12 +775,13 @@ void AntiInterferenceWatchdog()
 		else if (waitResult == WAIT_TIMEOUT) // Heartbeat
         {
             // 0. Idle Revert Logic
-            if (g_idleRevertEnabled.load())
+			if (g_idleRevertEnabled.load())
             {
                 LASTINPUTINFO lii = { sizeof(LASTINPUTINFO) };
                 if (GetLastInputInfo(&lii))
                 {
-                    DWORD idleMs = GetTickCount() - lii.dwTime;
+                    // FIX: Use GetTickCount64 for monotonic time, cast to DWORD to match lii.dwTime wrapping (C28159)
+                    DWORD idleMs = static_cast<DWORD>(GetTickCount64()) - lii.dwTime;
                     DWORD thresholdMs = g_idleTimeoutMs.load(); // Use the parsed MS value
                     int currentMode = g_lastMode.load();
 

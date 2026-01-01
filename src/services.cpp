@@ -36,9 +36,12 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
 {
     std::lock_guard lock(m_mutex);
     
-    if (!m_scManager && !Initialize())
+	if (!m_scManager && !Initialize())
         return false;
     
+    // FIX: Explicit null check to satisfy analyzer (C6387)
+    if (!m_scManager) return false;
+
     // Check if already added
     if (m_services.find(serviceName) != m_services.end())
         return true;
@@ -62,9 +65,15 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
         return false;
     }
     
-    // Check if service is disabled
+	// Check if service is disabled
     DWORD bytesNeeded = 0;
-    QueryServiceConfigW(state.handle, nullptr, 0, &bytesNeeded);
+    // FIX: Check return value (C6031)
+    if (!QueryServiceConfigW(state.handle, nullptr, 0, &bytesNeeded)) {
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+            // Should not happen for size query, but handling gracefully
+            Log("[SERVICE] QueryServiceConfigW size check failed: " + std::to_string(GetLastError()));
+        }
+    }
     
     std::vector<BYTE> configBuffer(bytesNeeded);
     LPQUERY_SERVICE_CONFIGW config = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(configBuffer.data());

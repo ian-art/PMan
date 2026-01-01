@@ -441,9 +441,13 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         Log("WARNING: ETW unavailable. Falling back to WinEvent (foreground) detection only.");
     }
     
-    std::thread watchdogThread(AntiInterferenceWatchdog);
+	std::thread watchdogThread(AntiInterferenceWatchdog);
     
-    CoInitialize(nullptr);
+    // FIX: Check return value (C6031)
+    HRESULT hrInit = CoInitialize(nullptr);
+    if (FAILED(hrInit)) {
+        Log("[INIT] CoInitialize failed: " + std::to_string(hrInit));
+    }
     
     HWINEVENTHOOK hook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
                                          nullptr, WinEventProc, 0, 0,
@@ -501,8 +505,9 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         Log("WARNING: Unable to read current registry setting");
 	}
     
-    MSG msg;
-    static uint32_t g_lastExplorerPollMs = 0;
+	MSG msg;
+    // FIX: Use 64-bit time tracking to prevent overflow issues (C28159)
+    static uint64_t g_lastExplorerPollMs = 0;
 
     while (g_running)
     {
@@ -564,11 +569,12 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         
         // Process explorer boost tick only if we timed out (no messages to process)
         // This prevents calling OnTick() during active user input, reducing overhead
-        if (waitResult == WAIT_TIMEOUT)
+		if (waitResult == WAIT_TIMEOUT)
         {
             // Calculate adaptive polling interval based on idle state
-            uint32_t now = GetTickCount();
-            uint32_t idleDurationMs = now - static_cast<uint32_t>(g_explorerBooster.GetLastUserActivity());
+            // FIX: Use GetTickCount64 (C28159)
+            uint64_t now = GetTickCount64();
+            uint64_t idleDurationMs = now - g_explorerBooster.GetLastUserActivity();
             uint32_t thresholdMs = g_explorerBooster.GetIdleThreshold();
             
             // Adaptive poll rate: poll faster when approaching idle threshold (within 5s)
