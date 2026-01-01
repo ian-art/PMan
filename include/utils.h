@@ -40,6 +40,10 @@ DWORD GetCurrentPrioritySeparation();
 // Get Global CPU Load Percentage
 double GetCpuLoad();
 
+// RAII Helpers
+HANDLE OpenProcessSafe(DWORD access, DWORD pid, const char* logTag = nullptr);
+void ForEachProcess(std::function<void(const PROCESSENTRY32W&)> callback);
+
 // RAII Wrapper for Windows HANDLEs
 struct HandleDeleter {
     void operator()(HANDLE h) const {

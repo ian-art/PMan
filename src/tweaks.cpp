@@ -311,13 +311,9 @@ static bool IsIoPriorityBlockedBySystem()
 
 void SetProcessIoPriority(DWORD pid, int mode)
 {
-    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, 
-                                   FALSE, pid);
-    if (!hProcess)
-    {
-        Log("[I/O] Failed to open process " + std::to_string(pid) + ": " + std::to_string(GetLastError()));
-        return;
-    }
+    UniqueHandle hGuard(OpenProcessSafe(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, pid, "[I/O]"));
+    if (!hGuard) return;
+    HANDLE hProcess = hGuard.get();
     
     bool ioPrioritySet = false;
     

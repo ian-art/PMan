@@ -207,7 +207,31 @@ double GetCpuLoad() {
     prevUser = user;
 
     ULONGLONG total = kernelDiff + userDiff;
-    if (total == 0) return 0.0;
+	if (total == 0) return 0.0;
 
     return 100.0 * (1.0 - (double)idleDiff / (double)total);
+}
+
+HANDLE OpenProcessSafe(DWORD access, DWORD pid, const char* logTag)
+{
+    HANDLE h = OpenProcess(access, FALSE, pid);
+    if (!h && logTag)
+    {
+        Log(std::string(logTag) + " Failed to open process " + std::to_string(pid) + 
+            ": " + std::to_string(GetLastError()));
+    }
+    return h;
+}
+
+void ForEachProcess(std::function<void(const PROCESSENTRY32W&)> callback)
+{
+    UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+    if (hSnap.get() == INVALID_HANDLE_VALUE) return;
+
+    PROCESSENTRY32W pe = {sizeof(pe)};
+    if (Process32FirstW(hSnap.get(), &pe)) {
+        do {
+            callback(pe);
+        } while (Process32NextW(hSnap.get(), &pe));
+    }
 }
