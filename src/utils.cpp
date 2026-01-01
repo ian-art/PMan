@@ -124,31 +124,38 @@ return (rc == ERROR_SUCCESS) ? val : 0xFFFFFFFF;
 
 bool IsAntiCheatProtected(DWORD pid)
 {
-    // Snapshot modules to detect anti-cheat engines
-    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid);
-    if (hSnap != INVALID_HANDLE_VALUE) 
-    {
-        MODULEENTRY32W me32; 
-        me32.dwSize = sizeof(me32);
-        
-        if (Module32FirstW(hSnap, &me32)) 
-        {
-            do {
-                std::wstring mod = me32.szModule;
-                // Check for common AC signatures
-                if (mod.find(L"EasyAntiCheat") != std::wstring::npos ||
-                    mod.find(L"BEClient") != std::wstring::npos || // BattlEye
-                    mod.find(L"vgk") != std::wstring::npos ||      // Vanguard
-                    mod.find(L"EAC") != std::wstring::npos) 
-                {
-                    CloseHandle(hSnap);
-                    return true;
-                }
-            } while (Module32NextW(hSnap, &me32));
+    // 1. Check Process Name first (Cheap)
+    ProcessIdentity identity;
+    if (GetProcessIdentity(pid, identity)) {
+        UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+        if (hProc) {
+            wchar_t path[MAX_PATH];
+            DWORD sz = MAX_PATH;
+            if (QueryFullProcessImageNameW(hProc.get(), 0, path, &sz)) {
+                if (IsAntiCheatProcess(ExeFromPath(path))) return true;
+            }
         }
-        CloseHandle(hSnap);
     }
-return false;
+
+    // 2. Check Loaded Modules (Expensive)
+    UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid));
+    if (hSnap.get() == INVALID_HANDLE_VALUE) return false;
+
+    MODULEENTRY32W me32 = {sizeof(me32)};
+    if (Module32FirstW(hSnap.get(), &me32)) 
+    {
+        do {
+            std::wstring mod = me32.szModule;
+            if (mod.find(L"EasyAntiCheat") != std::wstring::npos ||
+                mod.find(L"BEClient") != std::wstring::npos || 
+                mod.find(L"vgk") != std::wstring::npos ||      
+                mod.find(L"EAC") != std::wstring::npos) 
+            {
+                return true;
+            }
+        } while (Module32NextW(hSnap.get(), &me32));
+    }
+    return false;
 }
 
 DWORD GetParentProcessId(DWORD pid)
