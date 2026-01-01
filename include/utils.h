@@ -44,6 +44,9 @@ double GetCpuLoad();
 HANDLE OpenProcessSafe(DWORD access, DWORD pid, const char* logTag = nullptr);
 void ForEachProcess(std::function<void(const PROCESSENTRY32W&)> callback);
 
+// Registry Helpers
+bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD& outVal);
+
 // RAII Wrapper for Windows HANDLEs
 struct HandleDeleter {
     void operator()(HANDLE h) const {

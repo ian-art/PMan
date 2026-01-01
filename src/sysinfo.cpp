@@ -587,17 +587,8 @@ void DetectOSCapabilities()
                 DWORD ubrSize = sizeof(ubr);
                 HKEY hUbrKey = nullptr;
 
-                if (RegOpenKeyExW(
-                        HKEY_LOCAL_MACHINE,
-                        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-                        0,
-                        KEY_QUERY_VALUE,
-                        &hUbrKey) == ERROR_SUCCESS)
-                {
-                    RegQueryValueExW(hUbrKey, L"UBR", nullptr, nullptr,
-                                 reinterpret_cast<BYTE*>(&ubr), &ubrSize);
-                    RegCloseKey(hUbrKey);
-                }
+				DWORD ubr = 0;
+                RegReadDword(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", L"UBR", ubr);
 
                 Log(
                     "OS: " + osName +

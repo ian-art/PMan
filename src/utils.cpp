@@ -235,3 +235,13 @@ void ForEachProcess(std::function<void(const PROCESSENTRY32W&)> callback)
         } while (Process32NextW(hSnap.get(), &pe));
     }
 }
+
+bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD& outVal)
+{
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(root, subkey, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) return false;
+    UniqueRegKey keyGuard(key);
+
+    DWORD size = sizeof(DWORD);
+    return RegQueryValueExW(key, value, nullptr, nullptr, reinterpret_cast<BYTE*>(&outVal), &size) == ERROR_SUCCESS;
+}
