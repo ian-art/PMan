@@ -683,11 +683,17 @@ void SetTimerResolution(int mode)
         }
     }
     
-    if (mode == 1)
+	if (mode == 1)
     {
-        ULONG desired = 5000;
-        ULONG actual = 0;
+        ULONG min = 0, max = 0, current = 0;
+        ULONG desired = 5000; // Default target: 0.5ms
+
+        // Query capabilities to find true maximum
+        if (NT_SUCCESS(pNtQueryTimerResolution(&min, &max, &current))) {
+            desired = max; // Usually 5000 (0.5ms) or 10000 (1ms)
+        }
         
+        ULONG actual = 0;
         NTSTATUS status = pNtSetTimerResolution(desired, TRUE, &actual);
         if (NT_SUCCESS(status))
         {
