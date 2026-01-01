@@ -35,6 +35,7 @@
 #include <iostream>
 #include <objbase.h> // Fixed: Required for CoInitialize
 #include <pdh.h>
+#include <shellapi.h> // Required for CommandLineToArgvW
 
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "User32.lib")
@@ -199,11 +200,19 @@ static void LaunchRegistryGuard(DWORD originalVal)
     else
     {
         Log("[GUARD] Failed to launch safety guard: " + std::to_string(GetLastError()));
-    }
+}
 }
 
-int wmain(int argc, wchar_t** argv)
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow)
 {
+    UNREFERENCED_PARAMETER(hInstance);
+    UNREFERENCED_PARAMETER(hPrevInstance);
+    UNREFERENCED_PARAMETER(lpCmdLine);
+    UNREFERENCED_PARAMETER(nCmdShow);
+
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+
     // Check for Guard Mode (Must be before Mutex check)
     if (argc >= 6 && (std::wstring(argv[1]) == L"--guard"))
     {
@@ -306,9 +315,10 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 
 	bool taskExists = IsTaskInstalled(taskName);
 
-    if (!taskExists)
+if (!taskExists)
     {
-        std::wstring cmdStr = L"schtasks /create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\"\" /sc onlogon /rl highest /f";
+        // Add --guard /S flags to the scheduled task command
+        std::wstring cmdStr = L"schtasks /create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\" --guard /S\" /sc onlogon /rl highest /f";
         
         // Fix CreateProcessW requires a mutable buffer
         std::vector<wchar_t> cmdBuf(cmdStr.begin(), cmdStr.end());
