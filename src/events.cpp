@@ -751,13 +751,15 @@ void AntiInterferenceWatchdog()
                         g_cachedRegistryValue.store(0xFFFFFFFF); 
                         SetPrioritySeparation(expectedVal);
                     }
-                    else
+					else
                     {
-                        static bool warnedOnce = false;
-                        if (!warnedOnce || (g_interferenceCount % 10 == 0)) 
+                        static int lastLogCount = -1;
+                        int count = g_interferenceCount.load();
+                        if (count % 10 == 0 && count != lastLogCount) 
                         {
-                            Log("[INTERFERENCE] Registry changed by external tool. 'lock_policy' is OFF.");
-                            warnedOnce = true;
+                            Log("[INTERFERENCE] Registry changed by external tool. Total events: " + 
+                                std::to_string(count) + " (Policy Lock: OFF)");
+                            lastLogCount = count;
                         }
                     }
                 }
@@ -950,10 +952,17 @@ void AntiInterferenceWatchdog()
                             }
                             it = g_processHierarchy.erase(it);
                         } 
-                        else 
+						else 
                         {
                             ++it;
                         }
+                    }
+                    
+                    // Safety Cap: Prevent infinite growth if GC fails
+                    if (g_processHierarchy.size() > 2000) {
+                        Log("[GC] Hierarchy safety limit reached (2000+). Clearing cache to prevent bloat.");
+                        g_processHierarchy.clear();
+                        g_inheritedGamePids.clear();
                     }
                 }
             }
