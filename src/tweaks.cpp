@@ -427,11 +427,11 @@ void SetProcessIoPriority(DWORD pid, int mode)
                     Log("[I/O] Fallback priority set: " + 
                         std::string(mode == 1 ? "ABOVE_NORMAL (game)" : "BELOW_NORMAL (browser)") + " using SetPriorityClass");
                 }
-            }
+			}
         }
     }
 	
-    CloseHandle(hProcess);
+    // CloseHandle(hProcess); // REMOVED: Managed by UniqueHandle hGuard to prevent double-free crash
 }
 
 void SetNetworkQoS(int mode)
