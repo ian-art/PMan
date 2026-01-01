@@ -17,6 +17,10 @@ static std::filesystem::path GetConfigPath()
 // Forward declaration to fix compiler error C3861
 static bool IsValidExecutableName(const std::wstring& name);
 
+static bool ParseBool(const std::wstring& v) {
+    return (v == L"true" || v == L"1" || v == L"yes");
+}
+
 static constexpr const char* DEFAULT_IGNORE_LIST = R"(; Priority Manager - Shell Process Exclusion List (ignore_processes.txt)
 ; These system processes are part of the Desktop Experience.
 ; They should NEVER be treated as Browsers or Games.
@@ -441,26 +445,11 @@ void LoadConfig()
                     asciiLower(key);
                     asciiLower(value);
                     
-                    if (key == L"ignore_non_interactive")
-                    {
-                        ignoreNonInteractive = (value == L"true" || value == L"1" || value == L"yes");
-                    }
-                    else if (key == L"restore_on_exit")
-                    {
-                        restoreOnExit = (value == L"true" || value == L"1" || value == L"yes");
-                    }
-                    else if (key == L"suspend_updates_during_games")
-                    {
-                        g_suspendUpdatesDuringGames.store(value == L"true" || value == L"1" || value == L"yes");
-                    }
-                    else if (key == L"lock_policy")
-                    {
-                        lockPolicy = (value == L"true" || value == L"1" || value == L"yes");
-                    }
-                    else if (key == L"idle_revert_enabled")
-                    {
-                        g_idleRevertEnabled.store(value == L"true" || value == L"1" || value == L"yes");
-                    }
+					if (key == L"ignore_non_interactive") ignoreNonInteractive = ParseBool(value);
+                    else if (key == L"restore_on_exit") restoreOnExit = ParseBool(value);
+                    else if (key == L"suspend_updates_during_games") g_suspendUpdatesDuringGames.store(ParseBool(value));
+                    else if (key == L"lock_policy") lockPolicy = ParseBool(value);
+                    else if (key == L"idle_revert_enabled") g_idleRevertEnabled.store(ParseBool(value));
                     else if (key == L"idle_timeout")
                     {
                         if (!value.empty())
@@ -516,10 +505,7 @@ void LoadConfig()
                         try { return static_cast<uint32_t>(std::stoi(n)) * mul; } catch(...) { return 15000; }
                     };
 
-                    auto ParseBool = [](const std::wstring& v) {
-                        return (v == L"true" || v == L"1" || v == L"yes");
-                    };
-
+					// ParseBool is now static global
                     if (key == L"enabled") explorerConfig.enabled = ParseBool(value);
                     else if (key == L"idle_threshold") explorerConfig.idleThresholdMs = ParseTime(value);
                     else if (key == L"boost_dwm") explorerConfig.boostDwm = ParseBool(value);
