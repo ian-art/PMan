@@ -57,30 +57,21 @@ void ExplorerBooster::OnTick() {
     uint64_t now = GetTickCount64();
 
 	// CRITICAL FIX: Check if browser/game actually still exists
-    // If m_gameOrBrowserActive is true but no foreground window, auto-reset
     if (m_gameOrBrowserActive.load()) {
-        HWND fg = GetForegroundWindow();
+        HWND fg = GetForegroundWindow(); // Cache result to avoid double syscall
+        
         if (!fg) {
-            // Fix: Handle NULL window handle safely
+            // No foreground window at all - definitely safe to reset
             LogState("SAFETY RESET: No foreground window detected, clearing lock", 0);
-            OnGameStop(); // Force reset the stuck flag
-        }
-    }
-
-    // CRITICAL FIX: Check if browser/game actually still exists
-    if (m_gameOrBrowserActive.load()) {
-        HWND fg = GetForegroundWindow();
-        if (fg) {  // FIX: Only check if we HAVE a foreground window
+            OnGameStop(); 
+        } 
+        else {
             DWORD fgPid = 0;
             GetWindowThreadProcessId(fg, &fgPid);
             if (fgPid == 0) {
                 LogState("SAFETY RESET: No foreground PID detected, clearing lock", 0);
-                OnGameStop(); // Force reset the stuck flag
+                OnGameStop();
             }
-        } else {
-            // No foreground window at all - definitely safe to reset
-            LogState("SAFETY RESET: No foreground window, clearing lock", 0);
-            OnGameStop();
         }
     }
 
