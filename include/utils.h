@@ -4,6 +4,10 @@
 #include "types.h"
 #include <string>
 #include <memory>
+#include <vector>
+#include <functional>
+#include <windows.h>
+#include <tlhelp32.h>
 
 // Helpers
 std::string WideToUtf8(const wchar_t* wstr);
