@@ -335,8 +335,7 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
             
 			// 4. Moderate Memory Trimming								
 			// Special case: Don't freeze anti-cheat services if they mistakenly ended up in this list																						  
-            if (exe != L"riot-vanguard.exe" && exe != L"easyanticheat.exe" && 
-                exe != L"beservice.exe" && exe != L"navapsvc.exe") 
+            if (!IsAntiCheatProcess(exe)) 
             {
 				// FIX: Moderate trim to 200MB-500MB to prevent UI hangs/crashes								
                 SetProcessWorkingSetSize(hProc, 200 * 1024 * 1024, 500 * 1024 * 1024); 
