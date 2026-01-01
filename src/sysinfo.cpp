@@ -579,10 +579,6 @@ void DetectOSCapabilities()
                     osName = "Windows 10";
                 }
 
-                DWORD ubr = 0;
-                DWORD ubrSize = sizeof(ubr);
-                HKEY hUbrKey = nullptr;
-
 				DWORD ubr = 0;
                 RegReadDword(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", L"UBR", ubr);
 
