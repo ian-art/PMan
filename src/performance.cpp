@@ -225,9 +225,9 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
             }
             */
 
-            // Add synthetic frame data
+			// Add synthetic frame data
             session.frameHistory.push_back({now * 10000, estimatedFrameTime});
-            if (session.frameHistory.size() > 600) session.frameHistory.pop_front();
+            if (session.frameHistory.size() > 120) session.frameHistory.pop_front();
         }
     }
 	session.lastCpuTime = totalCpuTime100ns;
@@ -307,7 +307,7 @@ void PerformanceGuardian::OnPresentEvent(DWORD pid, uint64_t timestamp) {
         session.frameHistory.push_back({timestamp, 0.0});
     }
     
-    if (session.frameHistory.size() > 600) {
+	if (session.frameHistory.size() > 120) {
         session.frameHistory.pop_front();
     }
     
