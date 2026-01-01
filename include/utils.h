@@ -5,11 +5,11 @@
 #include <string>
 #include <memory>
 
-// Convert wide string to UTF-8
+// Helpers
 std::string WideToUtf8(const wchar_t* wstr);
-
-// Extract executable name from a full path
 std::wstring ExeFromPath(const wchar_t* path);
+ULONGLONG FileTimeToULL(const FILETIME& ft); // Shared utility
+bool IsAntiCheatProcess(const std::wstring& exeName); // Centralized AC check
 
 // Convert ASCII string to lowercase in-place
 void asciiLower(std::string& s);

@@ -179,8 +179,22 @@ DWORD GetParentProcessId(DWORD pid)
     return 0;
 }
 
-static ULONGLONG FileTimeToULL(const FILETIME& ft) {
+// FIX: Removed static to allow usage in performance.cpp
+ULONGLONG FileTimeToULL(const FILETIME& ft) {
     return (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+}
+
+// FIX: Centralized Anti-Cheat detection
+bool IsAntiCheatProcess(const std::wstring& exeName)
+{
+    if (exeName == L"riot-vanguard.exe" || 
+        exeName == L"easyanticheat.exe" || 
+        exeName == L"beservice.exe" || 
+        exeName == L"navapsvc.exe")
+    {
+        return true;
+    }
+    return false;
 }
 
 double GetCpuLoad() {
