@@ -182,15 +182,11 @@ static void DetectAMDChipletTopology()
     // For 3D V-Cache CPUs: CCD0 has the cache, CCD1+ don't
     if (g_cpuInfo.hasAmd3DVCache && g_cpuInfo.ccdCount >= 2)
     {
-        // Detect which CPU sets belong to which CCD
-        typedef BOOL (WINAPI *GetSystemCpuSetInformationPtr)(
-            PSYSTEM_CPU_SET_INFORMATION, ULONG, PULONG, HANDLE, ULONG);
-        
-        auto pGetSystemCpuSetInformation = 
-            reinterpret_cast<GetSystemCpuSetInformationPtr>(
-                GetProcAddress(kernel32, "GetSystemCpuSetInformation"));
-        
-        if (pGetSystemCpuSetInformation)
+	// Detect which CPU sets belong to which CCD
+    typedef BOOL (WINAPI *GetSystemCpuSetInformationPtr)(PSYSTEM_CPU_SET_INFORMATION, ULONG, PULONG, HANDLE, ULONG);
+    static auto pGetSystemCpuSetInformation = reinterpret_cast<GetSystemCpuSetInformationPtr>(GetNtProc("GetSystemCpuSetInformation"));
+    
+    if (pGetSystemCpuSetInformation)
         {
             ULONG cpuSetBufferSize = 0;
             pGetSystemCpuSetInformation(nullptr, 0, &cpuSetBufferSize, nullptr, 0);
