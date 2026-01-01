@@ -183,11 +183,8 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
     }
     CloseHandle(hProc);
     
-    ULARGE_INTEGER kernelTime, userTime;
-    kernelTime.LowPart = kernel.dwLowDateTime; kernelTime.HighPart = kernel.dwHighDateTime;
-    userTime.LowPart = user.dwLowDateTime; userTime.HighPart = user.dwHighDateTime;
-    
-	uint64_t totalCpuTime100ns = kernelTime.QuadPart + userTime.QuadPart;
+	// FIX: Use shared helper
+    uint64_t totalCpuTime100ns = FileTimeToULL(kernel) + FileTimeToULL(user);
     uint64_t now = GetTickCount64();
     
     // Fix: Use per-session tracking instead of static maps
