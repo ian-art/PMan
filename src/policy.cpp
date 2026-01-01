@@ -182,10 +182,8 @@ static bool IsProcessInActiveSession(DWORD pid)
         return false;
     }
 
-    // Verify the PID is still valid
-    ProcessIdentity verifyIdentity;
-    if (!GetProcessIdentity(pid, verifyIdentity) || 
-        verifyIdentity != currentIdentity)
+	// Verify the PID is still valid
+    if (!IsProcessIdentityValid(currentIdentity))
     {
         return false;
     }
