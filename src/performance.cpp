@@ -232,6 +232,7 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
 }
 
 void PerformanceGuardian::OnPerformanceTick() {
+    if (g_isSuspended.load()) return;
     std::lock_guard lock(m_mtx);
     uint64_t now = GetTickCount64();
 
@@ -320,14 +321,9 @@ void PerformanceGuardian::AnalyzeStutter(GameSession& session, DWORD pid) {
     if (session.frameHistory.size() < 60) return;
     
     // Calculate Stats
-    double sum = 0, sqSum = 0;
-    for (const auto& f : session.frameHistory) {
-        sum += f.durationMs;
-        sqSum += f.durationMs * f.durationMs;
-    }
-    
-    double mean = sum / session.frameHistory.size();
-    double variance = (sqSum / session.frameHistory.size()) - (mean * mean);
+	std::vector<double> stats = CalculateStats(session.frameHistory);
+    double mean = stats[0];
+    double variance = stats[1];
     double stdDev = std::sqrt((std::max)(0.0, variance));
     
     // Detect Micro-stutters (spikes > 2 sigma)
@@ -653,20 +649,7 @@ void PerformanceGuardian::GenerateSessionReport(const GameSession& session) {
 
     Log(report);
 
-    char* buf = nullptr;
-    size_t sz = 0;
-    std::filesystem::path reportPath;
-    if (_dupenv_s(&buf, &sz, "ProgramData") == 0 && buf != nullptr) {
-        reportPath = std::filesystem::path(buf) / "PriorityMgr" / "last_session_report.txt";
-        free(buf);
-    } else {
-        reportPath = "C:\\ProgramData\\PriorityMgr\\last_session_report.txt";
-    }
-    
-    std::error_code ec;
-    if (!std::filesystem::exists(reportPath.parent_path(), ec)) {
-        std::filesystem::create_directories(reportPath.parent_path(), ec);
-    }
+	std::filesystem::path reportPath = GetLogPath() / "last_session_report.txt";
 
     std::ofstream file(reportPath, std::ios::trunc);
     if (file.is_open()) {
