@@ -363,8 +363,7 @@ void SetProcessIoPriority(DWORD pid, int mode)
                 }
             }
         }
-    }
-    
+
 	if (!ioPrioritySet)
 	{
 		if (IsIoPriorityBlockedBySystem())
@@ -431,7 +430,7 @@ void SetProcessIoPriority(DWORD pid, int mode)
             }
         }
     }
-    
+	
     CloseHandle(hProcess);
 }
 
