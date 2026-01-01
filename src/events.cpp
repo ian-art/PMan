@@ -40,12 +40,12 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
     
     if (!PostQueuedCompletionStatus(g_hIocp, 0, 0, reinterpret_cast<LPOVERLAPPED>(job)))
     {
-        // Post failed - clean up manually
+		// Post failed - clean up manually
         g_iocpQueueSize.fetch_sub(1, std::memory_order_release);
         delete job;
         
         DWORD err = GetLastError();
-        if (err != ERROR_IO_PENDING && err != ERROR_SUCCESS) {
+        if (err != ERROR_SUCCESS) {
             Log("[IOCP] PostQueuedCompletionStatus failed: " + std::to_string(err));
         }
         return false;
