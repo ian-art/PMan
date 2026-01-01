@@ -33,20 +33,11 @@ std::wstring ExeFromPath(const wchar_t* path)
     return s;
 }
 
-void asciiLower(std::string& s)
+// asciiLower is now templated in header
+void* GetNtProc(const char* procName)
 {
-    for (char& c : s) 
-    {
-        if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
-    }
-}
-
-void asciiLower(std::wstring& s)
-{
-    for (wchar_t& c : s) 
-    {
-        if (c >= L'A' && c <= L'Z') c = c - L'A' + L'a';
-    }
+    HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
+    return hNtdll ? reinterpret_cast<void*>(GetProcAddress(hNtdll, procName)) : nullptr;
 }
 
 bool GetProcessIdentity(DWORD pid, ProcessIdentity& identity)

@@ -11,9 +11,16 @@ std::wstring ExeFromPath(const wchar_t* path);
 ULONGLONG FileTimeToULL(const FILETIME& ft); // Shared utility
 bool IsAntiCheatProcess(const std::wstring& exeName); // Centralized AC check
 
-// Convert ASCII string to lowercase in-place
-void asciiLower(std::string& s);
-void asciiLower(std::wstring& s);
+// Convert ASCII string to lowercase in-place (Templated)
+template<typename T>
+void asciiLower(T& s) {
+    for (auto& c : s) {
+        if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+    }
+}
+
+// Helper to get NTDLL function pointers
+void* GetNtProc(const char* procName);
 
 // Get process identity (PID + creation time)
 bool GetProcessIdentity(DWORD pid, ProcessIdentity& identity);
