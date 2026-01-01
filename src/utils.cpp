@@ -1,5 +1,6 @@
 #include "utils.h"
 #include "constants.h"
+#include "logger.h"
 #include <algorithm>
 #include <cctype>
 #include <cwctype>
@@ -252,3 +253,4 @@ bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD&
     DWORD size = sizeof(DWORD);
     return RegQueryValueExW(key, value, nullptr, nullptr, reinterpret_cast<BYTE*>(&outVal), &size) == ERROR_SUCCESS;
 }
+
