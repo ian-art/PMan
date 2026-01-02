@@ -17,9 +17,9 @@ static constexpr int MAX_IOCP_QUEUE_SIZE = 1000;
 bool PostIocp(JobType t, DWORD pid, HWND hwnd)
 {
 	// Check queue limit before allocation
-	// FIX: Backpressure mechanism - Wait for queue to drain instead of dropping events
-    while (g_iocpQueueSize.load(std::memory_order_acquire) >= MAX_IOCP_QUEUE_SIZE && g_running) {
-        Sleep(1);
+	// FIX: Drop event instead of blocking to prevent system lag/stutter
+    if (g_iocpQueueSize.load(std::memory_order_acquire) >= MAX_IOCP_QUEUE_SIZE) {
+        return false;
     }
     
     // Double check running state after wait
