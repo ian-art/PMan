@@ -484,9 +484,10 @@ if (!taskExists)
     HWND consoleWindow = GetConsoleWindow();
     if (consoleWindow != nullptr && !silent)
     {
-        ShowWindow(consoleWindow, SW_HIDE);
+        if (consoleWindow != nullptr)
     }
     
+	Log("*********************************");
     Log("=== Priority Manager Starting ===");
     Log("All Levels Implemented: Session-Scoped | Cooldown | Registry Guard | Graceful Shutdown | OS Detection | Anti-Interference");
     
