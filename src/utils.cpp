@@ -126,6 +126,8 @@ return (rc == ERROR_SUCCESS) ? val : 0xFFFFFFFF;
 bool IsAntiCheatProtected(DWORD pid)
 {
     // 1. Check Process Name first (Cheap)
+    // This relies on the consolidated list in IsAntiCheatProcess. 
+    // Fallback to module snapshot is disabled by default to prevent system-wide lag.
     ProcessIdentity identity;
     if (GetProcessIdentity(pid, identity)) {
         UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
@@ -137,25 +139,9 @@ bool IsAntiCheatProtected(DWORD pid)
             }
         }
     }
-
-    // 2. Check Loaded Modules (Expensive)
-    UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid));
-    if (hSnap.get() == INVALID_HANDLE_VALUE) return false;
-
-    MODULEENTRY32W me32 = {sizeof(me32)};
-    if (Module32FirstW(hSnap.get(), &me32)) 
-    {
-        do {
-            std::wstring mod = me32.szModule;
-            if (mod.find(L"EasyAntiCheat") != std::wstring::npos ||
-                mod.find(L"BEClient") != std::wstring::npos || 
-                mod.find(L"vgk") != std::wstring::npos ||      
-                mod.find(L"EAC") != std::wstring::npos) 
-            {
-                return true;
-            }
-        } while (Module32NextW(hSnap.get(), &me32));
-    }
+    
+    // Legacy expensive check removed for performance. 
+    // Enable only if deep inspection of injected AC modules is strictly required.
     return false;
 }
 
