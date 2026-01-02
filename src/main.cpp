@@ -35,6 +35,7 @@
 #include <iostream>
 #include <objbase.h> // Fixed: Required for CoInitialize
 #include <pdh.h>												
+#include <shellapi.h> // Required for CommandLineToArgvW
 
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "User32.lib")
@@ -264,8 +265,23 @@ static void LaunchRegistryGuard(DWORD originalVal)
 }
 }
 
-int wmain(int argc, wchar_t** argv)
+
+
+// Forward declaration for main program logic
+int RunMainProgram(int argc, wchar_t** argv);
+
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow)
 {
+    UNREFERENCED_PARAMETER(hInstance);
+    UNREFERENCED_PARAMETER(hPrevInstance);
+    UNREFERENCED_PARAMETER(nCmdShow);
+    UNREFERENCED_PARAMETER(lpCmdLine);
+
+    // Convert command line to argc/argv
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) return 1;
+	
     // Check for Guard Mode (Must be before Mutex check)
     if (argc >= 6 && (std::wstring(argv[1]) == L"--guard"))
     {
@@ -412,7 +428,7 @@ if (!taskExists)
     }
 
     HWND consoleWindow = GetConsoleWindow();
-    if (consoleWindow != nullptr)
+    if (consoleWindow != nullptr && !silent)
     {
         ShowWindow(consoleWindow, SW_HIDE);
     }
