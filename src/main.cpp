@@ -34,8 +34,7 @@
 #include <filesystem>
 #include <iostream>
 #include <objbase.h> // Fixed: Required for CoInitialize
-#include <pdh.h>
-#include <shellapi.h> // Required for CommandLineToArgvW
+#include <pdh.h>												
 
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "User32.lib")
@@ -203,16 +202,8 @@ static void LaunchRegistryGuard(DWORD originalVal)
 }
 }
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow)
+int wmain(int argc, wchar_t** argv)
 {
-    UNREFERENCED_PARAMETER(hInstance);
-    UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(lpCmdLine);
-    UNREFERENCED_PARAMETER(nCmdShow);
-
-    int argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-
     // Check for Guard Mode (Must be before Mutex check)
     if (argc >= 6 && (std::wstring(argv[1]) == L"--guard"))
     {
