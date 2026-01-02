@@ -45,6 +45,7 @@ uint32_t ExplorerBooster::GetIdleThreshold() const {
 }
 
 void ExplorerBooster::OnTick() {
+    if (g_userPaused.load()) return;
     // CAPTURE CONFIG SAFELY AT START OF TICK
     bool enabled = false;
     bool debug = false;

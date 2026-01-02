@@ -16,6 +16,12 @@ static constexpr DWORD   VAL_GAME   = 0x28;
 static constexpr DWORD   VAL_BROWSER= 0x26;
 static constexpr DWORD   IOCP_SHUTDOWN_KEY = 0xFFFFFFFF;
 
+// Tray Icon
+static constexpr UINT    WM_TRAYICON       = WM_USER + 1;
+static constexpr UINT    ID_TRAY_APP_ICON  = 1001;
+static constexpr UINT    ID_TRAY_EXIT      = 1002;
+static constexpr UINT    ID_TRAY_PAUSE     = 1003;
+
 // Mutex and Event Names
 static constexpr wchar_t MUTEX_NAME[] = L"Global\\PriorityManager_Mutex_1F4E7D2A";
 static constexpr wchar_t SHUTDOWN_EVENT_NAME[] = L"Global\\PriorityManager_Shutdown_Event_1F4E7D2A";

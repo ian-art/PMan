@@ -219,6 +219,7 @@ bool IsPolicyChangeAllowed(int newMode)
 void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
 {
     if (!g_running || pid == 0 || pid == GetCurrentProcessId()) return;
+    if (g_userPaused.load()) return;
     
     // Session-scoped filtering
     if (!hwnd && g_ignoreNonInteractive.load() && !g_sessionLocked.load())

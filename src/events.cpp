@@ -752,6 +752,8 @@ void AntiInterferenceWatchdog()
                 // Re-arm notification immediately
                 RegNotifyChangeKeyValue(hKey.get(), TRUE, REG_NOTIFY_CHANGE_LAST_SET, hRegEvent.get(), TRUE);
 
+                if (g_userPaused.load()) continue;
+
                 // Fix Read atomic state
                 uint64_t state = g_policyState.load();
                 int currentMode = static_cast<int>(state & 0xFFFFFFFF);

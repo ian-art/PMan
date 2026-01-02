@@ -55,6 +55,7 @@ extern std::atomic<bool> g_lockPolicy;
 extern std::atomic<int>  g_interferenceCount;
 extern std::atomic<bool> g_suspendUpdatesDuringGames;
 extern std::atomic<bool> g_isSuspended;
+extern std::atomic<bool> g_userPaused;
 
 // Idle Revert Feature
 extern std::atomic<bool> g_idleRevertEnabled;

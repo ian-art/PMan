@@ -38,6 +38,7 @@ std::atomic<bool> g_lockPolicy{false};
 std::atomic<int>  g_interferenceCount{0};
 std::atomic<bool> g_suspendUpdatesDuringGames{false};
 std::atomic<bool> g_isSuspended{false};
+std::atomic<bool> g_userPaused{false};
 
 // Idle Revert Feature
 std::atomic<bool> g_idleRevertEnabled{true};

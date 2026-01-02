@@ -265,10 +265,64 @@ static void LaunchRegistryGuard(DWORD originalVal)
 }
 }
 
-
-
 // Forward declaration for main program logic
 int RunMainProgram(int argc, wchar_t** argv);
+
+static NOTIFYICONDATAW g_nid = {};
+
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+    case WM_CREATE:
+        g_nid.cbSize = sizeof(NOTIFYICONDATAW);
+        g_nid.hWnd = hwnd;
+        g_nid.uID = ID_TRAY_APP_ICON;
+        g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+        g_nid.uCallbackMessage = WM_TRAYICON;
+        g_nid.hIcon = LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(101)); 
+        if (!g_nid.hIcon) g_nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+        wcscpy_s(g_nid.szTip, L"Priority Manager");
+        Shell_NotifyIconW(NIM_ADD, &g_nid);
+        return 0;
+
+    case WM_TRAYICON:
+        if (lParam == WM_RBUTTONUP || lParam == WM_LBUTTONUP)
+        {
+            SetForegroundWindow(hwnd);
+            HMENU hMenu = CreatePopupMenu();
+            bool paused = g_userPaused.load();
+            AppendMenuW(hMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Protection" : L"Pause Protection");
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
+            POINT pt; GetCursorPos(&pt);
+            TrackPopupMenu(hMenu, TPM_BOTTOMALIGN | TPM_RIGHTALIGN, pt.x, pt.y, 0, hwnd, nullptr);
+            DestroyMenu(hMenu);
+        }
+        return 0;
+
+    case WM_COMMAND:
+        if (LOWORD(wParam) == ID_TRAY_EXIT) {
+            DestroyWindow(hwnd);
+        } else if (LOWORD(wParam) == ID_TRAY_PAUSE) {
+            bool p = !g_userPaused.load();
+            g_userPaused.store(p);
+            wcscpy_s(g_nid.szTip, p ? L"Priority Manager (Paused)" : L"Priority Manager");
+            Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+            Log(p ? "[USER] Protection PAUSED." : "[USER] Protection RESUMED.");
+            if (!p) g_reloadNow.store(true);
+        }
+        return 0;
+
+    case WM_DESTROY:
+        Shell_NotifyIconW(NIM_DELETE, &g_nid);
+        PostQuitMessage(0);
+        return 0;
+
+    default:
+        return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+    }
+}
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow)
 {
@@ -546,13 +600,14 @@ if (!taskExists)
         Log("SetWinEventHook failed: " + std::to_string(GetLastError()));
     }
     
-    WNDCLASSW wc{}; 
-    wc.lpfnWndProc = DefWindowProcW;
+	WNDCLASSW wc{}; 
+    wc.lpfnWndProc = WindowProc;
     wc.lpszClassName = L"PMHidden";
     RegisterClassW(&wc);
     
-	HWND hwnd = CreateWindowW(wc.lpszClassName, L"", 0, 0, 0, 0, 0, 
-                              HWND_MESSAGE, nullptr, nullptr, nullptr);
+    // Parent must be nullptr (Top-level) for Tray Icon to receive events reliably
+	HWND hwnd = CreateWindowW(wc.lpszClassName, L"PriorityManagerTray", 0, 0, 0, 0, 0, 
+                              nullptr, nullptr, nullptr, nullptr);
     RegisterPowerNotifications(hwnd);
     
     // Register for Raw Input to track user activity (Keyboard & Mouse) for Explorer Booster
