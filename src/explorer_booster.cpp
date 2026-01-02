@@ -90,11 +90,17 @@ void ExplorerBooster::OnTick() {
         lastTickLog = now;
     }
 
-    // 1. Scan for new processes periodically
+	// 1. Scan for new processes periodically
     // FIX: Use local 'scanInterval' variable
-    if (now - m_lastScanMs > scanInterval) {
-        ScanShellProcesses();
-        m_lastScanMs = now;
+    // OPTIMIZATION: Do not scan if we are locked out (game active) or system is not idle
+    if (!m_gameOrBrowserActive.load() && m_currentState != ExplorerBoostState::LockedOut) {
+        // Exponential backoff: if we haven't seen activity for a long time, scan less frequently
+        uint32_t effectiveInterval = (now - m_lastUserActivityMs.load() > 60000) ? 30000 : scanInterval;
+
+        if (now - m_lastScanMs > effectiveInterval) {
+            ScanShellProcesses();
+            m_lastScanMs = now;
+        }
     }
 
     // 2. Update State Machine

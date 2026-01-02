@@ -75,21 +75,20 @@ try
             
             if (localtime_s(&timeinfo, &t) == 0)
             {
-                // Use strftime with explicit buffer size control
+				// Use strftime with explicit buffer size control
                 if (std::strftime(timebuf, TIMEBUF_SIZE, "%Y-%m-%d %H:%M:%S", &timeinfo) > 0)
                 {
-                    log << timebuf << "  " << msg << std::endl;
+                    // Use \n instead of std::endl to let OS handle buffering (prevents disk thrashing)
+                    log << timebuf << "  " << msg << "\n";
                 }
                 else
                 {
-                    // Handle formatting error gracefully
-                    log << "[Timestamp Error] " << msg << std::endl;
+                    log << "[Timestamp Error] " << msg << "\n";
                 }
             }
             else
             {
-                // Fallback if time conversion fails
-                log << msg << std::endl;
+                log << msg << "\n";
             }
         }
     }
