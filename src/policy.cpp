@@ -196,7 +196,8 @@ bool IsPolicyChangeAllowed(int newMode)
     if (newMode == currentMode) return true;
     
 	// Policy Cooldown / Hysteresis
-    static constexpr auto POLICY_COOLDOWN = std::chrono::seconds(5);
+    // 30s minimum to prevent scheduler thrashing
+    static constexpr auto POLICY_COOLDOWN = std::chrono::seconds(30);
     auto nowPoint = std::chrono::steady_clock::now();
     auto lastChangeRep = g_lastPolicyChange.load();
     
