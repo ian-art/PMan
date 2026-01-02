@@ -11,6 +11,7 @@
 #include <algorithm> // For std::max
 #include <unordered_map>
 #include <mutex>
+#include <thread> // For async trimming
 
 // NT MEMORY TRIM DEFINITIONS
 typedef NTSTATUS (NTAPI *NtSetSystemInformation_t)(
@@ -299,6 +300,13 @@ void SetProcessIoPriority(DWORD pid, int mode)
     // Fix: Check cache to prevent expensive API/Snapshot loops
     {
         std::lock_guard lock(g_ioPriorityCacheMtx);
+        
+        // Prevent unbounded growth (Claim 2.1)
+        if (g_ioPriorityCache.size() > 1000) {
+            g_ioPriorityCache.clear();
+            Log("[CACHE] IO Priority Cache cleared (size limit reached)");
+        }
+
         if (g_ioPriorityCache.find(pid) != g_ioPriorityCache.end() && g_ioPriorityCache[pid] == mode)
         {
             return;
@@ -907,34 +915,40 @@ void SetWorkingSetLimits(DWORD pid, int mode)
                 " (prevents paging)");
         }
         
-        CloseHandle(hProcess);
+		CloseHandle(hProcess);
         
-		// Trim browsers
-        std::shared_lock lg(g_setMtx);
-        std::unordered_set<std::wstring> browsersCopy = g_browsers;
-        lg.unlock();
-        
-        HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (hSnapshot != INVALID_HANDLE_VALUE)
-        {
-            PROCESSENTRY32W pe{};
-            pe.dwSize = sizeof(pe);
+        // [OPTIMIZATION] Offload browser trimming to background thread
+        // This prevents the Snapshot iteration from adding latency to the game launch.
+        std::thread([pid]() {
+            std::shared_lock lg(g_setMtx);
+            // Quick copy to minimize lock time
+            std::unordered_set<std::wstring> browsersCopy = g_browsers;
+            lg.unlock();
             
-            if (Process32FirstW(hSnapshot, &pe))
+            HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if (hSnapshot != INVALID_HANDLE_VALUE)
             {
-                do
+                PROCESSENTRY32W pe{};
+                pe.dwSize = sizeof(pe);
+                
+                if (Process32FirstW(hSnapshot, &pe))
                 {
-                    std::wstring exeName = pe.szExeFile;
-                    asciiLower(exeName);
-                    
-                    if (browsersCopy.count(exeName) && pe.th32ProcessID != pid)
+                    do
                     {
-                        TrimBrowserWorkingSet(pe.th32ProcessID);
-                    }
-                } while (Process32NextW(hSnapshot, &pe));
+                        std::wstring exeName = pe.szExeFile;
+                        asciiLower(exeName);
+                        
+                        // Ensure we don't trim the game itself if it's detected as a browser (unlikely but safe)
+                        if (browsersCopy.count(exeName) && pe.th32ProcessID != pid)
+                        {
+                            TrimBrowserWorkingSet(pe.th32ProcessID);
+                        }
+                    } while (Process32NextW(hSnapshot, &pe));
+                }
+                CloseHandle(hSnapshot);
             }
-            CloseHandle(hSnapshot);
-        }
+        }).detach();
+
         return;
     }
     else if (mode == 2) // BROWSER MODE
