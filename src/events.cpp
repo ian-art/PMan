@@ -16,19 +16,15 @@ static constexpr int MAX_IOCP_QUEUE_SIZE = 1000;
 
 bool PostIocp(JobType t, DWORD pid, HWND hwnd)
 {
-	// Check queue limit before allocation
-	// FIX: Drop event instead of blocking to prevent system lag/stutter
-    if (g_iocpQueueSize.load(std::memory_order_acquire) >= MAX_IOCP_QUEUE_SIZE) {
-        return false;
+    // Atomically reserve slot before allocation
+    int currentSize = g_iocpQueueSize.fetch_add(1, std::memory_order_acq_rel);
+    if (currentSize >= MAX_IOCP_QUEUE_SIZE)
+    {
+        g_iocpQueueSize.fetch_sub(1, std::memory_order_release);
+        return false; // Drop event, queue full
     }
     
-    // Double check running state after wait
-    if (!g_running) return false;
-    
-    if (!g_hIocp || g_hIocp == INVALID_HANDLE_VALUE) return false;
-    
-	// Use nothrow to prevent crashes on OOM
-    // FIX: Split allocation and initialization to satisfy static analysis (C28182)
+    // Now safe to allocate
     IocpJob* job = new (std::nothrow) IocpJob();
     if (!job) {
         Log("[IOCP] Failed to allocate job - out of memory");
@@ -38,15 +34,15 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
     job->pid = pid;
     job->hwnd = hwnd;
     
-	// Increment queue size BEFORE posting
-    // Fix: Ensure strict ordering (acq_rel) so increment is visible before job is processed
-    g_iocpQueueSize.fetch_add(1, std::memory_order_acq_rel);
+	// Queue size was already reserved (incremented) at the start of the function.
+    // Do NOT increment again here.
     
     if (!PostQueuedCompletionStatus(g_hIocp, 0, 0, reinterpret_cast<LPOVERLAPPED>(job)))
     {
-		// Post failed - clean up manually
         g_iocpQueueSize.fetch_sub(1, std::memory_order_release);
         delete job;
+        Log("[IOCP] Post failed, event dropped");
+    
         
         DWORD err = GetLastError();
         if (err != ERROR_SUCCESS) {
@@ -82,23 +78,27 @@ static const GUID DPCGuid = { 0x13976d09, 0x032d, 0x4fd7, { 0x81, 0x0a, 0x44, 0x
 static const GUID ISRGuid = { 0x99f948be, 0xb355, 0x4fc8, { 0x88, 0x7c, 0x7f, 0xf4, 0x67, 0x9c, 0x88, 0x4d } };
 
 static void WINAPI DpcIsrCallback(EVENT_RECORD* rec) {
+    // [OPTIMIZATION] Advanced: Use static ring buffer to prevent heap fragmentation in high-frequency ETW callback
+    static constexpr size_t DPC_RING_SIZE = 128;
+    static uint64_t dpcRingBuffer[DPC_RING_SIZE] = {0};
+    static size_t dpcRingHead = 0;
+    static size_t dpcRingCount = 0;
     static std::mutex dpcMtx;
-    static std::deque<uint64_t> dpcHistory; // Ring buffer of recent latencies
     
     if (!rec) return;
 
     DWORD bufferSize = 0;
     TdhGetEventInformation(rec, 0, nullptr, nullptr, &bufferSize);
-    if (bufferSize == 0) return;
     
-    std::vector<BYTE> buffer(bufferSize);
-    TRACE_EVENT_INFO* info = reinterpret_cast<TRACE_EVENT_INFO*>(buffer.data());
+    // Stack buffer optimization (avoid vector allocation). 4KB is safe and sufficient for ETW metadata.
+    if (bufferSize == 0 || bufferSize > 4096) return;
+    BYTE buffer[4096]; 
     
+    TRACE_EVENT_INFO* info = reinterpret_cast<TRACE_EVENT_INFO*>(buffer);
     if (TdhGetEventInformation(rec, 0, nullptr, info, &bufferSize) != ERROR_SUCCESS) 
         return;
 
     // Parse DPC duration (event ID 2 = DPCExec)
-    // Note: For DPC (Provider {139...}), Event ID 1=Enter, 2=Leave (Duration)
     if (rec->EventHeader.EventDescriptor.Id == 2) {
         ULONGLONG duration = 0;
         for (DWORD i = 0; i < info->PropertyCount; i++) {
@@ -114,22 +114,30 @@ static void WINAPI DpcIsrCallback(EVENT_RECORD* rec) {
                 
                 if (TdhGetProperty(rec, 0, nullptr, 1, &desc, sz, 
                                  reinterpret_cast<BYTE*>(&duration)) == ERROR_SUCCESS) {
-                    // duration is in 100ns units, convert to microseconds
+                    
                     uint64_t latencyUs = duration / 10;
                     
                     std::lock_guard lock(dpcMtx);
-                    dpcHistory.push_back(latencyUs);
-                    if (dpcHistory.size() > 100) dpcHistory.pop_front();
                     
-                    // Store the 95th percentile as system health metric
-                    if (!dpcHistory.empty()) {
-                        std::vector<uint64_t> sorted(dpcHistory.begin(), dpcHistory.end());
-                        std::sort(sorted.begin(), sorted.end());
-                        size_t idx = static_cast<size_t>(sorted.size() * 0.95);
-                        if (idx >= sorted.size()) idx = sorted.size() - 1;
+                    // Update Ring Buffer
+                    dpcRingBuffer[dpcRingHead] = latencyUs;
+                    dpcRingHead = (dpcRingHead + 1) % DPC_RING_SIZE;
+                    if (dpcRingCount < DPC_RING_SIZE) dpcRingCount++;
+                    
+                    // Calculate 95th percentile using stack copy + nth_element (faster than full sort)
+                    if (dpcRingCount > 0) {
+                        uint64_t snapshot[DPC_RING_SIZE];
+                        // Linear copy is valid for snapshotting data
+                        if (dpcRingCount == DPC_RING_SIZE) {
+                             memcpy(snapshot, dpcRingBuffer, sizeof(dpcRingBuffer));
+                        } else {
+                             memcpy(snapshot, dpcRingBuffer, dpcRingCount * sizeof(uint64_t));
+                        }
+
+                        size_t idx = static_cast<size_t>(dpcRingCount * 0.95);
+                        std::nth_element(snapshot, snapshot + idx, snapshot + dpcRingCount);
                         
-                        // FIX: Explicit static_cast to double prevents C4244 warning
-                        g_lastDpcLatency.store(static_cast<double>(sorted[idx]), std::memory_order_relaxed);
+                        g_lastDpcLatency.store(static_cast<double>(snapshot[idx]), std::memory_order_relaxed);
                     }
                 }
                 break;
@@ -137,6 +145,7 @@ static void WINAPI DpcIsrCallback(EVENT_RECORD* rec) {
         }
     }
 }
+
 
 // ---------------------------  ETW  ------------------------------------
 static void WINAPI EtwCallback(EVENT_RECORD* rec)
@@ -439,12 +448,14 @@ void EtwThread()
                    TRACE_LEVEL_VERBOSE, 0x1, 0, 0, nullptr); // 0x1 = Present only
 
 	// Enable DPC & ISR Providers (Verbose for duration data))
+    // DPC: Only capture duration warnings (>1ms)
     status = EnableTraceEx2(hSession, &DPCGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
-                            TRACE_LEVEL_VERBOSE, 0xFF, 0, 0, nullptr);
+                           TRACE_LEVEL_WARNING, 0x10, 0, 0, nullptr);
     if (status != ERROR_SUCCESS) Log("ETW: DPC EnableTraceEx2 failed: " + std::to_string(status));
 
+    // ISR: Only capture duration warnings (>1ms)
     status = EnableTraceEx2(hSession, &ISRGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
-                            TRACE_LEVEL_VERBOSE, 0xFF, 0, 0, nullptr);
+                           TRACE_LEVEL_WARNING, 0x10, 0, 0, nullptr);
     if (status != ERROR_SUCCESS) Log("ETW: ISR EnableTraceEx2 failed: " + std::to_string(status));
 
     if (status != ERROR_SUCCESS)
@@ -787,8 +798,20 @@ void AntiInterferenceWatchdog()
                 LASTINPUTINFO lii = { sizeof(LASTINPUTINFO) };
                 if (GetLastInputInfo(&lii))
                 {
-                    // FIX: Use GetTickCount64 for monotonic time, cast to DWORD to match lii.dwTime wrapping (C28159)
-                    DWORD idleMs = static_cast<DWORD>(GetTickCount64()) - lii.dwTime;
+                    uint64_t now = GetTickCount64();
+                    uint32_t lastInput = lii.dwTime;
+                    
+                    // Handle 32-bit wraparound
+                    uint64_t idleMs;
+                    if (now - lastInput > (1ULL << 32))
+                    {
+                        // Wrapped: need full 64-bit calculation
+                        idleMs = now - (0xFFFFFFFFULL - lastInput + 1ULL);
+                    }
+                    else
+                    {
+                        idleMs = now - lastInput;
+                    }
                     DWORD thresholdMs = g_idleTimeoutMs.load(); // Use the parsed MS value
                     int currentMode = g_lastMode.load();
 
