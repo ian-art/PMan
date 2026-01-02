@@ -162,7 +162,69 @@ static void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWO
                     std::to_string(originalVal));
             }
         }
-        RegCloseKey(key);
+	RegCloseKey(key);
+    } // End of Registry Check
+
+    // 3. CRITICAL: Check and resume suspended services
+    Log("[GUARD] Checking for stranded suspended services...");
+    SC_HANDLE scManager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (scManager) 
+    {
+        // Check BITS service
+        SC_HANDLE bits = OpenServiceW(scManager, L"BITS", SERVICE_QUERY_STATUS | SERVICE_START);
+        if (bits) 
+        {
+            SERVICE_STATUS status;
+            if (QueryServiceStatus(bits, &status) && status.dwCurrentState == SERVICE_STOPPED)
+            {
+                // Check if it was stopped by us (last start time within last hour)
+                // Heuristic: if stopped but not disabled, resume it
+                DWORD configSize = 0;
+                QueryServiceConfig(bits, NULL, 0, &configSize);
+                if (GetLastError() == ERROR_INSUFFICIENT_BUFFER && configSize > 0)
+                {
+                    std::vector<BYTE> configBuffer(configSize);
+                    LPQUERY_SERVICE_CONFIG config = reinterpret_cast<LPQUERY_SERVICE_CONFIG>(configBuffer.data());
+                    if (QueryServiceConfig(bits, config, configSize, &configSize))
+                    {
+                        if (config->dwStartType != SERVICE_DISABLED)
+                        {
+                            StartServiceW(bits, 0, nullptr);
+                            Log("[GUARD] BITS service was stopped - resumed");
+                        }
+                    }
+                }
+            }
+            CloseServiceHandle(bits);
+        }
+        
+        // Check Windows Update service
+        SC_HANDLE wuauserv = OpenServiceW(scManager, L"wuauserv", SERVICE_QUERY_STATUS | SERVICE_START);
+        if (wuauserv) 
+        {
+            SERVICE_STATUS status;
+            if (QueryServiceStatus(wuauserv, &status) && status.dwCurrentState == SERVICE_STOPPED)
+            {
+                DWORD configSize = 0;
+                QueryServiceConfig(wuauserv, NULL, 0, &configSize);
+                if (GetLastError() == ERROR_INSUFFICIENT_BUFFER && configSize > 0)
+                {
+                    std::vector<BYTE> configBuffer(configSize);
+                    LPQUERY_SERVICE_CONFIG config = reinterpret_cast<LPQUERY_SERVICE_CONFIG>(configBuffer.data());
+                    if (QueryServiceConfig(wuauserv, config, configSize, &configSize))
+                    {
+                        if (config->dwStartType != SERVICE_DISABLED)
+                        {
+                            StartServiceW(wuauserv, 0, nullptr);
+                            Log("[GUARD] wuauserv was stopped - resumed");
+                        }
+                    }
+                }
+            }
+            CloseServiceHandle(wuauserv);
+        }
+        
+        CloseServiceHandle(scManager);
     }
 }
 
@@ -365,9 +427,11 @@ if (!taskExists)
     g_explorerBooster.Initialize();
 
     DetectOSCapabilities();
-	// Create restore point before we do anything drastic, 
-    // but only if we have Admin rights (checked in DetectOSCapabilities)
-    EnsureStartupRestorePoint();
+    // Create restore point in background thread (non-blocking)
+    std::thread restoreThread([]() {
+        EnsureStartupRestorePoint();
+    });
+    restoreThread.detach(); // Don't block startup
     DetectHybridCoreSupport();
 
     // Safety check: Restore services if they were left suspended from a crash
@@ -431,18 +495,26 @@ if (!taskExists)
         Log("Failed to create shutdown event: " + std::to_string(GetLastError()));
     }
     
+    // Helper to pin thread to last physical core (away from games)
+    auto PinBackgroundThread = [](std::thread& t) {
+        if (g_physicalCoreCount > 2) {
+            DWORD_PTR affinityMask = 1ULL << (g_physicalCoreCount - 1);
+            SetThreadAffinityMask(t.native_handle(), affinityMask);
+        }
+    };
+    
     std::thread configThread(IocpConfigWatcher);
+    PinBackgroundThread(configThread);
+    
     std::thread etwThread;
     if (g_caps.canUseEtw)
     {
         etwThread = std::thread(EtwThread);
-    }
-    else
-    {
-        Log("WARNING: ETW unavailable. Falling back to WinEvent (foreground) detection only.");
+        PinBackgroundThread(etwThread);
     }
     
-	std::thread watchdogThread(AntiInterferenceWatchdog);
+    std::thread watchdogThread(AntiInterferenceWatchdog);
+    PinBackgroundThread(watchdogThread);
     
     // FIX: Check return value (C6031)
     HRESULT hrInit = CoInitialize(nullptr);
