@@ -220,10 +220,21 @@ static bool ResumeServiceState(WindowsServiceManager::ServiceState& state, const
             }
         }
     }
-    else if (state.action == ServiceAction::Paused)
+	else if (state.action == ServiceAction::Paused)
     {
         SERVICE_STATUS status;
-        if (ControlService(state.handle, SERVICE_CONTROL_CONTINUE, &status))
+        // FIX: Retry loop for service resumption (Claim 7.1)
+        // Services may fail transiently if dependencies are busy.
+        bool resumed = false;
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            if (ControlService(state.handle, SERVICE_CONTROL_CONTINUE, &status)) {
+                resumed = true;
+                break;
+            }
+            Sleep(500 * (attempt + 1)); // Backoff: 500ms, 1000ms, 1500ms
+        }
+
+        if (resumed)
         {
             Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " resumed successfully");
             success = true;
