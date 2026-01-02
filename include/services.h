@@ -44,8 +44,9 @@ public:
 	bool IsAnythingSuspended() const;
     void Cleanup();
 
-    // Metrics
+	// Metrics
     double GetBitsBandwidthMBps() const;
+    void UpdateBitsMetrics();
 
 private:
     mutable std::mutex m_metricsMtx;

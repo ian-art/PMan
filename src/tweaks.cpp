@@ -65,29 +65,8 @@ void IntelligentRamClean()
     }
 }
 
-static bool VerifyPrioritySeparation(DWORD expectedVal)
-{
-    DWORD currentVal = GetCurrentPrioritySeparation();
-    
-    if (currentVal == 0xFFFFFFFF)
-    {
-        Log("Verification failed: Unable to read registry");
-        g_cachedRegistryValue.store(0xFFFFFFFF);
-        return false;
-    }
-    
-    if (currentVal == expectedVal)
-    {
-        Log("√ Verification SUCCESS: " + GetModeDescription(currentVal));
-        return true;
-    }
-    else
-    {
-        Log("× Verification MISMATCH: Expected 0x" + std::to_string(expectedVal) + 
-            " but got 0x" + std::to_string(currentVal));
-        return false;
-    }
-}
+// [OPTIMIZATION] Removed VerifyPrioritySeparation to prevent registry hammering.
+// Verification is now handled asynchronously by the Watchdog if needed.
 
 bool SetPrioritySeparation(DWORD val)
 {
@@ -120,15 +99,15 @@ bool SetPrioritySeparation(DWORD val)
         return false;
     }
     
-    rc = RegSetValueExW(key.get(), L"Win32PrioritySeparation", 0, REG_DWORD,
+	rc = RegSetValueExW(key.get(), L"Win32PrioritySeparation", 0, REG_DWORD,
                         reinterpret_cast<const BYTE*>(&val), sizeof(val));
     // No explicit RegCloseKey needed - automatic cleanup
     
     if (rc == ERROR_SUCCESS)
     {
         g_cachedRegistryValue.store(val);
-        Sleep(50);
-        VerifyPrioritySeparation(val);
+        // Optimization: Removed Sleep(50) and verification to prevent registry hammering.
+        // The Anti-Interference Watchdog will catch discrepancies asynchronously.
         return true;
     }
     else

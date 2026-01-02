@@ -774,7 +774,11 @@ void AntiInterferenceWatchdog()
         }
 		else if (waitResult == WAIT_TIMEOUT) // Heartbeat
         {
-            // 0. Idle Revert Logic
+            // 0a. Update BITS Metrics (Background)
+            // This prevents blocking critical paths (like CaptureSnapshot) with Sleep(100)
+            g_serviceManager.UpdateBitsMetrics();
+
+            // 0b. Idle Revert Logic
 			if (g_idleRevertEnabled.load())
             {
                 LASTINPUTINFO lii = { sizeof(LASTINPUTINFO) };
