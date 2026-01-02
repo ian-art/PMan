@@ -83,15 +83,36 @@ bool SetPrioritySeparation(DWORD val)
         return true;
     }
     
-    HKEY rawKey = nullptr;
+HKEY rawKey = nullptr;
+    // Fix: Request KEY_QUERY_VALUE to check current value before writing
     LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
                             L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
-                            0, KEY_SET_VALUE, &rawKey);
+                            0, KEY_SET_VALUE | KEY_QUERY_VALUE, &rawKey);
     
     // RAII wrapper takes ownership immediately
     UniqueRegKey key(rawKey);
 
     if (rc != ERROR_SUCCESS) 
+    {
+        if (rc == ERROR_ACCESS_DENIED)
+            Log("Registry access denied - need admin rights");
+        else
+            Log("Registry open failed: " + std::to_string(rc));
+        return false;
+    }
+
+    DWORD currentVal = 0;
+    DWORD size = sizeof(currentVal);
+    // Fix: Use key.get() now that key is declared
+    if (RegQueryValueExW(key.get(), L"Win32PrioritySeparation", nullptr, nullptr,
+                        reinterpret_cast<BYTE*>(&currentVal), &size) == ERROR_SUCCESS)
+    {
+        if (currentVal == val)
+        {
+            g_cachedRegistryValue.store(val);
+            return true; // Skip unnecessary write
+        }
+    }
     {
         if (rc == ERROR_ACCESS_DENIED)
             Log("Registry access denied - need admin rights");
@@ -917,37 +938,59 @@ void SetWorkingSetLimits(DWORD pid, int mode)
         
 		CloseHandle(hProcess);
         
-        // [OPTIMIZATION] Offload browser trimming to background thread
-        // This prevents the Snapshot iteration from adding latency to the game launch.
-        std::thread([pid]() {
-            std::shared_lock lg(g_setMtx);
-            // Quick copy to minimize lock time
-            std::unordered_set<std::wstring> browsersCopy = g_browsers;
-            lg.unlock();
+// [OPTIMIZATION] Use cached browser PIDs instead of expensive snapshot
+        static std::mutex browserCacheMtx;
+        static std::unordered_set<DWORD> cachedBrowserPids;
+        static uint64_t lastBrowserScanMs = 0;
+        
+        // Capture a safe copy of the browser list for the thread
+        std::unordered_set<std::wstring> safeBrowserList;
+        {
+            std::shared_lock lock(g_setMtx);
+            safeBrowserList = g_browsers;
+        }
+
+        auto trimBrowsers = [pid, browsersCopy = std::move(safeBrowserList)]() {
+            std::lock_guard lock(browserCacheMtx);
+            uint64_t now = GetTickCount64();
+            
+            // Only scan every 60 seconds max
+            if (now - lastBrowserScanMs < 60000) {
+                // Use cached PIDs
+                for (DWORD browserPid : cachedBrowserPids) {
+                    if (browserPid != pid) {
+                        TrimBrowserWorkingSet(browserPid);
+                    }
+                }
+                return;
+            }
+            
+            // Update cache
+            lastBrowserScanMs = now;
+            cachedBrowserPids.clear();
             
             HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if (hSnapshot != INVALID_HANDLE_VALUE)
-            {
+            if (hSnapshot != INVALID_HANDLE_VALUE) {
                 PROCESSENTRY32W pe{};
                 pe.dwSize = sizeof(pe);
-                
-                if (Process32FirstW(hSnapshot, &pe))
-                {
-                    do
-                    {
+                if (Process32FirstW(hSnapshot, &pe)) {
+                    do {
                         std::wstring exeName = pe.szExeFile;
                         asciiLower(exeName);
                         
-                        // Ensure we don't trim the game itself if it's detected as a browser (unlikely but safe)
-                        if (browsersCopy.count(exeName) && pe.th32ProcessID != pid)
-                        {
-                            TrimBrowserWorkingSet(pe.th32ProcessID);
+                        if (browsersCopy.count(exeName)) {
+                            cachedBrowserPids.insert(pe.th32ProcessID);
+                            if (pe.th32ProcessID != pid) {
+                                TrimBrowserWorkingSet(pe.th32ProcessID);
+                            }
                         }
                     } while (Process32NextW(hSnapshot, &pe));
                 }
                 CloseHandle(hSnapshot);
             }
-        }).detach();
+        };
+        
+        std::thread(trimBrowsers).detach();
 
         return;
     }
