@@ -44,76 +44,113 @@ static void MarkRestorePointAsCreated()
 
 static bool CreateRestorePoint()
 {
-    // Fix: Force enable System Restore and bypass the 24-hour creation limit (Win10/11)
-    HKEY hSysRestore;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\SystemRestore", 
-        0, KEY_SET_VALUE, &hSysRestore) == ERROR_SUCCESS)
+    // NOTE:
+    // On Windows 10/11, System Restore is managed per-volume.
+    // There is NO supported registry switch that force-enables it.
+    // SRSetRestorePointW may return success even when a point is skipped.
+
+    // Best-effort: disable restore point frequency throttling
     {
-        DWORD val = 0;
-        // 0 = Allow multiple restore points per day (Bypass frequency limit)
-        RegSetValueExW(hSysRestore, L"SystemRestorePointCreationFrequency", 0, REG_DWORD, 
-            reinterpret_cast<const BYTE*>(&val), sizeof(val));
-        
-        // 0 = Globally Enable System Restore
-        RegSetValueExW(hSysRestore, L"DisableSR", 0, REG_DWORD, 
-            reinterpret_cast<const BYTE*>(&val), sizeof(val));
-            
-        RegCloseKey(hSysRestore);
+        HKEY hSysRestore;
+        if (RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\SystemRestore",
+                0,
+                KEY_SET_VALUE,
+                &hSysRestore) == ERROR_SUCCESS)
+        {
+            DWORD zero = 0;
+
+            // 0 = allow multiple restore points per day
+            RegSetValueExW(
+                hSysRestore,
+                L"SystemRestorePointCreationFrequency",
+                0,
+                REG_DWORD,
+                reinterpret_cast<const BYTE*>(&zero),
+                sizeof(zero));
+
+            RegCloseKey(hSysRestore);
+        }
     }
 
-    // 1. Load the library dynamically
+    // Load srclient.dll dynamically
     HMODULE hSrClient = LoadLibraryW(L"srclient.dll");
     if (!hSrClient)
     {
-        Log("[BACKUP] System Restore service (srclient.dll) not found - skipping backup");
+        Log("[BACKUP] srclient.dll not available. System Restore may be disabled.");
         return false;
     }
 
-    // 2. Get the function address
-    auto pSRSetRestorePointW = reinterpret_cast<SRSetRestorePointWPtr>(
-        GetProcAddress(hSrClient, "SRSetRestorePointW"));
+    auto pSRSetRestorePointW =
+        reinterpret_cast<SRSetRestorePointWPtr>(
+            GetProcAddress(hSrClient, "SRSetRestorePointW"));
 
     if (!pSRSetRestorePointW)
     {
-        Log("[BACKUP] SRSetRestorePointW entry point not found");
+        Log("[BACKUP] SRSetRestorePointW not exported by srclient.dll.");
         FreeLibrary(hSrClient);
         return false;
     }
 
-    // 3. Prepare the structure
-    RESTOREPOINTINFOW restorePt = {0};
-    restorePt.dwEventType = BEGIN_SYSTEM_CHANGE;
-    restorePt.dwRestorePtType = APPLICATION_INSTALL; // OR MODIFY_SETTINGS
-    restorePt.llSequenceNumber = 0;
-    wcscpy_s(restorePt.szDescription, L"Priority Manager First Run");
+    RESTOREPOINTINFOW rpInfo = {};
+    rpInfo.dwEventType      = BEGIN_SYSTEM_CHANGE;
+    rpInfo.dwRestorePtType = APPLICATION_INSTALL;
+    rpInfo.llSequenceNumber = 0;
+    wcscpy_s(rpInfo.szDescription, L"Priority Manager First Run");
 
-    STATEMGRSTATUS smStatus = {0};
+    STATEMGRSTATUS smStatus = {};
 
-    Log("[BACKUP] Attempting to create System Restore point...");
+    Log("[BACKUP] Requesting System Restore point creation...");
 
-    // 4. Call the API
-    if (pSRSetRestorePointW(&restorePt, &smStatus))
+    // BEGIN transaction
+    if (!pSRSetRestorePointW(&rpInfo, &smStatus))
     {
-        // Must call END_SYSTEM_CHANGE to finalize it
-        restorePt.dwEventType = END_SYSTEM_CHANGE;
-        restorePt.llSequenceNumber = smStatus.llSequenceNumber;
-        
-        if (pSRSetRestorePointW(&restorePt, &smStatus))
-        {
-            Log("[BACKUP] System Restore point created successfully.");
-            FreeLibrary(hSrClient);
-            return true;
-        }
+        Log("[BACKUP] BEGIN_SYSTEM_CHANGE rejected. Status: " +
+            std::to_string(smStatus.nStatus));
+        FreeLibrary(hSrClient);
+        return false;
     }
 
-    DWORD err = smStatus.nStatus; // Status from the manager
-    if (err == 0) err = GetLastError();
+    // END transaction (finalizes request)
+    rpInfo.dwEventType = END_SYSTEM_CHANGE;
+    rpInfo.llSequenceNumber = smStatus.llSequenceNumber;
 
-    Log("[BACKUP] Failed to create restore point. Status: " + std::to_string(err));
-    
+    if (!pSRSetRestorePointW(&rpInfo, &smStatus))
+    {
+        Log("[BACKUP] END_SYSTEM_CHANGE failed. Status: " +
+            std::to_string(smStatus.nStatus));
+        FreeLibrary(hSrClient);
+        return false;
+    }
+
+    /*
+        IMPORTANT:
+        SRSetRestorePointW returning success does NOT guarantee
+        that a restore point was created.
+
+        Common reasons for silent skip:
+        - System Protection disabled on the system volume
+        - Restore point frequency throttling
+        - Insufficient disk space
+        - Group Policy restrictions
+        - Concurrent restore activity
+    */
+
+    if (smStatus.nStatus == ERROR_SUCCESS)
+    {
+        Log("[BACKUP] Restore point request accepted by System Restore.");
+        FreeLibrary(hSrClient);
+        return true;
+    }
+
+    Log("[BACKUP] Restore point request completed with status: " +
+        std::to_string(smStatus.nStatus));
+
     FreeLibrary(hSrClient);
     return false;
 }
+
 
 void EnsureStartupRestorePoint()
 {
