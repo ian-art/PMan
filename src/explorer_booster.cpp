@@ -339,6 +339,11 @@ void ExplorerBooster::ApplyBoosts(DWORD pid, ExplorerBoostState state) {
 void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
     if (!m_config.preventShellPaging) return;
     
+    // Only enforce on systems with 12GB+ RAM
+    MEMORYSTATUSEX ms = { sizeof(ms) };
+    if (!GlobalMemoryStatusEx(&ms)) return;
+    if ((ms.ullTotalPhys >> 30) < 12) return; // <12GB: skip to avoid paging
+    
     auto it = m_instances.find(pid);
     if (it == m_instances.end()) return;
     HANDLE hProcess = it->second.handle.get();
@@ -346,14 +351,13 @@ void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
     PROCESS_MEMORY_COUNTERS pmc;
     if (!GetProcessMemoryInfo(hProcess, &pmc, sizeof(pmc))) return;
     
+    // Reduce locked memory: 32MB min, 96MB max (was 64-192)
     SIZE_T currentWS = pmc.WorkingSetSize;
-    // Don't let it shrink below 64MB, or current size if larger
-    SIZE_T minWS = (currentWS > 64 * 1024 * 1024) ? currentWS : 64 * 1024 * 1024;
-    // Allow some growth
-    SIZE_T maxWS = minWS + 128 * 1024 * 1024;
+    SIZE_T minWS = (currentWS > 32 * 1024 * 1024) ? currentWS : 32 * 1024 * 1024;
+    SIZE_T maxWS = minWS + 64 * 1024 * 1024; // 64MB growth headroom
     
-    // QUOTA_LIMITS_HARDWS_MIN_ENABLE (0x1) | QUOTA_LIMITS_HARDWS_MAX_DISABLE (0x8)
-    DWORD flags = 0x00000001 | 0x00000008; 
+    // Soft limits instead of hard: remove HARDWS_MIN flag
+    DWORD flags = QUOTA_LIMITS_HARDWS_MAX_DISABLE;
     
     if (SetProcessWorkingSetSizeEx(hProcess, minWS, maxWS, flags)) {
         // SUCCESS: Do nothing. (Silence the spam)
