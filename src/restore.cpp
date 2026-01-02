@@ -44,6 +44,23 @@ static void MarkRestorePointAsCreated()
 
 static bool CreateRestorePoint()
 {
+    // Fix: Force enable System Restore and bypass the 24-hour creation limit (Win10/11)
+    HKEY hSysRestore;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\SystemRestore", 
+        0, KEY_SET_VALUE, &hSysRestore) == ERROR_SUCCESS)
+    {
+        DWORD val = 0;
+        // 0 = Allow multiple restore points per day (Bypass frequency limit)
+        RegSetValueExW(hSysRestore, L"SystemRestorePointCreationFrequency", 0, REG_DWORD, 
+            reinterpret_cast<const BYTE*>(&val), sizeof(val));
+        
+        // 0 = Globally Enable System Restore
+        RegSetValueExW(hSysRestore, L"DisableSR", 0, REG_DWORD, 
+            reinterpret_cast<const BYTE*>(&val), sizeof(val));
+            
+        RegCloseKey(hSysRestore);
+    }
+
     // 1. Load the library dynamically
     HMODULE hSrClient = LoadLibraryW(L"srclient.dll");
     if (!hSrClient)
