@@ -750,9 +750,13 @@ if (!taskExists)
     
 	CoUninitialize();
     
-    g_running = false;
+	g_running = false;
     g_explorerBooster.Shutdown();
-    PostShutdown();
+    
+    // Signal threads to wake up/stop
+    if (g_hShutdownEvent) SetEvent(g_hShutdownEvent); // Wakes Watchdog immediately
+    StopEtwSession(); // Unblocks EtwThread (ProcessTrace returns)
+    PostShutdown(); // Wakes IocpConfigWatcher
     
     if (configThread.joinable()) configThread.join();
     if (etwThread.joinable()) etwThread.join();

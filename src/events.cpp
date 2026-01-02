@@ -339,7 +339,7 @@ struct TraceSessionGuard {
 // Mutex to prevent race conditions during session stop/callback
 static std::mutex g_etwSessionMtx;
 
-static void ForceStopEtwSession()
+void StopEtwSession()
 {
     std::lock_guard lock(g_etwSessionMtx);
     TRACEHANDLE session = g_etwSession.exchange(0);
@@ -1071,7 +1071,7 @@ void PerformGracefulShutdown()
 {
     Log("Performing graceful shutdown...");
     
-    ForceStopEtwSession();
+    StopEtwSession();
     
     if (g_sessionLocked.load())
     {

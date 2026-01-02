@@ -14,6 +14,7 @@ void CALLBACK WinEventProc(HWINEVENTHOOK, DWORD evt, HWND hwnd, LONG, LONG, DWOR
 // Control & Shutdown
 bool CheckForShutdownSignal();
 void PerformGracefulShutdown();
+void StopEtwSession();
 void WaitForThreads(DWORD timeoutMs = 5000);
 void PostShutdown();
 bool PostIocp(JobType t, DWORD pid = 0, HWND hwnd = nullptr);
