@@ -9,6 +9,8 @@
 #include <vector>
 #include <string>
 #include <algorithm> // For std::max
+#include <unordered_map>
+#include <mutex>
 
 // NT MEMORY TRIM DEFINITIONS
 typedef NTSTATUS (NTAPI *NtSetSystemInformation_t)(
@@ -274,6 +276,10 @@ void SetAmd3DVCacheAffinity(DWORD pid, int mode)
     CloseHandle(hProcess);
 }
 
+// Cache to prevent redundant I/O priority calls and expensive fallback loops
+static std::unordered_map<DWORD, int> g_ioPriorityCache;
+static std::mutex g_ioPriorityCacheMtx;
+
 static bool IsIoPriorityBlockedBySystem()
 {
     if (!g_caps.hasAdminRights) return true;
@@ -311,6 +317,15 @@ static bool IsIoPriorityBlockedBySystem()
 
 void SetProcessIoPriority(DWORD pid, int mode)
 {
+    // Fix: Check cache to prevent expensive API/Snapshot loops
+    {
+        std::lock_guard lock(g_ioPriorityCacheMtx);
+        if (g_ioPriorityCache.find(pid) != g_ioPriorityCache.end() && g_ioPriorityCache[pid] == mode)
+        {
+            return;
+        }
+    }
+
     UniqueHandle hGuard(OpenProcessSafe(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, pid, "[I/O]"));
     if (!hGuard) return;
     HANDLE hProcess = hGuard.get();
@@ -426,9 +441,15 @@ void SetProcessIoPriority(DWORD pid, int mode)
                 {
                     Log("[I/O] Fallback priority set: " + 
                         std::string(mode == 1 ? "ABOVE_NORMAL (game)" : "BELOW_NORMAL (browser)") + " using SetPriorityClass");
-                }
+				}
 			}
         }
+    }
+
+    // Update cache to prevent immediate retry (even if failed, to stop lag)
+    {
+        std::lock_guard lock(g_ioPriorityCacheMtx);
+        g_ioPriorityCache[pid] = mode;
     }
 	
     // CloseHandle(hProcess); // REMOVED: Managed by UniqueHandle hGuard to prevent double-free crash
@@ -1211,7 +1232,15 @@ void CleanupProcessState(DWORD pid)
     
     {
         std::lock_guard lock(g_trimTimeMtx);
-        if (g_lastTrimTimes.erase(pid) > 0)
+		if (g_lastTrimTimes.erase(pid) > 0)
+        {
+            cleanedSomething = true;
+        }
+    }
+
+    {
+        std::lock_guard lock(g_ioPriorityCacheMtx);
+        if (g_ioPriorityCache.erase(pid) > 0)
         {
             cleanedSomething = true;
         }
@@ -1325,10 +1354,25 @@ void ApplyTieredOptimization(DWORD pid, int mode, bool isGameChild)
             if (ntdll) {
                 typedef NTSTATUS (NTAPI *NtSetInformationProcessPtr)(HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG);
                 auto pNtSetInformationProcess = reinterpret_cast<NtSetInformationProcessPtr>(GetProcAddress(ntdll, "NtSetInformationProcess"));
-                if (pNtSetInformationProcess) {
-                     ULONG ioPriority = 4; // IoPriorityCritical
-                     pNtSetInformationProcess(hProcess, ProcessIoPriority, &ioPriority, sizeof(ioPriority));
-                     Log("[TIER1] I/O Priority set to CRITICAL");
+				if (pNtSetInformationProcess) {
+                     // Check cache for Critical I/O (Mode 4)
+                     bool skip = false;
+                     {
+                         std::lock_guard lock(g_ioPriorityCacheMtx);
+                         if (g_ioPriorityCache.find(pid) != g_ioPriorityCache.end() && g_ioPriorityCache[pid] == 4) skip = true;
+                     }
+
+                     if (!skip)
+                     {
+                         ULONG ioPriority = 4; // IoPriorityCritical
+                         pNtSetInformationProcess(hProcess, ProcessIoPriority, &ioPriority, sizeof(ioPriority));
+                         Log("[TIER1] I/O Priority set to CRITICAL");
+
+                         {
+                             std::lock_guard lock(g_ioPriorityCacheMtx);
+                             g_ioPriorityCache[pid] = 4;
+                         }
+                     }
                 }
             }
         }
