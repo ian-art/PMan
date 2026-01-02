@@ -184,7 +184,8 @@ static void DetectAMDChipletTopology()
     {
 	// Detect which CPU sets belong to which CCD
     typedef BOOL (WINAPI *GetSystemCpuSetInformationPtr)(PSYSTEM_CPU_SET_INFORMATION, ULONG, PULONG, HANDLE, ULONG);
-    static auto pGetSystemCpuSetInformation = reinterpret_cast<GetSystemCpuSetInformationPtr>(GetNtProc("GetSystemCpuSetInformation"));
+    // FIX: GetSystemCpuSetInformation is in Kernel32, not NTDLL
+    static auto pGetSystemCpuSetInformation = reinterpret_cast<GetSystemCpuSetInformationPtr>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetSystemCpuSetInformation"));
     
     if (pGetSystemCpuSetInformation)
         {
