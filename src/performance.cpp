@@ -13,6 +13,19 @@
 
 #pragma comment(lib, "Psapi.lib") // Link PSAPI
 
+// Helper to get precise process creation time for identity validation
+static uint64_t GetProcessCreationTimeHelper(DWORD pid) {
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc) return 0;
+    FILETIME c, e, k, u;
+    uint64_t res = 0;
+    if (GetProcessTimes(hProc, &c, &e, &k, &u)) {
+        res = (static_cast<uint64_t>(c.dwHighDateTime) << 32) | c.dwLowDateTime;
+    }
+    CloseHandle(hProc);
+    return res;
+}
+
 PerformanceGuardian::PerformanceGuardian() {}
 
 void PerformanceGuardian::Initialize() {
@@ -114,10 +127,11 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     std::lock_guard lock(m_mtx);
     GameSession session;
     session.pid = pid;
-    session.exeName = exeName;
+	session.exeName = exeName;
     session.lastAnalysisTime = GetTickCount64();
     session.sessionStartTime = GetTickCount64();
     session.sessionStutterCount = 0;
+    session.creationTime = GetProcessCreationTimeHelper(pid);
     
     // Check if we have a profile
     auto it = m_profiles.find(exeName);
@@ -244,12 +258,24 @@ void PerformanceGuardian::OnPerformanceTick() {
         bool isSilent = session.frameHistory.empty() || 
                        (now * 10000 - session.frameHistory.back().timestamp > 10000000); 
 
-        if (isSilent) {
+		if (isSilent) {
             EstimateFrameTimeFromCPU(session.pid);
         }
 
         // 2. Drive the Learning Loop manually
         if (now - session.lastAnalysisTime > 2000) {
+            // CRITICAL FIX: Validate Process Identity before analysis
+            // If the PID was reused, this prevents analyzing mixed/garbage data
+            uint64_t currentCreation = GetProcessCreationTimeHelper(session.pid);
+            if (currentCreation != 0 && session.creationTime != 0 && currentCreation != session.creationTime) {
+                Log("[PERF] PID Reuse detected for " + std::to_string(session.pid) + " (Zombie Session). Resetting.");
+                session.frameHistory.clear();
+                session.creationTime = currentCreation;
+                // Don't analyze this tick, wait for fresh data
+                session.lastAnalysisTime = now;
+                continue;
+            }
+
             if (!session.frameHistory.empty()) {
                 AnalyzeStutter(session, session.pid);
                 if (session.learningMode) UpdateLearning(session);
@@ -309,12 +335,8 @@ void PerformanceGuardian::OnPresentEvent(DWORD pid, uint64_t timestamp) {
         session.frameHistory.pop_front();
     }
     
-    uint64_t now = GetTickCount64();
-    if (now - session.lastAnalysisTime > 2000) {
-        AnalyzeStutter(session, pid);
-        if (session.learningMode) UpdateLearning(session);
-        session.lastAnalysisTime = now;
-    }
+    // [OPTIMIZATION] Removed synchronous AnalyzeStutter call.
+    // Analysis is now fully offloaded to OnPerformanceTick() to keep the Present path (ETW) wait-free.
 }
 
 void PerformanceGuardian::AnalyzeStutter(GameSession& session, DWORD pid) {
