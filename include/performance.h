@@ -50,11 +50,14 @@ private:
         bool tempIoHelps = false;
         bool tempPinHelps = false;
 
-        // Session Reporting
+		// Session Reporting
         uint64_t sessionStartTime = 0;
         uint32_t sessionStutterCount = 0;
+        
+        // Identity Validation (PID Reuse Protection)
+        uint64_t creationTime = 0;
 		
-		// Fix: Per-session CPU tracking (Moved from static function variables)
+		// Fix: Per-session CPU tracking
         uint64_t lastCpuTime = 0;
         uint64_t lastCpuTimestamp = 0;
     };
