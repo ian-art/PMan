@@ -353,8 +353,9 @@ std::wstring GetCurrentExeVersion()
     if (size == 0)
         return L"0.0.0.0";
 
-    std::vector<BYTE> buffer(size);
-    if (!GetFileVersionInfoW(path, handle, size, buffer.data()))
+	std::vector<BYTE> buffer(size);
+    // Fix C6388: Pass 0 as handle, as required/ignored by spec
+    if (!GetFileVersionInfoW(path, 0, size, buffer.data()))
         return L"0.0.0.0";
 
     VS_FIXEDFILEINFO* ffi = nullptr;
