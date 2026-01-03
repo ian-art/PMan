@@ -32,7 +32,6 @@ static constexpr wchar_t UPDATE_HOST[]     = L"dl.dropboxusercontent.com";
 static constexpr wchar_t UPDATE_VER_PATH[] = L"/scl/fi/o0j64sw05j35e6v5cmi9i/version.txt?rlkey=031mtw388jyfbej0tuvtdn3ac";
 // Link to pman.exe (Replace with your actual dl=1 link)
 static constexpr wchar_t UPDATE_BIN_PATH[] = L"/scl/fi/aaj2lplavy42q5zzxx6bo/pman.exe?rlkey=ixylbw2rxfsgifvl5ftwbj98f";
-static constexpr wchar_t CURR_VERSION[]    = L"2.2.4.2026";
 
 // Mutex and Event Names
 static constexpr wchar_t MUTEX_NAME[] = L"Global\\PriorityManager_Mutex_1F4E7D2A";

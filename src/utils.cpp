@@ -9,6 +9,7 @@
 #include <shellapi.h>
 #include <winhttp.h>
 #pragma comment(lib, "winhttp.lib")
+#pragma comment(lib, "Version.lib") // Required for GetFileVersionInfo
 
 std::string WideToUtf8(const wchar_t* wstr)
 {
@@ -336,7 +337,44 @@ static bool HttpRequest(const wchar_t* path, std::string& outData, bool binary)
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
 
-    return result;
+return result;
+}
+
+std::wstring GetCurrentExeVersion()
+{
+    wchar_t path[MAX_PATH]{};
+    // If the function fails, the return value is 0, path remains empty.
+    if (GetModuleFileNameW(nullptr, path, MAX_PATH) == 0)
+        return L"0.0.0.0";
+
+    DWORD handle = 0;
+    DWORD size = GetFileVersionInfoSizeW(path, &handle);
+    if (size == 0)
+        return L"0.0.0.0";
+
+    std::vector<BYTE> buffer(size);
+    if (!GetFileVersionInfoW(path, handle, size, buffer.data()))
+        return L"0.0.0.0";
+
+    VS_FIXEDFILEINFO* ffi = nullptr;
+    UINT len = 0;
+
+    if (!VerQueryValueW(buffer.data(), L"\\", reinterpret_cast<void**>(&ffi), &len))
+        return L"0.0.0.0";
+
+    if (len == 0 || ffi->dwSignature != VS_FFI_SIGNATURE)
+        return L"0.0.0.0";
+
+    wchar_t version[64];
+    swprintf_s(
+        version,
+        L"%u.%u.%u.%u",
+        HIWORD(ffi->dwFileVersionMS),
+        LOWORD(ffi->dwFileVersionMS),
+        HIWORD(ffi->dwFileVersionLS),
+        LOWORD(ffi->dwFileVersionLS));
+
+    return version;
 }
 
 bool CheckForUpdates(std::wstring& outLatestVer)
@@ -350,7 +388,10 @@ bool CheckForUpdates(std::wstring& outLatestVer)
         if (!data.empty()) {
             std::wstring latest = std::wstring(data.begin(), data.end());
             outLatestVer = latest;
-            return latest != CURR_VERSION;
+            
+            // Compare against dynamic resource version
+            std::wstring current = GetCurrentExeVersion();
+            return latest != current;
         }
     }
     return false;

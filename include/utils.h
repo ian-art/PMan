@@ -15,6 +15,9 @@ std::wstring ExeFromPath(const wchar_t* path);
 ULONGLONG FileTimeToULL(const FILETIME& ft); // Shared utility
 bool IsAntiCheatProcess(const std::wstring& exeName); // Centralized AC check
 
+// Retrieve file version from the executable's VERSIONINFO resource
+std::wstring GetCurrentExeVersion();
+
 // Convert ASCII string to lowercase in-place (Templated)
 template<typename T>
 void asciiLower(T& s) {

@@ -389,19 +389,20 @@ int wmain(int argc, wchar_t* argv[])
 	for (int i = 1; i < argc; i++)
     {
         std::wstring arg = argv[i];
-        if (arg == L"--help" || arg == L"-h" || arg == L"/?")
+		if (arg == L"--help" || arg == L"-h" || arg == L"/?")
         {
-            MessageBoxW(nullptr, 
-                L"Priority Manager (pman) v2.0.9.2025\n"
-				L"by Ian Anthony R. Tancinco\n\n"
-                L"Usage: pman.exe [OPTIONS]\n\n"
-				L"Options:\n"
-                L"  --help, -h, /?      Show this help message\n"
-                L"  --uninstall         Stop instances and remove startup task\n"
-                L"  --silent, /S         Run operations without message boxes\n"
-                L"  --guard             (Internal) Registry safety guard\n\n"
-                L"Automated Windows Priority & Affinity Manager",
-                L"Priority Manager - Help", MB_OK | MB_ICONINFORMATION);
+            std::wstring version = GetCurrentExeVersion();
+            std::wstring msg = L"Priority Manager (pman) v" + version + L"\n"
+                               L"by Ian Anthony R. Tancinco\n\n"
+                               L"Usage: pman.exe [OPTIONS]\n\n"
+                               L"Options:\n"
+                               L"  --help, -h, /?      Show this help message\n"
+                               L"  --uninstall         Stop instances and remove startup task\n"
+                               L"  --silent, /S         Run operations without message boxes\n"
+                               L"  --guard             (Internal) Registry safety guard\n\n"
+                               L"Automated Windows Priority & Affinity Manager";
+
+            MessageBoxW(nullptr, msg.c_str(), L"Priority Manager - Help", MB_OK | MB_ICONINFORMATION);
             return 0;
         }
         else if (arg == L"--uninstall" || arg == L"/uninstall") uninstall = true;
