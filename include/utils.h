@@ -55,7 +55,6 @@ bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD&
 bool CheckForUpdates(std::wstring& outLatestVer);
 bool DownloadUpdate(const std::wstring& savePath);
 void InstallUpdateAndRestart(const std::wstring& newExePath);
-void FinalizeUpdate(const std::wstring& targetPath, DWORD oldPid);
 
 // RAII Wrapper for Windows HANDLEs
 struct HandleDeleter {

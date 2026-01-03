@@ -34,7 +34,7 @@
 #include <filesystem>
 #include <iostream>
 #include <objbase.h> // Fixed: Required for CoInitialize
-#include <pdh.h>												
+#include <pdh.h>
 #include <shellapi.h> // Required for CommandLineToArgvW
 
 #pragma comment(lib, "Advapi32.lib")
@@ -44,6 +44,8 @@
 #pragma comment(lib, "Tdh.lib")
 #pragma comment(lib, "Pdh.lib") // For BITS monitoring
 
+// GLOBAL VARIABLE
+HINSTANCE g_hInst = nullptr;
 
 static void TerminateExistingInstances()
 {
@@ -349,22 +351,23 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     }
 }
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow)
+int wmain(int argc, wchar_t* argv[])
 {
-    UNREFERENCED_PARAMETER(hInstance);
-    UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(nCmdShow);
-    UNREFERENCED_PARAMETER(lpCmdLine);
+    // 1. Initialize Global Instance Handle (Required for Tray Icon)
+    g_hInst = GetModuleHandle(nullptr);
 
-    // Convert command line to argc/argv
-    int argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (!argv) return 1;
-	
-	// Check for Update Mode (Self-Update)
+    // 2. Hide Console Window immediately (Restored logic for Console Subsystem)
+    // This is required because /SUBSYSTEM:CONSOLE always spawns a window initially.
+    HWND consoleWindow = GetConsoleWindow();
+    if (consoleWindow != nullptr)
+    {
+        ShowWindow(consoleWindow, SW_HIDE);
+    }
+
+    // 3. argc/argv are provided directly by wmain, no conversion needed.
+
+    // Check for Update Mode (Self-Update)
     if (argc >= 4 && std::wstring(argv[1]) == L"--update") {
-        // argv[2] = target path, argv[3] = old pid
-        FinalizeUpdate(argv[2], std::wcstoul(argv[3], nullptr, 10));
         return 0;
     }
 
@@ -509,15 +512,11 @@ if (!taskExists)
         {
             if (!silent)
                 MessageBoxW(nullptr, L"Failed to launch schtasks. Please run as Administrator.", L"Priority Manager - Error", MB_OK | MB_ICONWARNING);
-            return 1;
+			return 1;
         }
     }
 
-    HWND consoleWindow = GetConsoleWindow();
-    if (consoleWindow != nullptr)
-    {
-        ShowWindow(consoleWindow, SW_HIDE);
-    }
+    // Console was hidden at startup.
 	
 	Log("*********************************");
     Log("=== Priority Manager Starting ===");
@@ -636,11 +635,12 @@ if (!taskExists)
 	WNDCLASSW wc{}; 
     wc.lpfnWndProc = WindowProc;
     wc.lpszClassName = L"PMHidden";
+    wc.hInstance = g_hInst; // FIX: Use global instance handle
     RegisterClassW(&wc);
     
-    // Parent must be nullptr (Top-level) for Tray Icon to receive events reliably
-	HWND hwnd = CreateWindowW(wc.lpszClassName, L"PriorityManagerTray", 0, 0, 0, 0, 0, 
-                              nullptr, nullptr, nullptr, nullptr);
+	// Parent must be nullptr (Top-level) for Tray Icon to receive events reliably
+    HWND hwnd = CreateWindowW(wc.lpszClassName, L"PriorityManagerTray", 0, 0, 0, 0, 0, 
+                              nullptr, nullptr, g_hInst, nullptr); // FIX: Use global instance handle
     RegisterPowerNotifications(hwnd);
     
     // Register for Raw Input to track user activity (Keyboard & Mouse) for Explorer Booster
@@ -777,11 +777,11 @@ if (!taskExists)
     RidCleanup[1].usUsagePage = 0x01; RidCleanup[1].usUsage = 0x02; RidCleanup[1].dwFlags = RIDEV_REMOVE; RidCleanup[1].hwndTarget = nullptr;
     RegisterRawInputDevices(RidCleanup, 2, sizeof(RAWINPUTDEVICE));
 
-    UnregisterPowerNotifications();
+	UnregisterPowerNotifications();
     if (hwnd) DestroyWindow(hwnd);
-    UnregisterClassW(wc.lpszClassName, nullptr);
+    UnregisterClassW(wc.lpszClassName, g_hInst); // FIX: Use global instance handle
     
-	CoUninitialize();
+    CoUninitialize();
     
 	g_running = false;
     g_explorerBooster.Shutdown();

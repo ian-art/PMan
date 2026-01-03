@@ -375,51 +375,31 @@ void InstallUpdateAndRestart(const std::wstring& newExePath)
 {
     wchar_t selfPath[MAX_PATH];
     GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
+
+    // Create a self-deleting batch script
+    // 1. Timeout to let this process exit
+    // 2. Move new file over old file
+    // 3. Start new file
+    // 4. Delete batch file
+    std::wstring batPath = std::wstring(selfPath) + L".update.bat";
     
-    // Launch new EXE with --update flag: pman_new.exe --update <target_exe> <old_pid>
-    std::wstring cmd = L"\"" + newExePath + L"\" --update \"" + selfPath + L"\" " + std::to_wstring(GetCurrentProcessId());
-    
-    STARTUPINFOW si = { sizeof(si) };
-    PROCESS_INFORMATION pi = {};
-    
-    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-        // We must exit now to allow the overwrite
+    std::string batScript = "@echo off\r\n"
+                            "timeout /t 1 /nobreak >nul\r\n"
+                            "move /y \"" + WideToUtf8(newExePath.c_str()) + "\" \"" + WideToUtf8(selfPath) + "\" >nul\r\n"
+                            "start \"\" \"" + WideToUtf8(selfPath) + "\" /silent\r\n"
+                            "del \"%~f0\"";
+
+    HANDLE hFile = CreateFileW(batPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        DWORD written = 0;
+        WriteFile(hFile, batScript.c_str(), (DWORD)batScript.length(), &written, nullptr);
+        CloseHandle(hFile);
+
+        // Execute the batch script hidden
+        ShellExecuteW(nullptr, L"open", batPath.c_str(), nullptr, nullptr, SW_HIDE);
+        
+        // Exit immediately to release file lock
         ExitProcess(0);
     }
-}
-
-void FinalizeUpdate(const std::wstring& targetPath, DWORD oldPid)
-{
-    // 1. Wait for old process to exit
-    HANDLE hProc = OpenProcess(SYNCHRONIZE, FALSE, oldPid);
-    if (hProc) {
-        WaitForSingleObject(hProc, 10000); // Wait up to 10s
-        CloseHandle(hProc);
-    }
-    
-    // 2. Overwrite the old binary
-    wchar_t selfPath[MAX_PATH];
-    GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
-    
-    bool success = false;
-    for (int i = 0; i < 20; i++) { // Retry for 2 seconds
-        if (CopyFileW(selfPath, targetPath.c_str(), FALSE)) {
-            success = true;
-            break;
-        }
-        Sleep(100);
-    }
-    
-    // 3. Relaunch the original (now updated) binary
-    if (success) {
-        ShellExecuteW(nullptr, nullptr, targetPath.c_str(), L"/silent", nullptr, SW_SHOWDEFAULT);
-    } else {
-        MessageBoxW(nullptr, L"Failed to overwrite main executable.", L"Update Error", MB_OK | MB_ICONERROR);
-    }
-    
-    // 4. Exit this temporary updater process
-    ExitProcess(0);
 }
 
