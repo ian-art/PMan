@@ -322,7 +322,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 if (result == IDYES) {
                         wchar_t tempPath[MAX_PATH];
                         GetTempPathW(MAX_PATH, tempPath);
-                        std::wstring dlPath = std::wstring(tempPath) + L"pman_new.exe";
+                        std::wstring dlPath = std::wstring(tempPath) + L"tmp.exe";
                         
                         if (DownloadUpdate(dlPath)) {
                             InstallUpdateAndRestart(dlPath);
