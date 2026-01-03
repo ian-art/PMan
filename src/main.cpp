@@ -292,7 +292,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             SetForegroundWindow(hwnd);
             HMENU hMenu = CreatePopupMenu();
             bool paused = g_userPaused.load();
-            AppendMenuW(hMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Protection" : L"Pause Protection");
+			AppendMenuW(hMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Protection" : L"Pause Protection");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
             POINT pt; GetCursorPos(&pt);
@@ -304,6 +305,30 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     case WM_COMMAND:
         if (LOWORD(wParam) == ID_TRAY_EXIT) {
             DestroyWindow(hwnd);
+			} else if (LOWORD(wParam) == ID_TRAY_UPDATE) {
+            std::thread([]{
+                std::wstring latest;
+                if (CheckForUpdates(latest)) {
+                    int result = MessageBoxW(nullptr, 
+                        (L"New version available: " + latest + L"\nUpdate now?").c_str(), 
+                        L"Update Available", MB_YESNO | MB_ICONQUESTION);
+                    
+                    if (result == IDYES) {
+                        wchar_t tempPath[MAX_PATH];
+                        GetTempPathW(MAX_PATH, tempPath);
+                        std::wstring dlPath = std::wstring(tempPath) + L"pman_new.exe";
+                        
+                        if (DownloadUpdate(dlPath)) {
+                            InstallUpdateAndRestart(dlPath);
+                        } else {
+                            MessageBoxW(nullptr, L"Download failed.", L"Error", MB_OK | MB_ICONERROR);
+                        }
+                    }
+                } else {
+                    MessageBoxW(nullptr, L"No updates available.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
+                }
+            }).detach();
+
         } else if (LOWORD(wParam) == ID_TRAY_PAUSE) {
             bool p = !g_userPaused.load();
             g_userPaused.store(p);
@@ -336,6 +361,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!argv) return 1;
 	
+	// Check for Update Mode (Self-Update)
+    if (argc >= 4 && std::wstring(argv[1]) == L"--update") {
+        // argv[2] = target path, argv[3] = old pid
+        FinalizeUpdate(argv[2], std::wcstoul(argv[3], nullptr, 10));
+        return 0;
+    }
+
     // Check for Guard Mode (Must be before Mutex check)
     if (argc >= 6 && (std::wstring(argv[1]) == L"--guard"))
     {

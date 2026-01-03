@@ -5,7 +5,10 @@
 #include <cctype>
 #include <cwctype>
 #include <tlhelp32.h>
-#include <mutex> // Fix: Added for thread safety
+#include <mutex>
+#include <shellapi.h>
+#include <winhttp.h>
+#pragma comment(lib, "winhttp.lib")
 
 std::string WideToUtf8(const wchar_t* wstr)
 {
@@ -237,6 +240,186 @@ bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD&
     UniqueRegKey keyGuard(key);
 
     DWORD size = sizeof(DWORD);
-    return RegQueryValueExW(key, value, nullptr, nullptr, reinterpret_cast<BYTE*>(&outVal), &size) == ERROR_SUCCESS;
+	return RegQueryValueExW(key, value, nullptr, nullptr, reinterpret_cast<BYTE*>(&outVal), &size) == ERROR_SUCCESS;
+}
+
+// ------------------- UPDATER IMPLEMENTATION -------------------
+
+static bool HttpRequest(const wchar_t* path, std::string& outData, bool binary)
+{
+    bool result = false;
+
+    HINTERNET hSession = WinHttpOpen(
+        L"PriorityManager/2.0",
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME,
+        WINHTTP_NO_PROXY_BYPASS,
+        0);
+
+    if (!hSession)
+        return false;
+
+    HINTERNET hConnect = WinHttpConnect(
+        hSession,
+        UPDATE_HOST,
+        INTERNET_DEFAULT_HTTPS_PORT,
+        0);
+
+    if (!hConnect) {
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    HINTERNET hRequest = WinHttpOpenRequest(
+        hConnect,
+        L"GET",
+        path,
+        nullptr,
+        WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES,
+        WINHTTP_FLAG_SECURE);
+
+    if (!hRequest) {
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+    WinHttpSetOption(
+        hRequest,
+        WINHTTP_OPTION_REDIRECT_POLICY,
+        &redirectPolicy,
+        sizeof(redirectPolicy));
+
+    if (WinHttpSendRequest(
+            hRequest,
+            WINHTTP_NO_ADDITIONAL_HEADERS,
+            0,
+            WINHTTP_NO_REQUEST_DATA,
+            0,
+            0,
+            0) &&
+        WinHttpReceiveResponse(hRequest, nullptr))
+    {
+        std::vector<char> buffer;
+        DWORD size = 0;
+
+        while (WinHttpQueryDataAvailable(hRequest, &size) && size > 0) {
+            std::vector<char> chunk(size);
+            DWORD read = 0;
+
+            if (!WinHttpReadData(hRequest, chunk.data(), size, &read))
+                break;
+
+            buffer.insert(buffer.end(), chunk.begin(), chunk.begin() + read);
+        }
+
+        if (!buffer.empty()) {
+            if (!binary) {
+                // Strip UTF-8 BOM if present
+                if (buffer.size() >= 3 &&
+                    static_cast<unsigned char>(buffer[0]) == 0xEF &&
+                    static_cast<unsigned char>(buffer[1]) == 0xBB &&
+                    static_cast<unsigned char>(buffer[2]) == 0xBF)
+                {
+                    buffer.erase(buffer.begin(), buffer.begin() + 3);
+                }
+            }
+
+            outData.assign(buffer.begin(), buffer.end());
+            result = true;
+        }
+    }
+
+    WinHttpCloseHandle(hRequest);
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+
+    return result;
+}
+
+bool CheckForUpdates(std::wstring& outLatestVer)
+{
+    std::string data;
+    if (HttpRequest(UPDATE_VER_PATH, data, false)) {
+        // Trim whitespace
+        data.erase(0, data.find_first_not_of(" \n\r\t"));
+        data.erase(data.find_last_not_of(" \n\r\t") + 1);
+        
+        if (!data.empty()) {
+            std::wstring latest = std::wstring(data.begin(), data.end());
+            outLatestVer = latest;
+            return latest != CURR_VERSION;
+        }
+    }
+    return false;
+}
+
+bool DownloadUpdate(const std::wstring& savePath)
+{
+    std::string data;
+    if (HttpRequest(UPDATE_BIN_PATH, data, true)) {
+        HANDLE hFile = CreateFileW(savePath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hFile != INVALID_HANDLE_VALUE) {
+            DWORD written = 0;
+            WriteFile(hFile, data.data(), (DWORD)data.size(), &written, nullptr);
+            CloseHandle(hFile);
+            return written == data.size();
+        }
+    }
+    return false;
+}
+
+void InstallUpdateAndRestart(const std::wstring& newExePath)
+{
+    wchar_t selfPath[MAX_PATH];
+    GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
+    
+    // Launch new EXE with --update flag: pman_new.exe --update <target_exe> <old_pid>
+    std::wstring cmd = L"\"" + newExePath + L"\" --update \"" + selfPath + L"\" " + std::to_wstring(GetCurrentProcessId());
+    
+    STARTUPINFOW si = { sizeof(si) };
+    PROCESS_INFORMATION pi = {};
+    
+    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        // We must exit now to allow the overwrite
+        ExitProcess(0);
+    }
+}
+
+void FinalizeUpdate(const std::wstring& targetPath, DWORD oldPid)
+{
+    // 1. Wait for old process to exit
+    HANDLE hProc = OpenProcess(SYNCHRONIZE, FALSE, oldPid);
+    if (hProc) {
+        WaitForSingleObject(hProc, 10000); // Wait up to 10s
+        CloseHandle(hProc);
+    }
+    
+    // 2. Overwrite the old binary
+    wchar_t selfPath[MAX_PATH];
+    GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
+    
+    bool success = false;
+    for (int i = 0; i < 20; i++) { // Retry for 2 seconds
+        if (CopyFileW(selfPath, targetPath.c_str(), FALSE)) {
+            success = true;
+            break;
+        }
+        Sleep(100);
+    }
+    
+    // 3. Relaunch the original (now updated) binary
+    if (success) {
+        ShellExecuteW(nullptr, nullptr, targetPath.c_str(), L"/silent", nullptr, SW_SHOWDEFAULT);
+    } else {
+        MessageBoxW(nullptr, L"Failed to overwrite main executable.", L"Update Error", MB_OK | MB_ICONERROR);
+    }
+    
+    // 4. Exit this temporary updater process
+    ExitProcess(0);
 }
 

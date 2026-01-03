@@ -21,6 +21,18 @@ static constexpr UINT    WM_TRAYICON       = WM_USER + 1;
 static constexpr UINT    ID_TRAY_APP_ICON  = 1001;
 static constexpr UINT    ID_TRAY_EXIT      = 1002;
 static constexpr UINT    ID_TRAY_PAUSE     = 1003;
+static constexpr UINT    ID_TRAY_UPDATE    = 1004;
+
+// Update Configuration (DROPBOX EXAMPLE)
+// HOST: Just the domain (e.g., www.dropbox.com)
+// PATH: Everything after the domain, including query params (?dl=1)
+
+static constexpr wchar_t UPDATE_HOST[]     = L"dl.dropboxusercontent.com";
+// Link to version.txt (Replace with your actual dl=1 link)
+static constexpr wchar_t UPDATE_VER_PATH[] = L"/scl/fi/o0j64sw05j35e6v5cmi9i/version.txt?rlkey=031mtw388jyfbej0tuvtdn3ac";
+// Link to pman.exe (Replace with your actual dl=1 link)
+static constexpr wchar_t UPDATE_BIN_PATH[] = L"/scl/fi/aaj2lplavy42q5zzxx6bo/pman.exe?rlkey=ixylbw2rxfsgifvl5ftwbj98f";
+static constexpr wchar_t CURR_VERSION[]    = L"2.2.4.2026";
 
 // Mutex and Event Names
 static constexpr wchar_t MUTEX_NAME[] = L"Global\\PriorityManager_Mutex_1F4E7D2A";

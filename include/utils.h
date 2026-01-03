@@ -51,6 +51,12 @@ void ForEachProcess(std::function<void(const PROCESSENTRY32W&)> callback);
 // Registry Helpers
 bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD& outVal);
 
+// Updater Functions
+bool CheckForUpdates(std::wstring& outLatestVer);
+bool DownloadUpdate(const std::wstring& savePath);
+void InstallUpdateAndRestart(const std::wstring& newExePath);
+void FinalizeUpdate(const std::wstring& targetPath, DWORD oldPid);
+
 // RAII Wrapper for Windows HANDLEs
 struct HandleDeleter {
     void operator()(HANDLE h) const {
