@@ -1,6 +1,7 @@
 #include "utils.h"
 #include "constants.h"
 #include "logger.h"
+#include <vector>
 #include <algorithm>
 #include <cctype>
 #include <cwctype>
@@ -362,31 +363,29 @@ std::wstring GetCurrentExeVersion()
     if (!VerQueryValueW(buffer.data(), L"\\", reinterpret_cast<void**>(&ffi), &len))
         return L"0.0.0.0";
 
-    if (len == 0 || ffi->dwSignature != VS_FFI_SIGNATURE)
+	if (len == 0 || ffi->dwSignature != VS_FFI_SIGNATURE)
         return L"0.0.0.0";
 
-    wchar_t version[64];
-    swprintf_s(
-        version,
-        L"%u.%u.%u.%u",
-        HIWORD(ffi->dwFileVersionMS),
-        LOWORD(ffi->dwFileVersionMS),
-        HIWORD(ffi->dwFileVersionLS),
-        LOWORD(ffi->dwFileVersionLS));
-
-    return version;
+    // Use C++ string construction to avoid buffer heuristics
+    return std::to_wstring(HIWORD(ffi->dwFileVersionMS)) + L"." +
+           std::to_wstring(LOWORD(ffi->dwFileVersionMS)) + L"." +
+           std::to_wstring(HIWORD(ffi->dwFileVersionLS)) + L"." +
+           std::to_wstring(LOWORD(ffi->dwFileVersionLS));
 }
 
 bool CheckForUpdates(std::wstring& outLatestVer)
 {
     std::string data;
     if (HttpRequest(UPDATE_VER_PATH, data, false)) {
-        // Trim whitespace
-        data.erase(0, data.find_first_not_of(" \n\r\t"));
-        data.erase(data.find_last_not_of(" \n\r\t") + 1);
+        // Safe Trim: Avoid npos/out_of_range errors on empty strings
+        size_t first = data.find_first_not_of(" \n\r\t");
+        if (first == std::string::npos) return false; // String is all whitespace or empty
+
+        size_t last = data.find_last_not_of(" \n\r\t");
+        std::string cleanData = data.substr(first, (last - first + 1));
         
-        if (!data.empty()) {
-            std::wstring latest = std::wstring(data.begin(), data.end());
+        if (!cleanData.empty()) {
+            std::wstring latest = std::wstring(cleanData.begin(), cleanData.end());
             outLatestVer = latest;
             
             // Compare against dynamic resource version

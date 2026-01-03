@@ -294,7 +294,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             SetForegroundWindow(hwnd);
             HMENU hMenu = CreatePopupMenu();
             bool paused = g_userPaused.load();
-			AppendMenuW(hMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Protection" : L"Pause Protection");
+			AppendMenuW(hMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Activity" : L"Pause Activity");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
@@ -310,12 +310,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			} else if (LOWORD(wParam) == ID_TRAY_UPDATE) {
             std::thread([]{
                 std::wstring latest;
-                if (CheckForUpdates(latest)) {
-                    int result = MessageBoxW(nullptr, 
-                        (L"New version available: " + latest + L"\nUpdate now?").c_str(), 
-                        L"Update Available", MB_YESNO | MB_ICONQUESTION);
-                    
-                    if (result == IDYES) {
+				if (CheckForUpdates(latest)) {
+                std::wstring current = GetCurrentExeVersion();
+                std::wstring msg = L"Current version: " + current + L"\n"
+                                   L"New version: " + latest + L"\n\n"
+                                   L"Update now?";
+
+                int result = MessageBoxW(nullptr, msg.c_str(), 
+                    L"Update Available:", MB_YESNO | MB_ICONQUESTION);
+                
+                if (result == IDYES) {
                         wchar_t tempPath[MAX_PATH];
                         GetTempPathW(MAX_PATH, tempPath);
                         std::wstring dlPath = std::wstring(tempPath) + L"pman_new.exe";
@@ -392,15 +396,17 @@ int wmain(int argc, wchar_t* argv[])
 		if (arg == L"--help" || arg == L"-h" || arg == L"/?")
         {
             std::wstring version = GetCurrentExeVersion();
-            std::wstring msg = L"Priority Manager (pman) v" + version + L"\n"
-                               L"by Ian Anthony R. Tancinco\n\n"
-                               L"Usage: pman.exe [OPTIONS]\n\n"
-                               L"Options:\n"
-                               L"  --help, -h, /?      Show this help message\n"
-                               L"  --uninstall         Stop instances and remove startup task\n"
-                               L"  --silent, /S         Run operations without message boxes\n"
-                               L"  --guard             (Internal) Registry safety guard\n\n"
-                               L"Automated Windows Priority & Affinity Manager";
+            std::wstring msg;
+            msg.reserve(512); // Pre-allocate to prevent reallocation fragmentation
+            msg += L"Priority Manager (pman) v" + version + L"\n";
+            msg += L"by Ian Anthony R. Tancinco\n\n";
+            msg += L"Usage: pman.exe [OPTIONS]\n\n";
+            msg += L"Options:\n";
+            msg += L"  --help, -h, /?      Show this help message\n";
+            msg += L"  --uninstall         Stop instances and remove startup task\n";
+            msg += L"  --silent, /S         Run operations without message boxes\n";
+            msg += L"  --guard             (Internal) Registry safety guard\n\n";
+            msg += L"Automated Windows Priority & Affinity Manager";
 
             MessageBoxW(nullptr, msg.c_str(), L"Priority Manager - Help", MB_OK | MB_ICONINFORMATION);
             return 0;
