@@ -182,9 +182,11 @@ static void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWO
             {
                 // Check if it was stopped by us (last start time within last hour)
                 // Heuristic: if stopped but not disabled, resume it
-                DWORD configSize = 0;
-                QueryServiceConfig(bits, NULL, 0, &configSize);
-                if (GetLastError() == ERROR_INSUFFICIENT_BUFFER && configSize > 0)
+				DWORD configSize = 0;
+                // Fix C6031: Explicitly check for expected failure
+                if (!QueryServiceConfig(bits, nullptr, 0, &configSize) && 
+                    GetLastError() == ERROR_INSUFFICIENT_BUFFER && 
+                    configSize > 0)
                 {
                     std::vector<BYTE> configBuffer(configSize);
                     LPQUERY_SERVICE_CONFIG config = reinterpret_cast<LPQUERY_SERVICE_CONFIG>(configBuffer.data());
@@ -208,9 +210,11 @@ static void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWO
             SERVICE_STATUS status;
             if (QueryServiceStatus(wuauserv, &status) && status.dwCurrentState == SERVICE_STOPPED)
             {
-                DWORD configSize = 0;
-                QueryServiceConfig(wuauserv, NULL, 0, &configSize);
-                if (GetLastError() == ERROR_INSUFFICIENT_BUFFER && configSize > 0)
+				DWORD configSize = 0;
+                // Fix C6031: Explicitly check for expected failure
+                if (!QueryServiceConfig(wuauserv, nullptr, 0, &configSize) && 
+                    GetLastError() == ERROR_INSUFFICIENT_BUFFER && 
+                    configSize > 0)
                 {
                     std::vector<BYTE> configBuffer(configSize);
                     LPQUERY_SERVICE_CONFIG config = reinterpret_cast<LPQUERY_SERVICE_CONFIG>(configBuffer.data());
