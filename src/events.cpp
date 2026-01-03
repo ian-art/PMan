@@ -105,43 +105,55 @@ static void WINAPI DpcIsrCallback(EVENT_RECORD* rec) {
             wchar_t* propName = reinterpret_cast<wchar_t*>(
                 reinterpret_cast<BYTE*>(info) + info->EventPropertyInfoArray[i].NameOffset);
             
-            if (propName && wcscmp(propName, L"Duration") == 0) {
-                PROPERTY_DATA_DESCRIPTOR desc;
-                desc.PropertyName = reinterpret_cast<ULONGLONG>(propName);
-                desc.ArrayIndex = ULONG_MAX;
-                desc.Reserved = 0;
-                DWORD sz = sizeof(duration);
-                
-                if (TdhGetProperty(rec, 0, nullptr, 1, &desc, sz, 
-                                 reinterpret_cast<BYTE*>(&duration)) == ERROR_SUCCESS) {
-                    
-                    uint64_t latencyUs = duration / 10;
-                    
-                    std::lock_guard lock(dpcMtx);
-                    
-                    // Update Ring Buffer
-                    dpcRingBuffer[dpcRingHead] = latencyUs;
-                    dpcRingHead = (dpcRingHead + 1) % DPC_RING_SIZE;
-                    if (dpcRingCount < DPC_RING_SIZE) dpcRingCount++;
-                    
-                    // Calculate 95th percentile using stack copy + nth_element (faster than full sort)
-                    if (dpcRingCount > 0) {
-                        uint64_t snapshot[DPC_RING_SIZE];
-                        // Linear copy is valid for snapshotting data
-                        if (dpcRingCount == DPC_RING_SIZE) {
-                             memcpy(snapshot, dpcRingBuffer, sizeof(dpcRingBuffer));
-                        } else {
-                             memcpy(snapshot, dpcRingBuffer, dpcRingCount * sizeof(uint64_t));
-                        }
+            if (!propName || wcscmp(propName, L"Duration") != 0) 
+                continue;
 
-                        size_t idx = static_cast<size_t>(dpcRingCount * 0.95);
-                        std::nth_element(snapshot, snapshot + idx, snapshot + dpcRingCount);
-                        
-                        g_lastDpcLatency.store(static_cast<double>(snapshot[idx]), std::memory_order_relaxed);
+            PROPERTY_DATA_DESCRIPTOR desc;
+            desc.PropertyName = reinterpret_cast<ULONGLONG>(propName);
+            desc.ArrayIndex = ULONG_MAX;
+            desc.Reserved = 0;
+            DWORD sz = sizeof(duration);
+            
+            if (TdhGetProperty(rec, 0, nullptr, 1, &desc, sz, 
+                             reinterpret_cast<BYTE*>(&duration)) == ERROR_SUCCESS) {
+                
+                uint64_t latencyUs = duration / 10;
+                
+                std::lock_guard lock(dpcMtx);
+                
+                // Update Ring Buffer
+                dpcRingBuffer[dpcRingHead] = latencyUs;
+                dpcRingHead = (dpcRingHead + 1) % DPC_RING_SIZE;
+                if (dpcRingCount < DPC_RING_SIZE) dpcRingCount++;
+                
+                // Calculate 95th percentile using stack copy + nth_element
+                size_t count = dpcRingCount;
+
+                if (count > 0) {
+                    // FIX C6385: Use integer arithmetic and explicit bounds checking
+                    size_t safeCount = (count > DPC_RING_SIZE) ? DPC_RING_SIZE : count;
+                    uint64_t snapshot[DPC_RING_SIZE];
+                    
+                    if (safeCount == 0) return; // Early exit for analyzer
+                    
+                    memcpy(snapshot, dpcRingBuffer, safeCount * sizeof(uint64_t));
+                    
+                    // Calculate 95th percentile index
+                    size_t idx = (safeCount * 95) / 100;
+                    
+                    // Safety clamp
+                    if (idx >= safeCount) {
+                        idx = safeCount - 1;
                     }
+                    
+                    // --- C6385 FIX: Redundant check for static analyzer ---
+                    if (idx >= safeCount) return;
+                    
+                    std::nth_element(snapshot, snapshot + idx, snapshot + safeCount);
+                    g_lastDpcLatency.store(static_cast<double>(snapshot[idx]), std::memory_order_relaxed);
                 }
-                break;
             }
+            break;
         }
     }
 }
