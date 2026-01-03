@@ -104,7 +104,7 @@ HKEY rawKey = nullptr;
     DWORD currentVal = 0;
     DWORD size = sizeof(currentVal);
     // Fix: Use key.get() now that key is declared
-    if (RegQueryValueExW(key.get(), L"Win32PrioritySeparation", nullptr, nullptr,
+	if (RegQueryValueExW(key.get(), L"Win32PrioritySeparation", nullptr, nullptr,
                         reinterpret_cast<BYTE*>(&currentVal), &size) == ERROR_SUCCESS)
     {
         if (currentVal == val)
@@ -113,15 +113,8 @@ HKEY rawKey = nullptr;
             return true; // Skip unnecessary write
         }
     }
-    {
-        if (rc == ERROR_ACCESS_DENIED)
-            Log("Registry access denied - need admin rights");
-        else
-            Log("Registry open failed: " + std::to_string(rc));
-        return false;
-    }
     
-	rc = RegSetValueExW(key.get(), L"Win32PrioritySeparation", 0, REG_DWORD,
+    rc = RegSetValueExW(key.get(), L"Win32PrioritySeparation", 0, REG_DWORD,
                         reinterpret_cast<const BYTE*>(&val), sizeof(val));
     // No explicit RegCloseKey needed - automatic cleanup
     
