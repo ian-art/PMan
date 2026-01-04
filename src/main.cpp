@@ -297,9 +297,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         {
             SetForegroundWindow(hwnd);
             HMENU hMenu = CreatePopupMenu();
-            bool paused = g_userPaused.load();
+			bool paused = g_userPaused.load();
 			AppendMenuW(hMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Activity" : L"Pause Activity");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_SUPPORT, L"Support PMan");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
             POINT pt; GetCursorPos(&pt);
@@ -309,9 +310,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_COMMAND:
-        if (LOWORD(wParam) == ID_TRAY_EXIT) {
+		if (LOWORD(wParam) == ID_TRAY_EXIT) {
             DestroyWindow(hwnd);
-			} else if (LOWORD(wParam) == ID_TRAY_UPDATE) {
+        } else if (LOWORD(wParam) == ID_TRAY_SUPPORT) {
+            ShellExecuteW(nullptr, L"open", SUPPORT_URL, nullptr, nullptr, SW_SHOWNORMAL);
+        } else if (LOWORD(wParam) == ID_TRAY_UPDATE) {
             std::thread([]{
                 std::wstring latest;
 				if (CheckForUpdates(latest)) {
