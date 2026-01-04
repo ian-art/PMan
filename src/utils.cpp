@@ -385,18 +385,50 @@ bool VerifyUpdateConnection()
 
     if (!hSession) return false;
 
-    // Lightweight check: Attempt to connect to the host
+    bool connected = false;
     HINTERNET hConnect = WinHttpConnect(
         hSession,
         UPDATE_HOST,
         INTERNET_DEFAULT_HTTPS_PORT,
         0);
 
-    bool connected = (hConnect != nullptr);
+    if (hConnect)
+    {
+        // Fix: WinHttpConnect is lazy. Use HEAD request to verify actual connectivity.
+        HINTERNET hRequest = WinHttpOpenRequest(
+            hConnect,
+            L"HEAD", 
+            UPDATE_VER_PATH, 
+            nullptr,
+            WINHTTP_NO_REFERER,
+            WINHTTP_DEFAULT_ACCEPT_TYPES,
+            WINHTTP_FLAG_SECURE);
 
-    if (hConnect) WinHttpCloseHandle(hConnect);
+        if (hRequest)
+        {
+            // Ensure redirects are followed for robustness
+            DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+            WinHttpSetOption(hRequest, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
+
+            if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+                WinHttpReceiveResponse(hRequest, nullptr))
+            {
+                DWORD statusCode = 0;
+                DWORD size = sizeof(statusCode);
+                
+                // If we get ANY status code, we have reached the server
+                if (WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, 
+                                      WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &size, WINHTTP_NO_HEADER_INDEX))
+                {
+                    connected = true;
+                }
+            }
+            WinHttpCloseHandle(hRequest);
+        }
+        WinHttpCloseHandle(hConnect);
+    }
+
     WinHttpCloseHandle(hSession);
-
     return connected;
 }
 
