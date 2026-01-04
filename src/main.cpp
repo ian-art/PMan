@@ -17,6 +17,9 @@
  */
 
 
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include "types.h"
 #include "constants.h"
 #include "globals.h"
@@ -37,6 +40,7 @@
 #include <pdh.h>
 #include <shellapi.h> // Required for CommandLineToArgvW
 
+#pragma comment(lib, "Ws2_32.lib") // Winsock 2 Library
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "User32.lib")
 #pragma comment(lib, "Shell32.lib")
@@ -314,8 +318,38 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             DestroyWindow(hwnd);
         } else if (LOWORD(wParam) == ID_TRAY_SUPPORT) {
             ShellExecuteW(nullptr, L"open", SUPPORT_URL, nullptr, nullptr, SW_SHOWNORMAL);
-        } else if (LOWORD(wParam) == ID_TRAY_UPDATE) {
+} else if (LOWORD(wParam) == ID_TRAY_UPDATE) {
             std::thread([]{
+                // AV-SAFE CONNECTIVITY CHECK (Winsock DNS Resolution)
+                // Instead of checking the OS environment (suspicious), we attempt to resolve the update host directly.
+                WSADATA wsaData;
+                bool isConnected = false;
+
+                if (WSAStartup(MAKEWORD(2, 2), &wsaData) == 0) {
+                    ADDRINFOW hints = {0};
+                    hints.ai_family = AF_UNSPEC;     // Allow IPv4 or IPv6
+                    hints.ai_socktype = SOCK_STREAM;
+                    hints.ai_protocol = IPPROTO_TCP;
+                    
+                    ADDRINFOW* result = nullptr;
+                    
+                    // Resolves "dl.dropboxusercontent.com" (from constants.h)
+                    // If this succeeds, DNS and Internet are definitely working.
+                    DWORD dwRetval = GetAddrInfoW(UPDATE_HOST, L"443", &hints, &result);
+                    
+                    if (dwRetval == 0) {
+                        isConnected = true;
+                        FreeAddrInfoW(result);
+                    }
+                    WSACleanup();
+                }
+
+                if (!isConnected) {
+                    MessageBoxW(nullptr, L"Unable to connect to the update server.\n\nPlease check your internet connection.", 
+                        L"Connection Error", MB_OK | MB_ICONWARNING);
+                    return;
+                }
+
                 std::wstring latest;
 				if (CheckForUpdates(latest)) {
                 std::wstring current = GetCurrentExeVersion();
