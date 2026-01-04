@@ -368,10 +368,36 @@ std::wstring GetCurrentExeVersion()
         return L"0.0.0.0";
 
     // Use C++ string construction to avoid buffer heuristics
-    return std::to_wstring(HIWORD(ffi->dwFileVersionMS)) + L"." +
+return std::to_wstring(HIWORD(ffi->dwFileVersionMS)) + L"." +
            std::to_wstring(LOWORD(ffi->dwFileVersionMS)) + L"." +
            std::to_wstring(HIWORD(ffi->dwFileVersionLS)) + L"." +
            std::to_wstring(LOWORD(ffi->dwFileVersionLS));
+}
+
+bool VerifyUpdateConnection()
+{
+    HINTERNET hSession = WinHttpOpen(
+        L"PriorityManager/2.0",
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME,
+        WINHTTP_NO_PROXY_BYPASS,
+        0);
+
+    if (!hSession) return false;
+
+    // Lightweight check: Attempt to connect to the host
+    HINTERNET hConnect = WinHttpConnect(
+        hSession,
+        UPDATE_HOST,
+        INTERNET_DEFAULT_HTTPS_PORT,
+        0);
+
+    bool connected = (hConnect != nullptr);
+
+    if (hConnect) WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+
+    return connected;
 }
 
 bool CheckForUpdates(std::wstring& outLatestVer)

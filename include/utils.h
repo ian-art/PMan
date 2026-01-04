@@ -55,6 +55,7 @@ void ForEachProcess(std::function<void(const PROCESSENTRY32W&)> callback);
 bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD& outVal);
 
 // Updater Functions
+bool VerifyUpdateConnection(); // Replaces Winsock check with WinHTTP
 bool CheckForUpdates(std::wstring& outLatestVer);
 bool DownloadUpdate(const std::wstring& savePath);
 void InstallUpdateAndRestart(const std::wstring& newExePath);
