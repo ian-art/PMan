@@ -1,6 +1,7 @@
 #include <winver.h>
-
-//101 ICON "pman.ico"
+// covert icon here: https://www.icoconverter.com/
+// size: 48 , bit depth: 8 // av safe
+101 ICON "pman.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION 2,2,5,2026
