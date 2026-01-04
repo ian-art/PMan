@@ -47,6 +47,7 @@
 
 // GLOBAL VARIABLE
 HINSTANCE g_hInst = nullptr;
+static UINT g_wmTaskbarCreated = 0;
 
 static void TerminateExistingInstances()
 {
@@ -279,6 +280,13 @@ static NOTIFYICONDATAW g_nid = {};
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+    // Re-add icon if Explorer restarts (TaskbarCreated message)
+    if (g_wmTaskbarCreated && uMsg == g_wmTaskbarCreated)
+    {
+        Shell_NotifyIconW(NIM_ADD, &g_nid);
+        return 0;
+    }
+
     switch (uMsg)
     {
     case WM_CREATE:
@@ -375,6 +383,9 @@ int wmain(int argc, wchar_t* argv[])
 {
     // 1. Initialize Global Instance Handle (Required for Tray Icon)
     g_hInst = GetModuleHandle(nullptr);
+
+    // Register system-wide message for Taskbar recreation detection
+    g_wmTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 
     // 2. Hide Console Window immediately (Restored logic for Console Subsystem)
     // This is required because /SUBSYSTEM:CONSOLE always spawns a window initially.
