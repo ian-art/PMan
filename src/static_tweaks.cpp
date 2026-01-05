@@ -169,16 +169,16 @@ void ApplyStaticTweaks()
     
     // Disable Nagle's Algorithm (TcpAckFrequency/TCPNoDelay)
     ConfigureRegistry(HKEY_LOCAL_MACHINE, 
-        L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces", 
+        L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces", 
         L"TcpAckFrequency", 1);
     
     ConfigureRegistry(HKEY_LOCAL_MACHINE, 
-        L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces", 
+        L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces", 
         L"TCPNoDelay", 1);
 
     // Network Throttling Index
     ConfigureRegistry(HKEY_LOCAL_MACHINE, 
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", 
+        L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", 
         L"NetworkThrottlingIndex", 0xFFFFFFFF);
 
     // ============================================================================
@@ -187,19 +187,19 @@ void ApplyStaticTweaks()
     Log("[TWEAK] Applying System Responsiveness tweaks...");
     
     ConfigureRegistry(HKEY_LOCAL_MACHINE, 
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", 
+        L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", 
         L"SystemResponsiveness", 0);
 
     ConfigureRegistry(HKEY_LOCAL_MACHINE, 
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", 
+        L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", 
         L"GPU Priority", 8);
 
     ConfigureRegistry(HKEY_LOCAL_MACHINE, 
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", 
+        L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", 
         L"Priority", 6);
 
     ConfigureRegistryString(HKEY_LOCAL_MACHINE, 
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", 
+        L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", 
         L"Scheduling Category", L"High");
 
     // ============================================================================
@@ -208,11 +208,11 @@ void ApplyStaticTweaks()
     Log("[TWEAK] Applying Kernel & Memory settings...");
     
     ConfigureRegistry(HKEY_LOCAL_MACHINE, 
-        L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management", 
+        L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", 
         L"LargeSystemCache", 0);
 
     ConfigureRegistry(HKEY_LOCAL_MACHINE, 
-        L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management", 
+        L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", 
         L"DisablePagingExecutive", 1);
 
     // ============================================================================
@@ -221,20 +221,20 @@ void ApplyStaticTweaks()
     Log("[TWEAK] Applying Privacy & Telemetry settings...");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\UserProfileEngagement", L"ScoobeSystemSettingEnabled", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\AdvertisingInfo", L"Enabled", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AdvertisingInfo", L"Enabled", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection", L"AllowTelemetry", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection", L"AllowTelemetry", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection", L"AllowTelemetry", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection", L"DoNotShowFeedbackNotifications", 1);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent", L"DisableTailoredExperiencesWithDiagnosticData", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\AdvertisingInfo", L"DisabledByGroupPolicy", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting", L"Disabled", 1);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Siuf\\Rules", L"NumberOfSIUFInPeriod", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\AdvertisingInfo", L"Enabled", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\DataCollection", L"AllowTelemetry", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection", L"AllowTelemetry", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection", L"AllowTelemetry", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\DataCollection", L"DoNotShowFeedbackNotifications", 1);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Policies\\Microsoft\\Windows\\CloudContent", L"DisableTailoredExperiencesWithDiagnosticData", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\AdvertisingInfo", L"DisabledByGroupPolicy", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\Windows Error Reporting", L"Disabled", 1);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Siuf\\Rules", L"NumberOfSIUFInPeriod", 0);
     DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\Microsoft\\Siuf\\Rules", L"PeriodInNanoSeconds");
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Siuf\\Rules", L"NumberOfSIUFInPeriod", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Siuf\\Rules", L"PeriodInNanoSeconds", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\AppCompat", L"DisableInventory", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\AppCompat", L"AITEnable", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Siuf\\Rules", L"NumberOfSIUFInPeriod", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Siuf\\Rules", L"PeriodInNanoSeconds", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\AppCompat", L"DisableInventory", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\AppCompat", L"AITEnable", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Search", L"AllowSearchToUseLocation", 0);
 
     // ============================================================================
@@ -263,24 +263,24 @@ void ApplyStaticTweaks()
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\PushToInstall", L"DisablePushToInstall", 1);
     DeleteRegistryKey(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager\\Subscriptions");
     DeleteRegistryKey(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager\\SuggestedApps");
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent", L"DisableWindowsConsumerFeatures", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent", L"DisableSoftLanding", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\CloudContent", L"DisableWindowsConsumerFeatures", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\CloudContent", L"DisableSoftLanding", 1);
 
     // ============================================================================
     // EXPLORER & UI BEHAVIOR
     // ============================================================================
     Log("[TWEAK] Applying Explorer & UI Behavior tweaks...");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"ShowSyncProviderNotifications", 0);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"Hidden", 0);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"ShowSuperHidden", 1);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"HideIcons", 0);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"HideFileExt", 0);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"NavPaneExpandToCurrentFolder", 1);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"NavPaneShowAllFolders", 1);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"Hidden", 0);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"ShowSuperHidden", 1);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"HideIcons", 0);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"HideFileExt", 0);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"NavPaneExpandToCurrentFolder", 1);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"NavPaneShowAllFolders", 1);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"SeparateProcess", 1);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer", L"DesktopProcess", 0);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"LaunchTo", 1);
-    ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Microsoft\\DirectX\\UserGpuPreferences", L"%sysdrive%\\Windows\\explorer.exe", L"GpuPreference=2;");
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"LaunchTo", 1);
+    ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Microsoft\\DirectX\\UserGpuPreferences", L"C:\\Windows\\explorer.exe", L"GpuPreference=2;");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Control Panel\\UnsupportedHardwareNotificationCache", L"SV2", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Control Panel\\UnsupportedHardwareNotificationCache", L"SV1", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Control Panel\\Desktop", L"IgnorePerProcessSystemDPIToast", 1);
@@ -294,8 +294,8 @@ void ApplyStaticTweaks()
     ConfigureRegistryBinary(HKEY_CURRENT_USER, L"Control Panel\\Desktop", L"UserPreferencesMask", userPrefMask, sizeof(userPrefMask));
     ConfigureRegistryString(HKEY_CURRENT_USER, L"Control Panel\\Desktop\\WindowMetrics", L"MinAnimate", L"0");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"TaskbarAnimations", 0);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"DisablePreviewDesktop", 0);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\DWM", L"EnableAeroPeek", 1);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"DisablePreviewDesktop", 0);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", L"EnableAeroPeek", 1);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", L"AlwaysHibernateThumbnails", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"IconsOnly", 1);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"ListviewAlphaSelect", 1);
@@ -313,7 +313,7 @@ void ApplyStaticTweaks()
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", L"NoInternetOpenWith", 1);
     DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", L"WindowsWelcomeCenter");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"DisallowShaking", 1);
-    DeleteRegistryKey(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\{98D99750-0B8A-4c59-9151-589053683D73}");
+    DeleteRegistryKey(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\{98D99750-0B8A-4c59-9151-589053683D73}");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\NewStartPanel", L"{20D04FE0-3AEA-1069-A2D8-08002B30309D}", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\ClassicStartMenu", L"{20D04FE0-3AEA-1069-A2D8-08002B30309D}", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications", L"GlobalUserDisabled", 1);
@@ -326,9 +326,9 @@ void ApplyStaticTweaks()
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"SystemUsesLightTheme", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\OperationStatusManager", L"EnthusiastMode", 1);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"ShowTaskViewButton", 0);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced\\People", L"PeopleBand", 0);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"TaskbarGlomLevel", 0);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"ShowTaskViewButton", 0);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced\\People", L"PeopleBand", 0);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"TaskbarGlomLevel", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"PeopleBand", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"TaskbarMn", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", L"HideSCAMeetNow", 1);
@@ -341,108 +341,109 @@ void ApplyStaticTweaks()
     // PERFORMANCE & MEMORY MANAGEMENT
     // ============================================================================
     Log("[TWEAK] Applying Performance & Memory Management tweaks...");
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"DisablePagingExecutive", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"LargeSystemCache", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters", L"EnablePrefetcher", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters", L"EnableSuperfetch", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters", L"EnableBootTrace", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters", L"SfTracingState", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"SwapfileControl", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"PagingFiles", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"ClearPageFileAtShutdown", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"SystemResponsiveness", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"NetworkThrottlingIndex", 4294967295);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl", L"Win32PrioritySeparation", 22);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"DisablePagingExecutive", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"LargeSystemCache", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters", L"EnablePrefetcher", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters", L"EnableSuperfetch", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters", L"EnableBootTrace", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters", L"SfTracingState", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"SwapfileControl", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"PagingFiles", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"ClearPageFileAtShutdown", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"SystemResponsiveness", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"NetworkThrottlingIndex", 4294967295);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\PriorityControl", L"Win32PrioritySeparation", 22);
 
     // ============================================================================
     // NETWORK & TCP/IP
     // ============================================================================
     Log("[TWEAK] Applying Network & TCP/IP tweaks...");
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters", L"DisabledComponents", 32);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters", L"DefaultTTL", 100);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"IRPStackSize", 32);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"SizReqBuf", 95268);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\Psched", L"NonBestEffortLimit", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\parameters", L"AutoShareWks", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"AutoShareServer", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Ndu", L"Start", 4);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"IRPStackSize", 30);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Tcpip6\\Parameters", L"DisabledComponents", 32);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters", L"DefaultTTL", 100);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"IRPStackSize", 32);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"SizReqBuf", 95268);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\Psched", L"NonBestEffortLimit", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\LanmanServer\\parameters", L"AutoShareWks", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"AutoShareServer", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Ndu", L"Start", 4);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"IRPStackSize", 30);
 
     // ============================================================================
     // GRAPHICS & DWM
     // ============================================================================
     Log("[TWEAK] Applying Graphics & DWM settings...");
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers", L"HwSchMode", 2);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\GraphicsDrivers", L"HwSchMode", 2);
 
     // ============================================================================
     // POWER & BOOT
     // ============================================================================
     Log("[TWEAK] Applying Power & Boot settings...");
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\BootControl", L"BootProgressAnimation", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Citrix", L"EnableVisualEffect", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Power\\PowerSettings\\54533251-82be-4824-96c1-47b60b740d00\\94d3a615-a899-4ac5-ae2b-e4d8f634367f", L"Attributes", 1);
-    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control", L"WaitToKillServiceTimeout", L"1000");
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\BootControl", L"BootProgressAnimation", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Citrix", L"EnableVisualEffect", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Power\\PowerSettings\\54533251-82be-4824-96c1-47b60b740d00\\94d3a615-a899-4ac5-ae2b-e4d8f634367f", L"Attributes", 1);
+    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control", L"WaitToKillServiceTimeout", L"1000");
 
     // ============================================================================
     // SECURITY POLICIES
     // ============================================================================
     Log("[TWEAK] Applying Security Policies...");
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\WDigest", L"Negotiate", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\WDigest", L"UseLogonCredential", 0);
-    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows NT\\MitigationOptions", L"MitigationOptions_FontBocking", L"1000000000000");
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"PromptOnSecureDesktop", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"EnableLUA", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorAdmin", 5);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorEnhancedAdmin", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorUser", 3);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\SecurityProviders\\WDigest", L"Negotiate", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\SecurityProviders\\WDigest", L"UseLogonCredential", 0);
+    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows NT\\MitigationOptions", L"MitigationOptions_FontBocking", L"1000000000000");
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"PromptOnSecureDesktop", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"EnableLUA", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorAdmin", 5);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorEnhancedAdmin", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorUser", 3);
 
     // ============================================================================
     // SYSTEM TWEAKS (MISC)
     // ============================================================================
     Log("[TWEAK] Applying System Miscellaneous tweaks...");
-    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer", L"Max Cached Icons", L"8192");
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", 0);
-    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Wow6432Node\\Microsoft\\PowerShell\\1\\ShellIds\\Microsoft.PowerShell", L"Path", L"C:\\Windows\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe");
-    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Wow6432Node\\Microsoft\\PowerShell\\1\\ShellIds\\Microsoft.PowerShell", L"ExecutionPolicy", L"Unrestricted");
-    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\PowerShell\\1\\ShellIds\\Microsoft.PowerShell", L"Path", L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
-    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\PowerShell\\1\\ShellIds\\Microsoft.PowerShell", L"ExecutionPolicy", L"Unrestricted");
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\ContentIndex", L"FilterFilesWithUnknownExtensions", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\FileSystem", L"NtfsDisableLastAccessUpdate", 0);
+    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer", L"Max Cached Icons", L"8192");
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", 0);
+    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Wow6432Node\\Microsoft\\PowerShell\\1\\ShellIds\\Microsoft.PowerShell", L"Path", L"C:\\Windows\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe");
+    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Wow6432Node\\Microsoft\\PowerShell\\1\\ShellIds\\Microsoft.PowerShell", L"ExecutionPolicy", L"Unrestricted");
+    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\PowerShell\\1\\ShellIds\\Microsoft.PowerShell", L"Path", L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\PowerShell\\1\\ShellIds\\Microsoft.PowerShell", L"ExecutionPolicy", L"Unrestricted");
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\ContentIndex", L"FilterFilesWithUnknownExtensions", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\FileSystem", L"NtfsDisableLastAccessUpdate", 0);
     // PnPCapabilities for network adapters (0000-0030)
     for (int i = 0; i <= 30; i++) {
         wchar_t subkey[256];
-        swprintf_s(subkey, L"SYSTEM\\CurrentControlSet\\Control\\Class\\{4D36E972-E325-11CE-BFC1-08002BE10318}\\%04d", i);
+        swprintf_s(subkey, L"System\\CurrentControlSet\\Control\\Class\\{4D36E972-E325-11CE-BFC1-08002BE10318}\\%04d", i);
         ConfigureRegistry(HKEY_LOCAL_MACHINE, subkey, L"PnPCapabilities", 24);
     }
-    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup", L"SourcePath", L"");
-    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", L"RegDone", L"1");
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Command Processor", L"CompletionChar", 9);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\EnhancedStorageDevices", L"TCGSecurityActivationDisabled", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\NcdAutoSetup\\Private", L"AutoSetup", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\System", L"EnableCdp", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\MicrosoftEdge\\Main", L"AllowPrelaunch", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Edge", L"HideFirstRunExperience", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MiscPolicyInfo", L"ShippedWithReserves", 2);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\PassedPolicy", L"ShippedWithReserves", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\ReserveManager", L"ShippedWithReserves", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Office\\16.0\\common\\officeupdate", L"preventteamsinstall", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\WindowsUpdate\\UX\\Settings", L"FlightSettingsMaxPauseDays", 730);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search", L"BingSearchEnabled", 0);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Policies\\Microsoft\\Windows\\CurrentVersion\\Search", L"BingSearchEnabled", 0);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Policies\\Microsoft\\Windows\\CurrentVersion\\PushNotifications", L"NoTileApplicationNotification", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Sensor\\Overrides\\{BFA794E4-F964-4FDB-90F6-51056BFE4B44}", L"SensorPermissionState", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\lfsvc\\Service\\Configuration", L"Status", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Config", L"DODownloadMode", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization", L"DODownloadMode", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Remote Assistance", L"fAllowToGetHelp", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Remote Assistance", L"fAllowFullControl", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\FileSystem", L"LongPathsEnabled", 1);
-    ConfigureRegistry(HKEY_CURRENT_USER, L"SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Feeds", L"EnableFeeds", 0);
+    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Setup", L"SourcePath", L"");
+    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion", L"RegDone", L"1");
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Command Processor", L"CompletionChar", 9);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\EnhancedStorageDevices", L"TCGSecurityActivationDisabled", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\NcdAutoSetup\\Private", L"AutoSetup", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\System", L"EnableCdp", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\MicrosoftEdge\\Main", L"AllowPrelaunch", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Edge", L"HideFirstRunExperience", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\MiscPolicyInfo", L"ShippedWithReserves", 2);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\PassedPolicy", L"ShippedWithReserves", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\ReserveManager", L"ShippedWithReserves", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Office\\16.0\\common\\officeupdate", L"preventteamsinstall", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\WindowsUpdate\\UX\\Settings", L"FlightSettingsMaxPauseDays", 730);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\Windows Search", L"BingSearchEnabled", 0);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Search", L"BingSearchEnabled", 0);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\PushNotifications", L"NoTileApplicationNotification", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Sensor\\Overrides\\{BFA794E4-F964-4FDB-90F6-51056BFE4B44}", L"SensorPermissionState", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\lfsvc\\Service\\Configuration", L"Status", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Config", L"DODownloadMode", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\DeliveryOptimization", L"DODownloadMode", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Remote Assistance", L"fAllowToGetHelp", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Remote Assistance", L"fAllowFullControl", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\FileSystem", L"LongPathsEnabled", 1);
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Policies\\Microsoft\\Windows\\Windows Feeds", L"EnableFeeds", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Feeds", L"ShellFeedsTaskbarViewMode", 2);
     DeleteRegistryKey(HKEY_CLASSES_ROOT, L"CLSID\\{018D5C66-4533-4307-9B53-224DE2ED1FE6}");
     DeleteRegistryKey(HKEY_CLASSES_ROOT, L"Wow6432Node\\CLSID\\{018D5C66-4533-4307-9B53-224DE2ED1FE6}");
     ConfigureRegistry(HKEY_CLASSES_ROOT, L"CLSID\\{018D5C66-4533-4307-9B53-224DE2ED1FE6}", L"System.IsPinnedToNameSpaceTree", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent\\DisableWindowsConsumerFeatures", L"", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\CloudContent\\DisableWindowsConsumerFeatures", L"", 1);
+	DeleteRegistryKey(HKEY_CURRENT_USER, L"Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32");
 
     // ============================================================================
     // UWP / BACKGROUND TASKS
@@ -463,8 +464,8 @@ void ApplyStaticTweaks()
     Log("[TWEAK] Applying Game DVR & Xbox disabling...");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR", L"AppCaptureEnabled", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"System\\GameConfigStore", L"GameDVR_Enabled", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\GameDVR", L"AllowGameDVR", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\PolicyManager\\default\\ApplicationManagement\\AllowGameDVR", L"value", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\GameDVR", L"AllowGameDVR", 0);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\PolicyManager\\default\\ApplicationManagement\\AllowGameDVR", L"value", 0);
 
     // ============================================================================
     // FILE ASSOCIATIONS (HTA)

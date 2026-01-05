@@ -309,7 +309,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             HMENU hMenu = CreatePopupMenu();
 			bool paused = g_userPaused.load();
 			AppendMenuW(hMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Activity" : L"Pause Activity");
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_APPLY_TWEAKS, L"Apply Tweaks");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_APPLY_TWEAKS, L"Boosts System");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_SUPPORT, L"Support PMan");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
@@ -364,8 +364,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         } else if (LOWORD(wParam) == ID_TRAY_APPLY_TWEAKS) {
             // Confirmation dialog to prevent accidental clicks
             int result = MessageBoxW(hwnd, 
-                L"This will apply a set of one-time system optimizations (Registry/Network).\n\n"
-                L"These changes persist until reverted manually.\n"
+                L"This will apply a set of one-time system optimizations.\n\n"
+                L"Note: Reboot system for the changes to take effect.\n\n"
                 L"Continue?", 
                 L"Apply System Tweaks", MB_YESNO | MB_ICONQUESTION);
 
