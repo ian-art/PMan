@@ -23,6 +23,7 @@ static constexpr UINT    ID_TRAY_EXIT      = 1002;
 static constexpr UINT    ID_TRAY_PAUSE     = 1003;
 static constexpr UINT    ID_TRAY_UPDATE    = 1004;
 static constexpr UINT    ID_TRAY_SUPPORT	= 1005;
+static constexpr UINT    ID_TRAY_APPLY_TWEAKS = 1006;
 
 // PAYPAL
 static constexpr wchar_t SUPPORT_URL[]      = L"https://paypal.me/ianart/100";
