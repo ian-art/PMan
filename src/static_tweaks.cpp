@@ -460,7 +460,7 @@ void ApplyStaticTweaks()
     DeleteRegistryKey(HKEY_CLASSES_ROOT, L"Wow6432Node\\CLSID\\{018D5C66-4533-4307-9B53-224DE2ED1FE6}");
     ConfigureRegistry(HKEY_CLASSES_ROOT, L"CLSID\\{018D5C66-4533-4307-9B53-224DE2ED1FE6}", L"System.IsPinnedToNameSpaceTree", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\CloudContent\\DisableWindowsConsumerFeatures", L"", 1);
-	DeleteRegistryKey(HKEY_CURRENT_USER, L"Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32");
+	ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32", L"", L"");
 
     // ============================================================================
     // UWP / BACKGROUND TASKS
