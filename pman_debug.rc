@@ -1,10 +1,10 @@
 #include <winver.h>
 // covert icon here: https://www.icoconverter.com/
-// size: 48 , bit depth: 8 // av safe
+// size: lowest , bit depth: 8 // av safe
 101 ICON "pman.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 2,2,5,2026
+FILEVERSION 2,2,6,2026
 PRODUCTVERSION 2,2026
 FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -23,7 +23,7 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Ian Anthony Tancinco\0"
             VALUE "FileDescription", "Windows Priority Manager\0"
-            VALUE "FileVersion", "2.2.5.2026\0"
+            VALUE "FileVersion", "2.2.6.2026\0"
             VALUE "InternalName", "pman_debug\0"
             VALUE "LegalCopyright", "Copyright \251 2025-2025 Ian Anthony Tancinco\0"
             VALUE "OriginalFilename", "pman_debug.exe\0"
@@ -35,7 +35,7 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Ian Anthony Tancinco\0"
             VALUE "FileDescription", "Windows Priority Manager\0"
-            VALUE "FileVersion", "2.2.5.2026\0"
+            VALUE "FileVersion", "2.2.6.2026\0"
             VALUE "InternalName", "pman_debug\0"
             VALUE "LegalCopyright", "Copyright \251 2025-2026 Ian Anthony Tancinco\0"
             VALUE "OriginalFilename", "pman_debug.exe\0"
