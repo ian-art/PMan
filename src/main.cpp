@@ -38,6 +38,8 @@
 #include <objbase.h> // Fixed: Required for CoInitialize
 #include <pdh.h>
 #include <shellapi.h> // Required for CommandLineToArgvW
+#include <commctrl.h> // For Edit Control in Live Log
+#include <fstream>    // Required for std::ofstream
 
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "User32.lib")
@@ -45,10 +47,134 @@
 #pragma comment(lib, "Ole32.lib")
 #pragma comment(lib, "Tdh.lib")
 #pragma comment(lib, "Pdh.lib") // For BITS monitoring
+#pragma comment(lib, "Gdi32.lib") // Required for CreateFontW/DeleteObject
 
 // GLOBAL VARIABLE
 HINSTANCE g_hInst = nullptr;
 static UINT g_wmTaskbarCreated = 0;
+HWND g_hLogWindow = nullptr; // Handle for Live Log Window
+
+// --- Helper: Open File in Default Editor ---
+static void OpenFileInEditor(const std::wstring& filename) {
+    std::filesystem::path path = GetLogPath() / filename;
+    // Ensure file exists to prevent error
+    if (!std::filesystem::exists(path)) {
+        std::ofstream(path) << ""; // Create empty if missing
+    }
+    // Use "edit" verb if available, fallback to "open"
+    HINSTANCE res = ShellExecuteW(nullptr, L"edit", path.c_str(), nullptr, nullptr, SW_SHOW);
+    if ((intptr_t)res <= 32) {
+        ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOW);
+    }
+}
+
+// --- Live Log Viewer Window Class ---
+class LogViewer {
+public:
+    static void Register(HINSTANCE hInst) {
+        WNDCLASSW wc = {};
+        wc.lpfnWndProc = Proc;
+        wc.hInstance = hInst;
+        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+        wc.lpszClassName = L"PManLogViewer";
+        wc.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(101));
+        RegisterClassW(&wc);
+    }
+
+    static void Show() {
+        if (g_hLogWindow) {
+            if (IsIconic(g_hLogWindow)) ShowWindow(g_hLogWindow, SW_RESTORE);
+            SetForegroundWindow(g_hLogWindow);
+            return;
+        }
+        g_hLogWindow = CreateWindowW(L"PManLogViewer", L"Priority Manager - Live Log",
+            WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
+            nullptr, nullptr, g_hInst, nullptr);
+        ShowWindow(g_hLogWindow, SW_SHOW);
+    }
+
+private:
+    static LRESULT CALLBACK Proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+        static HWND hEdit;
+        static HFONT hFont;
+        static UINT_PTR hTimer;
+        static std::streampos lastPos = 0;
+
+        switch (uMsg) {
+        case WM_CREATE: {
+            hEdit = CreateWindowW(L"EDIT", nullptr,
+                WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
+                0, 0, 0, 0, hwnd, (HMENU)1, g_hInst, nullptr);
+            
+            hFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET,
+                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+            SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+            hTimer = SetTimer(hwnd, 1, 500, nullptr);
+            UpdateLog(hEdit, lastPos);
+            return 0;
+        }
+        case WM_SIZE: {
+            RECT rc; GetClientRect(hwnd, &rc);
+            MoveWindow(hEdit, 0, 0, rc.right, rc.bottom, TRUE);
+            return 0;
+        }
+        case WM_TIMER:
+            UpdateLog(hEdit, lastPos);
+            return 0;
+        case WM_DESTROY:
+            KillTimer(hwnd, hTimer);
+            DeleteObject(hFont);
+            g_hLogWindow = nullptr;
+            lastPos = 0; 
+            return 0;
+        }
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+
+    static void UpdateLog(HWND hEdit, std::streampos& lastPos) {
+        std::filesystem::path logPath = GetLogPath() / L"log.txt";
+        
+        HANDLE hFile = CreateFileW(logPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        
+        if (hFile == INVALID_HANDLE_VALUE) return;
+
+        LARGE_INTEGER size;
+        GetFileSizeEx(hFile, &size);
+
+        if (size.QuadPart < lastPos) lastPos = 0;
+
+        if (size.QuadPart > lastPos) {
+            DWORD bytesToRead = (DWORD)(size.QuadPart - lastPos);
+            if (bytesToRead > 65536 && lastPos == 0) {
+                lastPos = size.QuadPart - 65536;
+                bytesToRead = 65536;
+            }
+
+            std::vector<char> buffer(bytesToRead + 1);
+            LARGE_INTEGER move; move.QuadPart = lastPos;
+            SetFilePointerEx(hFile, move, nullptr, FILE_BEGIN);
+            
+            DWORD bytesRead = 0;
+            if (ReadFile(hFile, buffer.data(), bytesToRead, &bytesRead, nullptr) && bytesRead > 0) {
+                buffer[bytesRead] = '\0';
+                
+                int wlen = MultiByteToWideChar(CP_ACP, 0, buffer.data(), bytesRead, nullptr, 0);
+                std::vector<wchar_t> wBuffer(wlen + 1);
+                MultiByteToWideChar(CP_ACP, 0, buffer.data(), bytesRead, wBuffer.data(), wlen);
+                wBuffer[wlen] = L'\0';
+
+				// Append text
+                // Fix C4245: Cast -1 to WPARAM (UINT_PTR) explicitly
+                SendMessageW(hEdit, EM_SETSEL, (WPARAM)-1, (LPARAM)-1); // Move to end
+                SendMessageW(hEdit, EM_REPLACESEL, FALSE, (LPARAM)wBuffer.data());
+                lastPos += bytesRead;
+            }
+        }
+        CloseHandle(hFile);
+    }
+};
 
 static void TerminateExistingInstances()
 {
@@ -307,28 +433,80 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         {
             SetForegroundWindow(hwnd);
             HMENU hMenu = CreatePopupMenu();
-			bool paused = g_userPaused.load();
-			AppendMenuW(hMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Activity" : L"Pause Activity");
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_APPLY_TWEAKS, L"Boosts System");
+            bool paused = g_userPaused.load();
+
+            // 1. Dashboards Submenu
+            HMENU hDashMenu = CreatePopupMenu();
+            AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_LIVE_LOG, L"Live Log Viewer");
+            AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_OPEN_DIR, L"Open Log Folder");
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hDashMenu, L"Monitor & Logs");
+
+            // 2. Configuration Submenu
+            HMENU hConfigMenu = CreatePopupMenu();
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, L"Edit Config (config.ini)");
+            AppendMenuW(hConfigMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_GAMES, L"Edit Games List");
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_BROWSERS, L"Edit Browsers List");
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_IGNORED, L"Edit Ignored Processes");
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_LAUNCHERS, L"Edit Custom Launchers");
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hConfigMenu, L"Configuration");
+
+            // 3. Controls Submenu
+            HMENU hControlMenu = CreatePopupMenu();
+            AppendMenuW(hControlMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Activity" : L"Pause Activity");
+            AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_APPLY_TWEAKS, L"Boost System Now");
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hControlMenu, L"Controls");
+
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+
+            // 4. Global Actions
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_SUPPORT, L"Support PMan");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
+
             POINT pt; GetCursorPos(&pt);
             TrackPopupMenu(hMenu, TPM_BOTTOMALIGN | TPM_RIGHTALIGN, pt.x, pt.y, 0, hwnd, nullptr);
+            
+            DestroyMenu(hControlMenu);
+            DestroyMenu(hConfigMenu);
+            DestroyMenu(hDashMenu);
             DestroyMenu(hMenu);
         }
         return 0;
 
     case WM_COMMAND:
-		if (LOWORD(wParam) == ID_TRAY_EXIT) {
+    {
+        DWORD wmId = LOWORD(wParam);
+        
+        // --- New Handlers ---
+        if (wmId == ID_TRAY_LIVE_LOG) {
+            LogViewer::Show();
+        }
+        else if (wmId == ID_TRAY_OPEN_DIR) {
+            ShellExecuteW(nullptr, L"open", GetLogPath().c_str(), nullptr, nullptr, SW_SHOW);
+        }
+        else if (wmId == ID_TRAY_EDIT_CONFIG) {
+            OpenFileInEditor(CONFIG_FILENAME);
+        }
+        else if (wmId == ID_TRAY_EDIT_GAMES || wmId == ID_TRAY_EDIT_BROWSERS) {
+            OpenFileInEditor(CONFIG_FILENAME); // These are inside config.ini
+        }
+        else if (wmId == ID_TRAY_EDIT_IGNORED) {
+            OpenFileInEditor(IGNORED_PROCESSES_FILENAME);
+        }
+        else if (wmId == ID_TRAY_EDIT_LAUNCHERS) {
+            OpenFileInEditor(CUSTOM_LAUNCHERS_FILENAME);
+        }
+        // --- End New Handlers ---
+
+        else if (wmId == ID_TRAY_EXIT) {
             DestroyWindow(hwnd);
-        } else if (LOWORD(wParam) == ID_TRAY_SUPPORT) {
+        } 
+        else if (wmId == ID_TRAY_SUPPORT) {
             ShellExecuteW(nullptr, L"open", SUPPORT_URL, nullptr, nullptr, SW_SHOWNORMAL);
-		} else if (LOWORD(wParam) == ID_TRAY_UPDATE) {
+        }
+        else if (wmId == ID_TRAY_UPDATE) {
             std::thread([]{
-                // AV-SAFE CONNECTIVITY CHECK (WinHTTP)
-                // Checks connectivity to update server without using buggy Ws2tcpip headers
                 if (!VerifyUpdateConnection()) {
                     MessageBoxW(nullptr, L"Unable to connect to the update server.\n\nPlease check your internet connection.", 
                         L"Connection Error", MB_OK | MB_ICONWARNING);
@@ -336,16 +514,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 }
 
                 std::wstring latest;
-				if (CheckForUpdates(latest)) {
-                std::wstring current = GetCurrentExeVersion();
-                std::wstring msg = L"Current version: " + current + L"\n"
-                                   L"New version: " + latest + L"\n\n"
-                                   L"Update now?";
+                if (CheckForUpdates(latest)) {
+                    std::wstring current = GetCurrentExeVersion();
+                    std::wstring msg = L"Current version: " + current + L"\n"
+                                       L"New version: " + latest + L"\n\n"
+                                       L"Update now?";
 
-                int result = MessageBoxW(nullptr, msg.c_str(), 
-                    L"Update Available:", MB_YESNO | MB_ICONQUESTION);
-                
-                if (result == IDYES) {
+                    int result = MessageBoxW(nullptr, msg.c_str(), 
+                        L"Update Available:", MB_YESNO | MB_ICONQUESTION);
+                    
+                    if (result == IDYES) {
                         wchar_t tempPath[MAX_PATH];
                         GetTempPathW(MAX_PATH, tempPath);
                         std::wstring dlPath = std::wstring(tempPath) + L"tmp.exe";
@@ -356,13 +534,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                             MessageBoxW(nullptr, L"Download failed.", L"Error", MB_OK | MB_ICONERROR);
                         }
                     }
-				} else {
+                } else {
                     MessageBoxW(nullptr, L"No updates available.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
                 }
             }).detach();
-
-        } else if (LOWORD(wParam) == ID_TRAY_APPLY_TWEAKS) {
-            // Confirmation dialog to prevent accidental clicks
+        } 
+        else if (wmId == ID_TRAY_APPLY_TWEAKS) {
             int result = MessageBoxW(hwnd, 
                 L"This will apply a set of one-time system optimizations.\n\n"
                 L"Note: Reboot system for the changes to take effect.\n\n"
@@ -375,8 +552,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     MessageBoxW(nullptr, L"System tweaks have been applied successfully.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
                 }).detach();
             }
-
-        } else if (LOWORD(wParam) == ID_TRAY_PAUSE) {
+        } 
+        else if (wmId == ID_TRAY_PAUSE) {
             bool p = !g_userPaused.load();
             g_userPaused.store(p);
             wcscpy_s(g_nid.szTip, p ? L"Priority Manager (Paused)" : L"Priority Manager");
@@ -385,6 +562,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             if (!p) g_reloadNow.store(true);
         }
         return 0;
+    } // End of WM_COMMAND Block
 
     case WM_DESTROY:
         Shell_NotifyIconW(NIM_DELETE, &g_nid);
@@ -398,8 +576,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 int wmain(int argc, wchar_t* argv[])
 {
-    // 1. Initialize Global Instance Handle (Required for Tray Icon)
+	// 1. Initialize Global Instance Handle (Required for Tray Icon)
     g_hInst = GetModuleHandle(nullptr);
+
+    // Register UI Classes
+    LogViewer::Register(g_hInst);
 
     // Register system-wide message for Taskbar recreation detection
     g_wmTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");

@@ -25,6 +25,15 @@ static constexpr UINT    ID_TRAY_UPDATE    = 1004;
 static constexpr UINT    ID_TRAY_SUPPORT	= 1005;
 static constexpr UINT    ID_TRAY_APPLY_TWEAKS = 1006;
 
+// New Menu IDs for Configuration and Logging
+static constexpr UINT    ID_TRAY_LIVE_LOG       = 2001;
+static constexpr UINT    ID_TRAY_OPEN_DIR       = 2002;
+static constexpr UINT    ID_TRAY_EDIT_CONFIG    = 2003;
+static constexpr UINT    ID_TRAY_EDIT_GAMES     = 2004;
+static constexpr UINT    ID_TRAY_EDIT_BROWSERS  = 2005;
+static constexpr UINT    ID_TRAY_EDIT_IGNORED   = 2006;
+static constexpr UINT    ID_TRAY_EDIT_LAUNCHERS = 2007;
+
 // PAYPAL
 static constexpr wchar_t SUPPORT_URL[]      = L"https://paypal.me/ianart/100";
 
