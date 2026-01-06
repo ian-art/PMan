@@ -148,52 +148,72 @@ static void SetServiceStartup(const wchar_t* serviceName, DWORD startupType)
 }
 
 // Helper to enumerate and configure dynamic user services (e.g. suffixes like _1a2b3)
+// Helper to enumerate and configure dynamic user services (e.g. suffixes like _1a2b3)
 static void EnumerateAndConfigureUserServices(const wchar_t* pattern, DWORD startupType)
 {
-    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT | SC_MANAGER_ENUMERATE_SERVICE);
-    if (!scm) {
+    // RAII wrapper for SC_HANDLE to ensure closure on any return path
+    class ScHandleGuard {
+        SC_HANDLE h_;
+    public:
+        ScHandleGuard(SC_HANDLE h) : h_(h) {}
+        ~ScHandleGuard() { if (h_) CloseServiceHandle(h_); }
+        operator SC_HANDLE() const { return h_; }
+        bool IsValid() const { return h_ != nullptr; }
+    };
+
+    ScHandleGuard scm(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT | SC_MANAGER_ENUMERATE_SERVICE));
+    if (!scm.IsValid()) {
         Log("[ERROR] OpenSCManager for enum failed: " + std::to_string(GetLastError()));
         return;
     }
 
-    DWORD bufSize = 0;
     DWORD bytesNeeded = 0;
     DWORD servicesReturned = 0;
     DWORD resumeHandle = 0;
+    std::vector<BYTE> buffer;
 
-    // First call to get size
-    if (!EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL,
-                              nullptr, 0, &bytesNeeded, &servicesReturned, &resumeHandle, nullptr)) {
-        if (GetLastError() != ERROR_MORE_DATA) {
-            CloseServiceHandle(scm);
+    // Loop to handle the race condition where service count changes between size check and data retrieval
+    // This resolves C6385 by ensuring the buffer is always large enough for the actual data read.
+    while (true) {
+        // Attempt to enumerate
+        if (EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL,
+            buffer.data(), static_cast<DWORD>(buffer.size()), &bytesNeeded,
+            &servicesReturned, &resumeHandle, nullptr)) {
+            // Success
+            break;
+        }
+
+        DWORD error = GetLastError();
+        if (error == ERROR_MORE_DATA) {
+            // Resize buffer to the required size and retry
+            buffer.resize(bytesNeeded + static_cast<DWORD>(buffer.size())); // + current size to be safe, though bytesNeeded is usually total
+            // Reset for next pass (though resumeHandle maintains position in some contexts, we want full list usually)
+            // Note: EnumServicesStatusExW continues from resumeHandle if non-zero. 
+            // For a robust "snapshot", if we resized, we just continue loop.
+        }
+        else {
+            Log("[ERROR] EnumServicesStatusExW failed: " + std::to_string(error));
             return;
         }
     }
 
-    bufSize = bytesNeeded;
-    void* buf = malloc(bufSize);
-    if (!buf) {
-        CloseServiceHandle(scm);
-        return;
-    }
+    if (servicesReturned > 0 && !buffer.empty()) {
+        // Strict safety check: Ensure the buffer is actually large enough for the array of structs
+        if (buffer.size() < servicesReturned * sizeof(ENUM_SERVICE_STATUS_PROCESSW)) {
+            return; // Should theoretically never happen on success, but satisfies static analysis
+        }
 
-    // Second call to get data
-    if (EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL,
-                             reinterpret_cast<LPBYTE>(buf), bufSize, &bytesNeeded,
-                             &servicesReturned, &resumeHandle, nullptr)) {
-        
-        LPENUM_SERVICE_STATUS_PROCESSW services = reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buf);
+        auto* services = reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buffer.data());
         size_t patternLen = wcslen(pattern);
 
         for (DWORD i = 0; i < servicesReturned; i++) {
+            // Additional bounds check for the string pointer is implicit in Windows API guarantees, 
+            // but we ensure the struct access itself (services[i]) is valid via the check above.
             if (wcsncmp(services[i].lpServiceName, pattern, patternLen) == 0) {
                 SetServiceStartup(services[i].lpServiceName, startupType);
             }
         }
     }
-
-    free(buf);
-    CloseServiceHandle(scm);
 }
 
 // --------------------------------------------------------------------------------
