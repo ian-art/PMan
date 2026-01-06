@@ -16,7 +16,6 @@
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
  */
 
-
 #define WIN32_LEAN_AND_MEAN
 #include "types.h"
 #include "constants.h"
@@ -126,7 +125,7 @@ public:
         RegisterClassW(&wc);
     }
 
-    static void Show() {
+    static void Show(HWND hOwner) {
         if (g_hLogWindow) {
             if (IsIconic(g_hLogWindow)) ShowWindow(g_hLogWindow, SW_RESTORE);
             SetForegroundWindow(g_hLogWindow);
@@ -134,7 +133,7 @@ public:
         }
         g_hLogWindow = CreateWindowW(L"PManLogViewer", L"Priority Manager - Live Log",
             WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
-            nullptr, nullptr, g_hInst, nullptr);
+            hOwner, nullptr, g_hInst, nullptr);
         ShowWindow(g_hLogWindow, SW_SHOW);
     }
 
@@ -575,7 +574,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         
         // --- New Handlers ---
         if (wmId == ID_TRAY_LIVE_LOG) {
-            LogViewer::Show();
+            LogViewer::Show(hwnd);
         }
         else if (wmId == ID_TRAY_OPEN_DIR) {
             ShellExecuteW(nullptr, L"open", GetLogPath().c_str(), nullptr, nullptr, SW_SHOW);
@@ -639,9 +638,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             ShellExecuteW(nullptr, L"open", SUPPORT_URL, nullptr, nullptr, SW_SHOWNORMAL);
         }
         else if (wmId == ID_TRAY_UPDATE) {
-            std::thread([]{
+            std::thread([hwnd]{
                 if (!VerifyUpdateConnection()) {
-                    MessageBoxW(nullptr, L"Unable to connect to the update server.\n\nPlease check your internet connection.", 
+                    MessageBoxW(hwnd, L"Unable to connect to the update server.\n\nPlease check your internet connection.", 
                         L"Connection Error", MB_OK | MB_ICONWARNING);
                     return;
                 }
@@ -653,7 +652,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                                        L"New version: " + latest + L"\n\n"
                                        L"Update now?";
 
-                    int result = MessageBoxW(nullptr, msg.c_str(), 
+                    int result = MessageBoxW(hwnd, msg.c_str(), 
                         L"Update Available:", MB_YESNO | MB_ICONQUESTION);
                     
                     if (result == IDYES) {
@@ -664,11 +663,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                         if (DownloadUpdate(dlPath)) {
                             InstallUpdateAndRestart(dlPath);
                         } else {
-                            MessageBoxW(nullptr, L"Download failed.", L"Error", MB_OK | MB_ICONERROR);
+                            MessageBoxW(hwnd, L"Download failed.", L"Error", MB_OK | MB_ICONERROR);
                         }
                     }
                 } else {
-                    MessageBoxW(nullptr, L"No updates available.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
+                    MessageBoxW(hwnd, L"No updates available.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
                 }
             }).detach();
         } 
