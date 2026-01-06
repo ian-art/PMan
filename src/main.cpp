@@ -516,9 +516,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
-            // 4. Global Actions
+			// 4. Global Actions
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_SUPPORT, L"Support PMan \u2764\U0001F97A");
+			AppendMenuW(hMenu, MF_STRING, ID_TRAY_ABOUT, L"About");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
 
             POINT pt; GetCursorPos(&pt);
@@ -569,9 +570,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         }
         // --- End New Handlers ---
 
-        else if (wmId == ID_TRAY_EXIT) {
+		else if (wmId == ID_TRAY_EXIT) {
             DestroyWindow(hwnd);
         } 
+        else if (wmId == ID_TRAY_ABOUT) {
+            std::wstring version = GetCurrentExeVersion();
+            std::wstring msg = L"Priority Manager\n\n"
+							   L"Version " + version + L"\n\n"
+                               L"Copyright \251 2025-2026 Ian Anthony R. Tancinco\n\n"
+							   
+                               L"Automated Windows Priority & Affinity Manager";
+            MessageBoxW(hwnd, msg.c_str(), L"About", MB_OK | MB_ICONINFORMATION);
+        }
         else if (wmId == ID_TRAY_SUPPORT) {
             ShellExecuteW(nullptr, L"open", SUPPORT_URL, nullptr, nullptr, SW_SHOWNORMAL);
         }
