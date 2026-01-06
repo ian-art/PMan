@@ -517,6 +517,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
 			// 4. Global Actions
+            wchar_t self[MAX_PATH];
+            GetModuleFileNameW(nullptr, self, MAX_PATH);
+            std::wstring taskName = std::filesystem::path(self).stem().wstring();
+            bool isAutoStart = IsTaskInstalled(taskName);
+
+            AppendMenuW(hMenu, MF_STRING | (isAutoStart ? MF_CHECKED : 0), ID_TRAY_AUTO_START, L"Run at Startup");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_SUPPORT, L"Support PMan \u2764\U0001F97A");
 			AppendMenuW(hMenu, MF_STRING, ID_TRAY_ABOUT, L"About");
@@ -570,7 +576,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         }
         // --- End New Handlers ---
 
-		else if (wmId == ID_TRAY_EXIT) {
+		else if (wmId == ID_TRAY_AUTO_START) {
+            wchar_t self[MAX_PATH];
+            GetModuleFileNameW(nullptr, self, MAX_PATH);
+            std::wstring taskName = std::filesystem::path(self).stem().wstring();
+            
+            if (IsTaskInstalled(taskName)) {
+                ShellExecuteW(nullptr, L"runas", L"schtasks.exe", 
+                    (L"/delete /tn \"" + taskName + L"\" /f").c_str(), nullptr, SW_HIDE);
+            } else {
+                std::wstring params = L"/create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\" --guard /S\" /sc onlogon /rl highest /f";
+                ShellExecuteW(nullptr, L"runas", L"schtasks.exe", params.c_str(), nullptr, SW_HIDE);
+            }
+        }
+        else if (wmId == ID_TRAY_EXIT) {
             DestroyWindow(hwnd);
         } 
         else if (wmId == ID_TRAY_ABOUT) {
