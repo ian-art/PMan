@@ -1,10 +1,11 @@
 #include <winver.h>
+#include "version.h"
 
 101 ICON "pman.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 2,3,0,2026
-PRODUCTVERSION 2,2026
+FILEVERSION PMAN_VERSION_MAJOR, PMAN_VERSION_MINOR, PMAN_VERSION_PATCH, PMAN_VERSION_BUILD
+PRODUCTVERSION PMAN_VERSION_MAJOR, PMAN_VERSION_MINOR, PMAN_VERSION_PATCH, PMAN_VERSION_BUILD
 FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
 FILEFLAGS 0x1L
@@ -19,27 +20,27 @@ BEGIN
     BLOCK "StringFileInfo"
     BEGIN
         BLOCK "040904b0"   // Unicode
-        BEGIN
+		BEGIN
             VALUE "CompanyName", "Ian Anthony Tancinco\0"
             VALUE "FileDescription", "Windows Priority Manager\0"
-            VALUE "FileVersion", "2.3.0.2026\0"
+            VALUE "FileVersion", PMAN_FILE_VERSION_STRING
             VALUE "InternalName", "pman\0"
             VALUE "LegalCopyright", "Copyright \251 2025-2026 Ian Anthony Tancinco\0"
             VALUE "OriginalFilename", "pman.exe\0"
             VALUE "ProductName", "Microsoft Windows\0"
-            VALUE "ProductVersion", "2.2026\0"
+            VALUE "ProductVersion", PMAN_PRODUCT_VERSION_STRING
         END
 
         BLOCK "04090000"   // ANSI/MBCS fallback
-        BEGIN
+		BEGIN
             VALUE "CompanyName", "Ian Anthony Tancinco\0"
             VALUE "FileDescription", "Windows Priority Manager\0"
-            VALUE "FileVersion", "2.3.0.2026\0"
+            VALUE "FileVersion", PMAN_FILE_VERSION_STRING
             VALUE "InternalName", "pman\0"
-            VALUE "LegalCopyright", "Copyright \251 2025-2025 Ian Anthony Tancinco\0"
+            VALUE "LegalCopyright", "Copyright \251 2025-2026 Ian Anthony Tancinco\0"
             VALUE "OriginalFilename", "pman.exe\0"
             VALUE "ProductName", "Microsoft Windows\0"
-            VALUE "ProductVersion", "2.2026\0"
+            VALUE "ProductVersion", PMAN_PRODUCT_VERSION_STRING
         END
     END
 
