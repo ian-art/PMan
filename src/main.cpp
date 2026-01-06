@@ -590,10 +590,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hStartupMenu, MF_STRING | (startupMode == 1 ? MF_CHECKED : 0), ID_TRAY_STARTUP_ACTIVE,   L"Enabled (Active Optimization)");
             AppendMenuW(hStartupMenu, MF_STRING | (startupMode == 2 ? MF_CHECKED : 0), ID_TRAY_STARTUP_PASSIVE,  L"Enabled (Standby Mode)");
             
-            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hStartupMenu, L"Startup Behavior");
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
+			AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hStartupMenu, L"Startup Behavior");
+            
+            // 5. Help Submenu
+            HMENU hHelpMenu = CreatePopupMenu();
+            AppendMenuW(hHelpMenu, MF_STRING, ID_TRAY_HELP_USAGE, L"Help");
+            AppendMenuW(hHelpMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
+            AppendMenuW(hHelpMenu, MF_STRING, ID_TRAY_ABOUT, L"About");
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hHelpMenu, L"Help");
+            
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_SUPPORT, L"Support PMan \u2764\U0001F97A");
-			AppendMenuW(hMenu, MF_STRING, ID_TRAY_ABOUT, L"About");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
 
             POINT pt; GetCursorPos(&pt);
@@ -602,6 +608,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             DestroyMenu(hControlMenu);
             DestroyMenu(hConfigMenu);
             DestroyMenu(hDashMenu);
+            DestroyMenu(hHelpMenu);
             DestroyMenu(hMenu);
         }
         return 0;
@@ -682,8 +689,25 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                                L"Automated Windows Priority & Affinity Manager";
             MessageBoxW(hwnd, msg.c_str(), L"About", MB_OK | MB_ICONINFORMATION);
         }
-        else if (wmId == ID_TRAY_SUPPORT) {
+		else if (wmId == ID_TRAY_SUPPORT) {
             ShellExecuteW(nullptr, L"open", SUPPORT_URL, nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        else if (wmId == ID_TRAY_HELP_USAGE) {
+            std::wstring version = GetCurrentExeVersion();
+            std::wstring msg;
+            msg.reserve(512);
+            msg += L"Priority Manager (pman) v" + version + L"\n";
+            msg += L"by Ian Anthony R. Tancinco\n\n";
+            msg += L"Usage: pman.exe [OPTIONS]\n\n";
+            msg += L"Options:\n";
+            msg += L"  --help, -h, /?      Show this help message\n";
+            msg += L"  --uninstall         Stop instances and remove startup task\n";
+            msg += L"  --silent, /S         Run operations without message boxes\n";
+            msg += L"  --guard             (Internal) Registry safety guard\n\n";
+            msg += L"Automated Windows Priority & Affinity Manager";
+            
+            // Use hwnd (hidden tray window) as owner to prevent taskbar icon
+            MessageBoxW(hwnd, msg.c_str(), L"Priority Manager - Help", MB_OK | MB_ICONINFORMATION);
         }
         else if (wmId == ID_TRAY_UPDATE) {
             std::thread([hwnd]{
