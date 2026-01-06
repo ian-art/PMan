@@ -25,7 +25,9 @@ static constexpr UINT    ID_TRAY_UPDATE    = 1004;
 static constexpr UINT    ID_TRAY_SUPPORT	= 1005;
 static constexpr UINT    ID_TRAY_APPLY_TWEAKS = 1006;
 static constexpr UINT    ID_TRAY_ABOUT        = 1007;
-static constexpr UINT    ID_TRAY_AUTO_START   = 1008;
+static constexpr UINT    ID_TRAY_STARTUP_DISABLED = 1008;
+static constexpr UINT    ID_TRAY_STARTUP_ACTIVE   = 1009;
+static constexpr UINT    ID_TRAY_STARTUP_PASSIVE  = 1010;
 
 // Inter-thread communication for Real-Time Logging
 static constexpr UINT    WM_LOG_UPDATED       = WM_USER + 20;

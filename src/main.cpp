@@ -298,7 +298,33 @@ static bool IsTaskInstalled(const std::wstring& taskName)
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     
-    return (exitCode == 0);
+return (exitCode == 0);
+}
+
+static int GetStartupMode(const std::wstring& taskName)
+{
+    if (!IsTaskInstalled(taskName)) return 0; // Disabled
+
+    // Check if task has --paused argument by querying XML definition
+    std::wstring cmd = L"cmd /c schtasks /query /tn \"" + taskName + L"\" /xml | findstr /C:\"--paused\"";
+    STARTUPINFOW si{};
+    PROCESS_INFORMATION pi{};
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+
+    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 
+                       CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+    {
+        WaitForSingleObject(pi.hProcess, 3000);
+        DWORD exitCode = 1;
+        GetExitCodeProcess(pi.hProcess, &exitCode);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        
+        // findstr returns 0 if found, 1 if not found
+        return (exitCode == 0) ? 2 : 1; // 2=Passive, 1=Active
+    }
+    return 1; // Default to Active if check fails but task exists
 }
 
 // Phase 4: Crash-Proof Registry Guard
@@ -514,15 +540,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_APPLY_TWEAKS, L"Boost System Now");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hControlMenu, L"Controls");
 
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+			AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
 			// 4. Global Actions
             wchar_t self[MAX_PATH];
             GetModuleFileNameW(nullptr, self, MAX_PATH);
             std::wstring taskName = std::filesystem::path(self).stem().wstring();
-            bool isAutoStart = IsTaskInstalled(taskName);
+            int startupMode = GetStartupMode(taskName);
 
-            AppendMenuW(hMenu, MF_STRING | (isAutoStart ? MF_CHECKED : 0), ID_TRAY_AUTO_START, L"Run at Startup");
+            HMENU hStartupMenu = CreatePopupMenu();
+            AppendMenuW(hStartupMenu, MF_STRING | (startupMode == 0 ? MF_CHECKED : 0), ID_TRAY_STARTUP_DISABLED, L"Disabled (Manual Start)");
+            AppendMenuW(hStartupMenu, MF_STRING | (startupMode == 1 ? MF_CHECKED : 0), ID_TRAY_STARTUP_ACTIVE,   L"Enabled (Active Optimization)");
+            AppendMenuW(hStartupMenu, MF_STRING | (startupMode == 2 ? MF_CHECKED : 0), ID_TRAY_STARTUP_PASSIVE,  L"Enabled (Standby Mode)");
+            
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hStartupMenu, L"Startup Behavior");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_SUPPORT, L"Support PMan \u2764\U0001F97A");
 			AppendMenuW(hMenu, MF_STRING, ID_TRAY_ABOUT, L"About");
@@ -574,20 +605,23 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
             OpenFileInEditor(CUSTOM_LAUNCHERS_FILENAME, path);
         }
-        // --- End New Handlers ---
+		// --- End New Handlers ---
 
-		else if (wmId == ID_TRAY_AUTO_START) {
-            wchar_t self[MAX_PATH];
-            GetModuleFileNameW(nullptr, self, MAX_PATH);
+        else if (wmId == ID_TRAY_STARTUP_DISABLED) {
+            wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
+            std::wstring taskName = std::filesystem::path(self).stem().wstring();
+            ShellExecuteW(nullptr, L"runas", L"schtasks.exe", (L"/delete /tn \"" + taskName + L"\" /f").c_str(), nullptr, SW_HIDE);
+        }
+        else if (wmId == ID_TRAY_STARTUP_ACTIVE || wmId == ID_TRAY_STARTUP_PASSIVE) {
+            wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
             std::wstring taskName = std::filesystem::path(self).stem().wstring();
             
-            if (IsTaskInstalled(taskName)) {
-                ShellExecuteW(nullptr, L"runas", L"schtasks.exe", 
-                    (L"/delete /tn \"" + taskName + L"\" /f").c_str(), nullptr, SW_HIDE);
-            } else {
-                std::wstring params = L"/create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\" --guard /S\" /sc onlogon /rl highest /f";
-                ShellExecuteW(nullptr, L"runas", L"schtasks.exe", params.c_str(), nullptr, SW_HIDE);
-            }
+            // Base arguments: Guard + Silent. Passive mode adds --paused
+            std::wstring args = L" --guard /S";
+            if (wmId == ID_TRAY_STARTUP_PASSIVE) args += L" --paused";
+
+            std::wstring params = L"/create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\"" + args + L"\" /sc onlogon /rl highest /f";
+            ShellExecuteW(nullptr, L"runas", L"schtasks.exe", params.c_str(), nullptr, SW_HIDE);
         }
         else if (wmId == ID_TRAY_EXIT) {
             DestroyWindow(hwnd);
@@ -735,8 +769,9 @@ int wmain(int argc, wchar_t* argv[])
             MessageBoxW(nullptr, msg.c_str(), L"Priority Manager - Help", MB_OK | MB_ICONINFORMATION);
             return 0;
         }
-        else if (arg == L"--uninstall" || arg == L"/uninstall") uninstall = true;
+		else if (arg == L"--uninstall" || arg == L"/uninstall") uninstall = true;
         else if (arg == L"/S" || arg == L"/s" || arg == L"/silent" || arg == L"-silent" || arg == L"/quiet") silent = true;
+        else if (arg == L"--paused") g_userPaused.store(true);
     }
 
     if (!uninstall)
