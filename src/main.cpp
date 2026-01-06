@@ -74,18 +74,56 @@ static std::wstring GetRegisteredAppPath(const wchar_t* exeName) {
     return L"";
 }
 
+// --- Helper: Find Line Number of Section Header ---
+static int GetConfigLineNumber(const std::wstring& sectionHeader) {
+    std::filesystem::path path = GetLogPath() / CONFIG_FILENAME;
+    std::wifstream file(path);
+    if (!file) return 0;
+
+    std::wstring line;
+    int lineNum = 1;
+    while (std::getline(file, line)) {
+        if (line.find(sectionHeader) != std::wstring::npos) {
+            return lineNum;
+        }
+        lineNum++;
+    }
+    return 0;
+}
+
 // --- Helper: Open File in Default or Specific Editor ---
-static void OpenFileInEditor(const std::wstring& filename, const std::wstring& forcedEditor = L"") {
+static void OpenFileInEditor(const std::wstring& filename, const std::wstring& forcedEditor = L"", int jumpToLine = 0) {
     std::filesystem::path path = GetLogPath() / filename;
     // Ensure file exists to prevent error
     if (!std::filesystem::exists(path)) {
         std::ofstream(path) << ""; // Create empty if missing
     }
 
-    // 1. Priority: Custom Editor (Notepad++, VS Code, etc.)
+	// 1. Priority: Custom Editor (Notepad++, VS Code, etc.)
     if (!forcedEditor.empty()) {
-        std::wstring params = L"\"" + path.wstring() + L"\"";
-        // We use "open" here because advanced editors handle UAC internally (they will prompt you if save fails)
+        std::wstring params;
+
+        // Format command line args based on detected editor
+        if (jumpToLine > 0) {
+            std::wstring lowerEditor = forcedEditor;
+            std::transform(lowerEditor.begin(), lowerEditor.end(), lowerEditor.begin(), ::towlower);
+
+            if (lowerEditor.find(L"notepad++.exe") != std::wstring::npos) {
+                // Notepad++: -n123 "path"
+                params = L"-n" + std::to_wstring(jumpToLine) + L" \"" + path.wstring() + L"\"";
+            } else if (lowerEditor.find(L"code.exe") != std::wstring::npos) {
+                // VS Code: -g "path:123"
+                params = L"-g \"" + path.wstring() + L":" + std::to_wstring(jumpToLine) + L"\"";
+            } else if (lowerEditor.find(L"sublime_text.exe") != std::wstring::npos) {
+                // Sublime: "path:123"
+                params = L"\"" + path.wstring() + L":" + std::to_wstring(jumpToLine) + L"\"";
+            } else {
+                params = L"\"" + path.wstring() + L"\"";
+            }
+        } else {
+            params = L"\"" + path.wstring() + L"\"";
+        }
+
         HINSTANCE res = ShellExecuteW(nullptr, L"open", forcedEditor.c_str(), params.c_str(), nullptr, SW_SHOW);
         if ((intptr_t)res > 32) return; // Success
     }
@@ -586,23 +624,33 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
             OpenFileInEditor(CONFIG_FILENAME, path);
         }
-        else if (wmId == ID_TRAY_EDIT_GAMES || wmId == ID_TRAY_EDIT_BROWSERS) {
+		else if (wmId == ID_TRAY_EDIT_GAMES) {
             std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
             if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
             if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
-            OpenFileInEditor(CONFIG_FILENAME, path); 
+            
+            int line = GetConfigLineNumber(L"[games]");
+            OpenFileInEditor(CONFIG_FILENAME, path, line); 
         }
-        else if (wmId == ID_TRAY_EDIT_IGNORED) {
+        else if (wmId == ID_TRAY_EDIT_BROWSERS) {
             std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
             if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
             if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
-            OpenFileInEditor(IGNORED_PROCESSES_FILENAME, path);
+            
+            int line = GetConfigLineNumber(L"[browsers]");
+            OpenFileInEditor(CONFIG_FILENAME, path, line); 
         }
-        else if (wmId == ID_TRAY_EDIT_LAUNCHERS) {
+		else if (wmId == ID_TRAY_EDIT_IGNORED) {
             std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
             if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
             if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
-            OpenFileInEditor(CUSTOM_LAUNCHERS_FILENAME, path);
+            OpenFileInEditor(IGNORED_PROCESSES_FILENAME, path, 0);
+        }
+		else if (wmId == ID_TRAY_EDIT_LAUNCHERS) {
+            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
+            OpenFileInEditor(CUSTOM_LAUNCHERS_FILENAME, path, 0);
         }
 		// --- End New Handlers ---
 
