@@ -108,7 +108,10 @@ private:
             
             hFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET,
                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
-            SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+			SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+            // Fix: Increase text limit from default 32KB to Max (approx 2GB) to prevent truncation
+            SendMessageW(hEdit, EM_LIMITTEXT, 0, 0);
 
             hTimer = SetTimer(hwnd, 1, 500, nullptr);
             UpdateLog(hEdit, lastPos);
@@ -119,7 +122,8 @@ private:
             MoveWindow(hEdit, 0, 0, rc.right, rc.bottom, TRUE);
             return 0;
         }
-        case WM_TIMER:
+		case WM_TIMER:
+        case WM_LOG_UPDATED: // Handle push notification for zero-latency updates
             UpdateLog(hEdit, lastPos);
             return 0;
         case WM_DESTROY:

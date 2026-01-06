@@ -1,5 +1,6 @@
 #include "logger.h"
-#include "types.h" // For Windows definitions if needed
+#include "constants.h" // Required for WM_LOG_UPDATED
+#include "types.h"
 #include <windows.h>
 #include <sddl.h>   // Required for security descriptor string conversion
 #include <aclapi.h> // Required for security functions
@@ -92,8 +93,14 @@ try
             }
         }
     }
-    catch (const std::exception&) 
+	catch (const std::exception&) 
     { 
         // Silent in background mode - no console output
     }
+
+    // Real-time update: Notify the viewer immediately if it exists
+    // This removes the need to wait for the 500ms polling timer
+    static HWND hViewer = nullptr;
+    if (!IsWindow(hViewer)) hViewer = FindWindowW(L"PManLogViewer", nullptr);
+    if (hViewer) PostMessageW(hViewer, WM_LOG_UPDATED, 0, 0);
 }

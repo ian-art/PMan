@@ -25,6 +25,9 @@ static constexpr UINT    ID_TRAY_UPDATE    = 1004;
 static constexpr UINT    ID_TRAY_SUPPORT	= 1005;
 static constexpr UINT    ID_TRAY_APPLY_TWEAKS = 1006;
 
+// Inter-thread communication for Real-Time Logging
+static constexpr UINT    WM_LOG_UPDATED       = WM_USER + 20;
+
 // New Menu IDs for Configuration and Logging
 static constexpr UINT    ID_TRAY_LIVE_LOG       = 2001;
 static constexpr UINT    ID_TRAY_OPEN_DIR       = 2002;
