@@ -931,7 +931,7 @@ void SetWorkingSetLimits(DWORD pid, int mode)
         
 		CloseHandle(hProcess);
         
-// [OPTIMIZATION] Use cached browser PIDs instead of expensive snapshot
+		// [OPTIMIZATION] Use cached browser PIDs instead of expensive snapshot
         static std::mutex browserCacheMtx;
         static std::unordered_set<DWORD> cachedBrowserPids;
         static uint64_t lastBrowserScanMs = 0;

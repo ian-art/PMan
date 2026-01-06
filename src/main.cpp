@@ -364,7 +364,7 @@ static int GetStartupMode(const std::wstring& taskName)
     return 1; // Default to Active if check fails but task exists
 }
 
-// Phase 4: Crash-Proof Registry Guard
+// Crash-Proof Registry Guard
 static void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWORD originalVal)
 {
 	// 1. Wait for the main process to exit (crash, kill, or close)

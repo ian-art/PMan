@@ -246,7 +246,6 @@ bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD&
 }
 
 // ------------------- UPDATER IMPLEMENTATION -------------------
-
 static bool HttpRequest(const wchar_t* path, std::string& outData, bool binary)
 {
     bool result = false;
@@ -368,7 +367,7 @@ std::wstring GetCurrentExeVersion()
         return L"0.0.0.0";
 
     // Use C++ string construction to avoid buffer heuristics
-return std::to_wstring(HIWORD(ffi->dwFileVersionMS)) + L"." +
+	return std::to_wstring(HIWORD(ffi->dwFileVersionMS)) + L"." +
            std::to_wstring(LOWORD(ffi->dwFileVersionMS)) + L"." +
            std::to_wstring(HIWORD(ffi->dwFileVersionLS)) + L"." +
            std::to_wstring(LOWORD(ffi->dwFileVersionLS));
@@ -501,4 +500,3 @@ void InstallUpdateAndRestart(const std::wstring& newExePath)
         ExitProcess(0);
     }
 }
-

@@ -45,14 +45,11 @@ static constexpr UINT    ID_TRAY_EDIT_LAUNCHERS = 2007;
 // PAYPAL
 static constexpr wchar_t SUPPORT_URL[]      = L"https://paypal.me/ianart/100";
 
-// Update Configuration (DROPBOX EXAMPLE)
-// HOST: Just the domain (e.g., www.dropbox.com)
-// PATH: Everything after the domain, including query params (?dl=1)
-
+// Update Configuration
 static constexpr wchar_t UPDATE_HOST[]     = L"dl.dropboxusercontent.com";
-// Link to version.txt (Replace with your actual dl=1 link)
+// Link to version.txt
 static constexpr wchar_t UPDATE_VER_PATH[] = L"/scl/fi/o0j64sw05j35e6v5cmi9i/version.txt?rlkey=031mtw388jyfbej0tuvtdn3ac";
-// Link to pman.exe (Replace with your actual dl=1 link)
+// Link to pman.exe
 static constexpr wchar_t UPDATE_BIN_PATH[] = L"/scl/fi/aaj2lplavy42q5zzxx6bo/pman.exe?rlkey=ixylbw2rxfsgifvl5ftwbj98f";
 
 // Mutex and Event Names

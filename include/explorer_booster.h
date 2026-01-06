@@ -63,7 +63,7 @@ private:
     // Configuration
     ExplorerConfig m_config;
     
-// State tracking
+	// State tracking
     std::atomic<uint64_t> m_lastUserActivityMs{0};
 	std::atomic<uint64_t> m_lastScanMs{0};
     std::atomic<bool> m_gameOrBrowserActive{false};

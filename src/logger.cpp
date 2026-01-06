@@ -32,7 +32,7 @@ try
     {
         std::filesystem::path dir = GetLogPath();
         
-        // Fix 4.1: Secure Directory Creation (Admins: Full, Users: Read-Only)
+        // Fix: Secure Directory Creation (Admins: Full, Users: Read-Only)
         if (!std::filesystem::exists(dir))
         {
             PSECURITY_DESCRIPTOR pSD = nullptr;

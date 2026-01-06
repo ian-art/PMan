@@ -105,7 +105,7 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
 
 bool WindowsServiceManager::SuspendService(const std::wstring& serviceName)
 {
-    // Fix 4.2: Service Whitelist Check
+    // Fix: Service Whitelist Check
     static const std::unordered_set<std::wstring> SAFE_SERVICES = {
         L"wuauserv",      // Windows Update
         L"bits",          // Background Intelligent Transfer
