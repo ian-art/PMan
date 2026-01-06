@@ -175,10 +175,11 @@ private:
             KillTimer(hwnd, hTimer);
             DeleteObject(hFont);
             g_hLogWindow = nullptr;
-            lastPos = 0; 
+			lastPos = 0; 
             return 0;
         }
-        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+        // Fix: Explicitly use DefWindowProcW to prevent title truncation ("P") in non-Unicode builds
+        return DefWindowProcW(hwnd, uMsg, wParam, lParam);
     }
 
     static void UpdateLog(HWND hEdit, std::streampos& lastPos) {
@@ -517,7 +518,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
             // 4. Global Actions
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_SUPPORT, L"Support PMan \u2764");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_SUPPORT, L"Support PMan \u2764\U0001F97A");
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
 
             POINT pt; GetCursorPos(&pt);
