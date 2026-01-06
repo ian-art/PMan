@@ -54,17 +54,62 @@ HINSTANCE g_hInst = nullptr;
 static UINT g_wmTaskbarCreated = 0;
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 
-// --- Helper: Open File in Default Editor ---
-static void OpenFileInEditor(const std::wstring& filename) {
+// --- Helper: Detect External Editors (Notepad++, VS Code, etc.) ---
+static std::wstring GetRegisteredAppPath(const wchar_t* exeName) {
+    const HKEY roots[] = { HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER };
+    wchar_t buffer[MAX_PATH];
+    
+    for (HKEY root : roots) {
+        HKEY hKey;
+        std::wstring keyPath = std::wstring(L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\") + exeName;
+        if (RegOpenKeyExW(root, keyPath.c_str(), 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
+            DWORD size = sizeof(buffer);
+            // Default value of the key contains the full path to the executable
+            if (RegQueryValueExW(hKey, nullptr, nullptr, nullptr, (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
+                RegCloseKey(hKey);
+                return buffer;
+            }
+            RegCloseKey(hKey);
+        }
+    }
+    return L"";
+}
+
+// --- Helper: Open File in Default or Specific Editor ---
+static void OpenFileInEditor(const std::wstring& filename, const std::wstring& forcedEditor = L"") {
     std::filesystem::path path = GetLogPath() / filename;
     // Ensure file exists to prevent error
     if (!std::filesystem::exists(path)) {
         std::ofstream(path) << ""; // Create empty if missing
     }
-    // Use "edit" verb if available, fallback to "open"
-    HINSTANCE res = ShellExecuteW(nullptr, L"edit", path.c_str(), nullptr, nullptr, SW_SHOW);
+
+    // 1. Priority: Custom Editor (Notepad++, VS Code, etc.)
+    if (!forcedEditor.empty()) {
+        std::wstring params = L"\"" + path.wstring() + L"\"";
+        // We use "open" here because advanced editors handle UAC internally (they will prompt you if save fails)
+        HINSTANCE res = ShellExecuteW(nullptr, L"open", forcedEditor.c_str(), params.c_str(), nullptr, SW_SHOW);
+        if ((intptr_t)res > 32) return; // Success
+    }
+
+    // 2. Fallback: Force "Run as Administrator" on default Notepad
+    // This solves the "Can't save in ProgramData" issue.
+    // We target "notepad.exe" explicitly to attach the "runas" verb.
+    std::wstring params = L"\"" + path.wstring() + L"\"";
+    HINSTANCE res = ShellExecuteW(nullptr, L"runas", L"notepad.exe", params.c_str(), nullptr, SW_SHOW);
+    
+    // 3. Last Resort: Generic "Open" (Stripped Windows / No Notepad)
+    // If Admin Notepad failed (User cancelled UAC, or notepad.exe is missing in stripped OS)
     if ((intptr_t)res <= 32) {
-        ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOW);
+        // Try to open with WHATEVER is registered for .txt/.ini (could be WordPad, etc.)
+        res = ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOW);
+        
+        // 4. Absolute Failure: No application found
+        if ((intptr_t)res <= 32) {
+             MessageBoxW(nullptr, 
+                 L"Unable to open configuration file.\n\n"
+                 L"No text editor was found on this system, or the operation was cancelled.",
+                 L"Editor Error", MB_OK | MB_ICONERROR);
+        }
     }
 }
 
@@ -433,9 +478,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_TRAYICON:
-        if (lParam == WM_RBUTTONUP || lParam == WM_LBUTTONUP)
+		if (lParam == WM_RBUTTONUP || lParam == WM_LBUTTONUP)
         {
             SetForegroundWindow(hwnd);
+            
+            // Detect best available editor (Priority: Notepad++ -> VS Code -> Sublime)
+            std::wstring editorPath, editorName;
+            if ((editorPath = GetRegisteredAppPath(L"notepad++.exe")) != L"")      editorName = L" [Notepad++]";
+            else if ((editorPath = GetRegisteredAppPath(L"Code.exe")) != L"")      editorName = L" [VS Code]";
+            else if ((editorPath = GetRegisteredAppPath(L"sublime_text.exe")) != L"") editorName = L" [Sublime]";
+
             HMENU hMenu = CreatePopupMenu();
             bool paused = g_userPaused.load();
 
@@ -445,14 +497,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_OPEN_DIR, L"Open Log Folder");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hDashMenu, L"Monitor & Logs");
 
-            // 2. Configuration Submenu
+			// 2. Configuration Submenu
             HMENU hConfigMenu = CreatePopupMenu();
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, L"Edit Config (config.ini)");
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, (L"Edit Config (config.ini)" + editorName).c_str());
             AppendMenuW(hConfigMenu, MF_SEPARATOR, 0, nullptr);
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_GAMES, L"Edit Games List");
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_BROWSERS, L"Edit Browsers List");
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_IGNORED, L"Edit Ignored Processes");
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_LAUNCHERS, L"Edit Custom Launchers");
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_GAMES, (L"Edit Games List" + editorName).c_str());
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_BROWSERS, (L"Edit Browsers List" + editorName).c_str());
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_IGNORED, (L"Edit Ignored Processes" + editorName).c_str());
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_LAUNCHERS, (L"Edit Custom Launchers" + editorName).c_str());
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hConfigMenu, L"Configuration");
 
             // 3. Controls Submenu
@@ -489,17 +541,30 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         else if (wmId == ID_TRAY_OPEN_DIR) {
             ShellExecuteW(nullptr, L"open", GetLogPath().c_str(), nullptr, nullptr, SW_SHOW);
         }
-        else if (wmId == ID_TRAY_EDIT_CONFIG) {
-            OpenFileInEditor(CONFIG_FILENAME);
+		else if (wmId == ID_TRAY_EDIT_CONFIG) {
+            // Re-detect to ensure we have the path (or cache it in a broader scope, but this is safe)
+            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
+            OpenFileInEditor(CONFIG_FILENAME, path);
         }
         else if (wmId == ID_TRAY_EDIT_GAMES || wmId == ID_TRAY_EDIT_BROWSERS) {
-            OpenFileInEditor(CONFIG_FILENAME); // These are inside config.ini
+            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
+            OpenFileInEditor(CONFIG_FILENAME, path); 
         }
         else if (wmId == ID_TRAY_EDIT_IGNORED) {
-            OpenFileInEditor(IGNORED_PROCESSES_FILENAME);
+            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
+            OpenFileInEditor(IGNORED_PROCESSES_FILENAME, path);
         }
         else if (wmId == ID_TRAY_EDIT_LAUNCHERS) {
-            OpenFileInEditor(CUSTOM_LAUNCHERS_FILENAME);
+            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
+            OpenFileInEditor(CUSTOM_LAUNCHERS_FILENAME, path);
         }
         // --- End New Handlers ---
 
