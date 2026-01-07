@@ -739,7 +739,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                         }
                     }
                 } else {
-                    MessageBoxW(hwnd, L"No updates available.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
+                    MessageBoxW(hwnd, L"You have the latest version of PMan.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
                 }
             }).detach();
         } 
