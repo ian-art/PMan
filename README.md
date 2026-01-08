@@ -212,8 +212,11 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 
 ## License
 
-This project is licensed under the MIT License.
-See the `LICENSE` file for details.
+This project is licensed under the **GNU General Public License v3.0** (GPL-3.0).
+
+**What this means**: You can freely use, modify, and distribute this software, but any derivative work must also be released under GPL-3.0 with its source code available.
+
+See the [LICENSE](LICENSE) file for the full license text.
 
 **VirusTotal**
 `e573a3ec40b681f7d9ef89b75d6166a43a931c0454a3b2952ab0cd8794641876`
