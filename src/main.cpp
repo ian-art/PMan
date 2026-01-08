@@ -30,6 +30,7 @@
 #include "services.h"
 #include "restore.h"
 #include "static_tweaks.h"
+#include "memory_optimizer.h"
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -965,6 +966,9 @@ if (!taskExists)
     // Initialize Smart Shell Booster
     g_explorerBooster.Initialize();
 
+	// Initialize Smart Memory Optimizer
+    g_memoryOptimizer.Initialize();
+
     DetectOSCapabilities();
     // Create restore point in background thread (non-blocking)
     std::thread restoreThread([]() {
@@ -1055,6 +1059,13 @@ if (!taskExists)
     std::thread watchdogThread(AntiInterferenceWatchdog);
     PinBackgroundThread(watchdogThread);
     
+	// Start Memory Optimizer in background thread
+    std::thread memOptThread([]() {
+        g_memoryOptimizer.RunThread();
+    });
+    PinBackgroundThread(memOptThread);
+    memOptThread.detach(); // Allow it to run independently until app exit
+	
     // FIX: Check return value (C6031)
     HRESULT hrInit = CoInitialize(nullptr);
     if (FAILED(hrInit)) {
@@ -1222,7 +1233,8 @@ if (!taskExists)
     
 	g_running = false;
     g_explorerBooster.Shutdown();
-    
+    g_memoryOptimizer.Shutdown();
+	
     // Signal threads to wake up/stop
     if (g_hShutdownEvent) SetEvent(g_hShutdownEvent); // Wakes Watchdog immediately
     StopEtwSession(); // Unblocks EtwThread (ProcessTrace returns)

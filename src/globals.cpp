@@ -10,6 +10,9 @@ PerformanceGuardian g_perfGuardian;
 // Explorer Booster
 ExplorerBooster g_explorerBooster;
 
+// RAM Cleaner
+MemoryOptimizer g_memoryOptimizer;
+
 // Memory Telemetry
 MemoryTelemetry g_memTelemetry{};
 

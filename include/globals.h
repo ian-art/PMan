@@ -6,6 +6,7 @@
 #include "services.h" // Needed for WindowsServiceManager type
 #include "performance.h" // Performance Guardian
 #include "explorer_booster.h" // Smart Explorer Booster
+#include "memory_optimizer.h" // Smart RAM Cleaner
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
@@ -25,6 +26,9 @@ extern PerformanceGuardian g_perfGuardian;
 
 // Explorer Booster
 extern ExplorerBooster g_explorerBooster;
+
+// Memory Optimizer
+extern MemoryOptimizer g_memoryOptimizer;
 
 // Memory Telemetry
 extern MemoryTelemetry g_memTelemetry;
