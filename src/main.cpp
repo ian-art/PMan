@@ -1004,11 +1004,13 @@ if (!taskExists)
     // Safety check: Restore services if they were left suspended from a crash
     if (g_caps.hasAdminRights && g_serviceManager.Initialize())
     {
+		/*
         g_serviceManager.AddService(L"wuauserv", 
             SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START);
         g_serviceManager.AddService(L"BITS", 
             SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_PAUSE_CONTINUE | SERVICE_STOP | SERVICE_START);
-        
+        */
+
         // Check if services are suspended (shouldn't be at startup)
         SC_HANDLE scManager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
         if (scManager)
