@@ -46,6 +46,8 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
     // Now safe to allocate
     IocpJob* job = new (std::nothrow) IocpJob();
     if (!job) {
+        // FIX: Decrement counter if allocation fails, otherwise the slot is leaked forever
+        g_iocpQueueSize.fetch_sub(1, std::memory_order_release);
         Log("[IOCP] Failed to allocate job - out of memory");
         return false;
     }
@@ -102,7 +104,7 @@ static void WINAPI DpcIsrCallback(EVENT_RECORD* rec) {
     static uint64_t dpcRingBuffer[DPC_RING_SIZE] = {0};
     static size_t dpcRingHead = 0;
     static size_t dpcRingCount = 0;
-    static std::mutex dpcMtx;
+    // [OPTIMIZATION] Mutex removed: ProcessTrace serializes callbacks on the ETW thread.
     
     if (!rec) return;
 
@@ -138,7 +140,7 @@ static void WINAPI DpcIsrCallback(EVENT_RECORD* rec) {
                 
                 uint64_t latencyUs = duration / 10;
                 
-                std::lock_guard lock(dpcMtx);
+                // Mutex removed (Single-threaded context)
                 
                 // Update Ring Buffer
                 dpcRingBuffer[dpcRingHead] = latencyUs;
@@ -471,12 +473,12 @@ void EtwThread()
 	// CRITICAL: Enable DirectX 9 Provider (for old games like C&C3)
     static const GUID D3D9Guid = { 0x783ACA0A, 0x790E, 0x4d7f, { 0x8A, 0x51, 0xC4, 0x15, 0x1E, 0x9F, 0x6F, 0xD3 } };
     EnableTraceEx2(hSession, &D3D9Guid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
-                   TRACE_LEVEL_VERBOSE, 0x1, 0, 0, nullptr); // 0x1 = Present only
+                   TRACE_LEVEL_INFORMATION, 0x1, 0, 0, nullptr); // Reduced to INFO
 
     // CRITICAL: Enable DirectX 10 Provider (hybrid DX10/11)
     static const GUID D3D10Guid = { 0x9B7E4C8F, 0x342C, 0x4106, { 0xA1, 0x9F, 0x4F, 0x27, 0x04, 0xF6, 0x89, 0xF0 } };
     EnableTraceEx2(hSession, &D3D10Guid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
-                   TRACE_LEVEL_VERBOSE, 0x1, 0, 0, nullptr); // 0x1 = Present only
+                   TRACE_LEVEL_INFORMATION, 0x1, 0, 0, nullptr); // Reduced to INFO
 
 	// Enable DPC & ISR Providers (Verbose for duration data))
     // DPC: Only capture duration warnings (>1ms)
