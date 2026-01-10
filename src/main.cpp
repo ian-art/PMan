@@ -178,6 +178,9 @@ public:
             WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
             hOwner, nullptr, g_hInst, nullptr);
         ShowWindow(g_hLogWindow, SW_SHOW);
+		// [FIX] Force flush buffered logs to disk immediately when Viewer opens.
+        // This ensures the viewer has a file to read even if no new logs occur.
+        FlushLogger();
     }
 
 private:
