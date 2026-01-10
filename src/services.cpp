@@ -385,6 +385,8 @@ void SuspendBackgroundServices()
     // Add services to manage
     bool hasAnyService = false;
     
+    // [SAFETY PATCH] Removed wuauserv and BITS to prevent OS corruption
+    /*
     if (g_serviceManager.AddService(L"wuauserv", 
         SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
     {
@@ -396,6 +398,7 @@ void SuspendBackgroundServices()
     {
         hasAnyService = true;
     }
+    */
 
     // Block Delivery Optimization (The main cause of "Online Lag")
     if (g_serviceManager.AddService(L"dosvc", 

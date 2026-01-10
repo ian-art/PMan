@@ -26,9 +26,18 @@
 #include "performance.h" // Performance Guardian
 #include "explorer_booster.h" // Smart Explorer Booster
 #include "memory_optimizer.h" // Smart RAM Cleaner
+#include "input_guardian.h"   // Input Responsiveness
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
+
+// Network Intelligence
+enum class NetworkState {
+    Offline = 0,    // No internet access
+    Unstable = 1,   // High latency (>150ms) or packet loss
+    Stable = 2      // Low latency, reliable connection
+};
+
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
@@ -45,6 +54,9 @@ extern PerformanceGuardian g_perfGuardian;
 
 // Explorer Booster
 extern ExplorerBooster g_explorerBooster;
+
+// Input Guardian
+extern InputGuardian g_inputGuardian;
 
 // Memory Optimizer
 extern MemoryOptimizer g_memoryOptimizer;
@@ -79,6 +91,7 @@ extern std::atomic<int>  g_interferenceCount;
 extern std::atomic<bool> g_suspendUpdatesDuringGames;
 extern std::atomic<bool> g_isSuspended;
 extern std::atomic<bool> g_userPaused;
+extern std::atomic<NetworkState> g_networkState;
 
 // Idle Revert Feature
 extern std::atomic<bool> g_idleRevertEnabled;
@@ -161,5 +174,10 @@ extern std::atomic<uint64_t> g_lastEtwHeartbeat; // ETW Liveness
 
 // Root Cause Correlation Global
 extern std::atomic<double> g_lastDpcLatency;
+
+// Network Activity Cache
+// Stores PIDs that have active TCP connections (Updated by NetworkMonitor)
+extern std::shared_mutex g_netActivityMtx;
+extern std::unordered_set<DWORD> g_activeNetPids GUARDED_BY(g_netActivityMtx);
 
 #endif // PMAN_GLOBALS_H

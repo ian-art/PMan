@@ -32,6 +32,8 @@
 #include "restore.h"
 #include "static_tweaks.h"
 #include "memory_optimizer.h"
+#include "network_monitor.h"
+#include "input_guardian.h"
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -797,6 +799,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 int wmain(int argc, wchar_t* argv[])
 {
+    // Initialize Telemetry-Safe Logger
+    InitLogger();
+
 	// 1. Initialize Global Instance Handle (Required for Tray Icon)
     g_hInst = GetModuleHandle(nullptr);
 
@@ -982,6 +987,9 @@ if (!taskExists)
     // Initialize Smart Shell Booster
     g_explorerBooster.Initialize();
 
+    // Initialize Input Responsiveness Guard
+    g_inputGuardian.Initialize();
+
 	// Initialize Smart Memory Optimizer
     g_memoryOptimizer.Initialize();
 
@@ -1054,28 +1062,34 @@ if (!taskExists)
         Log("Failed to create shutdown event: " + std::to_string(GetLastError()));
     }
     
-    // Helper to pin thread to last physical core (away from games)
+    // Helper to pin thread to last physical cores (away from games)
     auto PinBackgroundThread = [](std::thread& t) {
-        if (g_physicalCoreCount > 2) {
-            DWORD_PTR affinityMask = 1ULL << (g_physicalCoreCount - 1);
+        if (g_physicalCoreCount >= 4) {
+            // [PERF FIX] Use last 2 cores instead of 1 to reduce contention
+            DWORD_PTR affinityMask = (1ULL << (g_physicalCoreCount - 1)) | (1ULL << (g_physicalCoreCount - 2));
             SetThreadAffinityMask(t.native_handle(), affinityMask);
         }
+        // Always lower priority to prevent interference
+        SetThreadPriority(t.native_handle(), THREAD_PRIORITY_LOWEST);
     };
     
     std::thread configThread(IocpConfigWatcher);
     PinBackgroundThread(configThread);
+    Sleep(100); // [POLISH] Stagger start
     
     std::thread etwThread;
     if (g_caps.canUseEtw)
     {
         etwThread = std::thread(EtwThread);
         PinBackgroundThread(etwThread);
+        Sleep(100); // [POLISH] Stagger start
     }
     
     std::thread watchdogThread(AntiInterferenceWatchdog);
     PinBackgroundThread(watchdogThread);
+    Sleep(100); // [POLISH] Stagger start
     
-	// Start Memory Optimizer in background thread
+    // Start Memory Optimizer in background thread
     std::thread memOptThread([]() {
         g_memoryOptimizer.RunThread();
     });
@@ -1087,6 +1101,9 @@ if (!taskExists)
     if (FAILED(hrInit)) {
         Log("[INIT] CoInitialize failed: " + std::to_string(hrInit));
     }
+
+    // Network Intelligence
+    g_networkMonitor.Initialize();
     
     HWINEVENTHOOK hook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
                                          nullptr, WinEventProc, 0, 0,
@@ -1168,8 +1185,13 @@ if (!taskExists)
             
             if (msg.message == WM_INPUT) 
             {
-                // Signal user activity to Smart Explorer Booster
+                // Signal user activity to Smart Shell Booster
                 g_explorerBooster.OnUserActivity();
+                
+                // Input Responsiveness Guard
+                // Monitor latency and boost foreground threads
+                g_inputGuardian.OnInput(msg.time);
+                
                 DefWindowProc(msg.hwnd, msg.message, msg.wParam, msg.lParam);
             }
             else if (msg.message == WM_POWERBROADCAST)
@@ -1182,8 +1204,11 @@ if (!taskExists)
                 else if (msg.wParam == PBT_APMRESUMEAUTOMATIC || msg.wParam == PBT_APMRESUMESUSPEND)
                 {
                     Log("System resumed - waiting 5s for kernel stability");
-                    Sleep(5000); 
-                    g_isSuspended.store(false);
+                    // Fix: Move blocking wait to background thread to prevent UI freeze
+                    std::thread([]() {
+                        Sleep(5000); 
+                        g_isSuspended.store(false);
+                    }).detach();
                 }
                 else if (msg.wParam == PBT_POWERSETTINGCHANGE)
                 {
@@ -1196,9 +1221,11 @@ if (!taskExists)
         
 		if (g_reloadNow.exchange(false))
         {
-            // Allow file system to settle (fixes empty-read race conditions with Notepad++/UAC)
-            Sleep(250);
-            LoadConfig();
+            // [PERF FIX] Move blocking sleep/load to background thread
+            std::thread([]() {
+                Sleep(250);
+                LoadConfig();
+            }).detach();
         }
 
         // Safety check: ensure services are not left suspended
@@ -1248,7 +1275,9 @@ if (!taskExists)
     CoUninitialize();
     
 	g_running = false;
+    g_networkMonitor.Stop(); // Stop Monitor
     g_explorerBooster.Shutdown();
+    g_inputGuardian.Shutdown();
     g_memoryOptimizer.Shutdown();
 	
     // Signal threads to wake up/stop
@@ -1279,5 +1308,9 @@ if (!taskExists)
     }
     
     Log("=== Priority Manager Stopped ===");
+    
+    // Flush logs to disk before exit
+    ShutdownLogger();
+
     return 0;
 }

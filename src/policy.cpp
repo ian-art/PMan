@@ -18,6 +18,7 @@
  */
 
 #include "policy.h"
+#include "throttle_manager.h"
 #include "globals.h"
 #include "constants.h"
 #include "logger.h"
@@ -26,6 +27,56 @@
 #include "services.h"
 #include <wtsapi32.h>
 #include <mutex>
+#include <shared_mutex>
+
+// Background Activity Classification
+ProcessNetClass ClassifyProcessActivity(DWORD pid, const std::wstring& exeName) {
+    // 1. Safety Check: System Critical (Uses centralized utils check)
+    if (IsSystemCriticalProcess(exeName)) return ProcessNetClass::SystemCritical;
+
+    // 2. User Config: User Critical (Games/Players/Browsers)
+    {
+        std::shared_lock lg(g_setMtx);
+        if (g_games.count(exeName) || g_videoPlayers.count(exeName) || g_browsers.count(exeName)) {
+            return ProcessNetClass::UserCritical;
+        }
+    }
+
+    // 3. Network Behavior Check
+    bool isNetActive = false;
+    {
+        std::shared_lock lock(g_netActivityMtx);
+        isNetActive = g_activeNetPids.count(pid);
+    }
+
+    if (isNetActive) {
+        // Known Background Hogs
+        if (exeName == L"dosvc.exe" || exeName == L"gamingservices.exe" || 
+            exeName == L"clicktorunsvc.exe" || exeName == L"onedrive.exe" || 
+            exeName == L"backgroundtaskhost.exe") 
+        {
+            return ProcessNetClass::NetworkBound; // Valid target for throttling
+        }
+        
+        // Launchers in background (when game is running) are also Network Bound
+        // Note: GAME_LAUNCHERS is defined in constants.h, we can access it here
+        {
+            std::shared_lock lg(g_setMtx);
+            // Check if it's a custom launcher or a known standard launcher
+            if (g_customLaunchers.count(exeName)) {
+                return ProcessNetClass::NetworkBound;
+            }
+        }
+        // Iterate standard list (defined in constants.h, available via globals or direct check)
+        // Since GAME_LAUNCHERS is in constants.h which policy.cpp includes indirectly via globals->constants
+        if (GAME_LAUNCHERS.count(exeName)) {
+            return ProcessNetClass::NetworkBound;
+        }
+    }
+
+    // 4. Default
+    return ProcessNetClass::Unknown;
+}
 
 #pragma comment(lib, "Wtsapi32.lib")
 
@@ -215,8 +266,8 @@ bool IsPolicyChangeAllowed(int newMode)
     if (newMode == currentMode) return true;
     
 	// Policy Cooldown / Hysteresis
-    // 30s minimum to prevent scheduler thrashing
-    static constexpr auto POLICY_COOLDOWN = std::chrono::seconds(30);
+    // [POLISH] Reduced to 5s to improve Alt-Tab responsiveness while preventing thrashing
+    static constexpr auto POLICY_COOLDOWN = std::chrono::seconds(5);
     auto nowPoint = std::chrono::steady_clock::now();
     auto lastChangeRep = g_lastPolicyChange.load();
     
@@ -239,9 +290,14 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
 {
     if (!g_running || pid == 0 || pid == GetCurrentProcessId()) return;
     if (g_userPaused.load()) return;
-    
-    // Session-scoped filtering
-    if (!hwnd && g_ignoreNonInteractive.load() && !g_sessionLocked.load())
+
+    // [PERF FIX] Offload to background thread to prevent UI blocking
+    std::thread([pid, hwnd]() mutable {
+        // Re-verify flags inside thread
+        if (!g_running || g_userPaused.load()) return;
+
+        // Session-scoped filtering
+        if (!hwnd && g_ignoreNonInteractive.load() && !g_sessionLocked.load())
     {
         if (!IsProcessInActiveSession(pid))
         {
@@ -301,6 +357,16 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
 
     // FIX: Normalize to lowercase for consistent lookups (Ignore List, Games, Browsers)
     asciiLower(exe);
+
+    // Network Policy Enrollment
+    // Check if this is a background bandwidth hog BEFORE applying game/desktop logic
+    ProcessNetClass netClass = ClassifyProcessActivity(pid, exe);
+    if (netClass == ProcessNetClass::NetworkBound) {
+        // Throttling (Job Object + Dynamic Priority)
+        g_throttleManager.ManageProcess(pid);
+        // We continue execution so standard optimizations can still apply if needed,
+        // but typically NetworkBound apps are background services.
+    }
 
 	int mode = 0; // FIX: Declare mode early so it can be used by goto logic
     bool forceOverride = false;
@@ -684,4 +750,5 @@ apply_policy:  // FIX: Label for the goto jump
             }
         }
     }
+	}).detach(); // End of async thread
 }

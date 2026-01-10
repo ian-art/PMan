@@ -194,6 +194,13 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
                     std::wstring name = p.filename().wstring();
                     std::transform(name.begin(), name.end(), name.begin(), ::towlower);
                     
+                    // Critical Safety Check (Defender Safe)
+                    // Explicitly prevent trimming AV or System processes
+                    if (IsSystemCriticalProcess(name)) {
+                        CloseHandle(hProc);
+                        continue;
+                    }
+
                     std::shared_lock<std::shared_mutex> lock(g_setMtx);
                     if (g_ignoredProcesses.find(name) != g_ignoredProcesses.end()) {
                         CloseHandle(hProc);
@@ -201,12 +208,6 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
                     }
                 }
 
-                // Trim Working Set
-                SIZE_T sizeBefore = pmc.WorkingSetSize;
-                if (EmptyWorkingSet(hProc)) {
-                    totalFreedBytes += sizeBefore; 
-                    trimmedCount++;
-                }
                 m_processTracker[pid].lastTrimTime = now;
             }
         }

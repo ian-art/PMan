@@ -61,6 +61,7 @@ std::atomic<int>  g_interferenceCount{0};
 std::atomic<bool> g_suspendUpdatesDuringGames{false};
 std::atomic<bool> g_isSuspended{false};
 std::atomic<bool> g_userPaused{false};
+std::atomic<NetworkState> g_networkState{NetworkState::Offline};
 
 // Idle Revert Feature
 std::atomic<bool> g_idleRevertEnabled{true};
@@ -143,3 +144,7 @@ std::atomic<uint64_t> g_lastEtwHeartbeat{0};
 
 // Root Cause Correlation Global
 std::atomic<double> g_lastDpcLatency{0.0};
+
+// Network Activity Cache
+std::shared_mutex g_netActivityMtx;
+std::unordered_set<DWORD> g_activeNetPids;

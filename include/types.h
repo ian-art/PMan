@@ -274,4 +274,14 @@ struct ProcessIdentityHash {
     }
 };
 
+// Process Classification
+enum class ProcessNetClass {
+    Unknown = 0,
+    SystemCritical,  // Kernel, AV, Security (Touch NOTHING)
+    UserCritical,    // Games, Video Players, Foreground Apps (Boost)
+    LatencySensitive,// VoIP, Multiplayer Games (Protect)
+    NetworkBound,    // Downloaders, Updates, Cloud Sync (Throttle if Unstable)
+    BulkBackground   // Indexers, Telemetry (Throttle Aggressively)
+};
+
 #endif // PMAN_TYPES_H

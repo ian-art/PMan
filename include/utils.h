@@ -30,6 +30,7 @@
 
 // Helpers
 std::string WideToUtf8(const wchar_t* wstr);
+bool IsSystemCriticalProcess(const std::wstring& exeName); // Defender/System Exclusion
 std::wstring ExeFromPath(const wchar_t* path);
 ULONGLONG FileTimeToULL(const FILETIME& ft); // Shared utility
 bool IsAntiCheatProcess(const std::wstring& exeName); // Centralized AC check
@@ -100,5 +101,8 @@ bool IsAntiCheatProtected(DWORD pid);
 
 // Get Parent PID (Non-ETW fallback)
 DWORD GetParentProcessId(DWORD pid);
+
+// Get DWM Process ID (Shared Utility)
+DWORD GetDwmProcessId();
 
 #endif // PMAN_UTILS_H

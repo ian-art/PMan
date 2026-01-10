@@ -502,6 +502,30 @@ void ApplyStaticTweaks()
 	ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32", L"", L"");
 
     // ============================================================================
+    // POLICY & PERSISTENCE (AV-SAFE)
+    // ============================================================================
+    Log("[TWEAK] Applying Phase 7: Policy & Persistence...");
+
+    // 1. Update Deferral (Not Disabling)
+    // AUOptions = 2 (Notify for download and auto install). Gives user control without breaking OS.
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", L"AUOptions", 2);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", L"NoAutoUpdate", 0);
+    // Exclude drivers from quality updates to prevent stability issues (User consented stability)
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\WindowsUpdate", L"ExcludeWUDriversInQualityUpdate", 1);
+
+    // 2. Delivery Optimization Limits
+    // DODownloadMode = 0 (HTTP Only, no P2P). Reduces background upload/download bandwidth.
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\DeliveryOptimization", L"DODownloadMode", 0);
+    
+    // 3. Power Profile Tuning (Unhide Advanced Settings for User Tuning)
+    // Processor Idle Demotion Threshold
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Power\\PowerSettings\\54533251-82be-4824-96c1-47b60b740d00\\4b92d758-5a24-4851-a470-815d78aee119", L"Attributes", 2);
+    // Processor Idle Promote Threshold
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Power\\PowerSettings\\54533251-82be-4824-96c1-47b60b740d00\\7b224883-b3cc-4d79-819f-8374152cbe7c", L"Attributes", 2);
+    // Latency Sensitivity Hint (Unhide)
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Power\\PowerSettings\\54533251-82be-4824-96c1-47b60b740d00\\619b7505-003b-4e82-b7a6-4dd29c300971", L"Attributes", 2);
+
+    // ============================================================================
     // UWP / BACKGROUND TASKS
     // ============================================================================
     Log("[TWEAK] Applying UWP & Background Tasks cleanup...");
@@ -743,10 +767,11 @@ void ApplyStaticTweaks()
 	SetServiceStartup(L"PushToInstall", SERVICE_DEMAND_START);
 	SetServiceStartup(L"WinRM", SERVICE_DEMAND_START);
 	SetServiceStartup(L"WSearch", SERVICE_DEMAND_START);
-	SetServiceStartup(L"W32Time", SERVICE_DEMAND_START);
-	SetServiceStartup(L"wuauserv", SERVICE_DISABLED);
-	SetServiceStartup(L"ApxSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WinHttpAutoProxySvc", SERVICE_DEMAND_START);
+    SetServiceStartup(L"W32Time", SERVICE_DEMAND_START);
+    // FIX: Do not disable Update Service. Set to Manual and rely on Policy Deferral.
+    SetServiceStartup(L"wuauserv", SERVICE_DEMAND_START);
+    SetServiceStartup(L"ApxSvc", SERVICE_DEMAND_START);
+    SetServiceStartup(L"WinHttpAutoProxySvc", SERVICE_DEMAND_START);
 	SetServiceStartup(L"dot3svc", SERVICE_DEMAND_START);
 	SetServiceStartup(L"WlanSvc", SERVICE_DELAYED_AUTO_START);
 	SetServiceStartup(L"wmiApSrv", SERVICE_DEMAND_START);

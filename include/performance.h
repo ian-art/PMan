@@ -21,11 +21,13 @@
 #define PMAN_PERFORMANCE_H
 
 #include "types.h"
-#include <vector>
-#include <deque>
+#include <unordered_map>
+#include <string>
 #include <mutex>
 #include <unordered_map>
 #include <filesystem>
+#include <deque>
+#include <vector>
 
 struct GameProfile {
     std::wstring exeName;

@@ -23,10 +23,15 @@
 #include <string>
 #include <filesystem>
 
-// Log a message to the global log file
+// Log a message to the internal circular buffer
 void Log(const std::string& msg);
 
 // Get the path to the log directory
 std::filesystem::path GetLogPath();
+
+// Telemetry-Safe Logging Control
+void InitLogger();     // Initialize buffer and directory
+void ShutdownLogger(); // Flush buffer to disk and close
+void FlushLogger();    // Force write buffer to disk (used by Viewer)
 
 #endif // PMAN_LOGGER_H

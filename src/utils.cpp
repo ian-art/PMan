@@ -28,6 +28,7 @@
 #include <mutex>
 #include <shellapi.h>
 #include <winhttp.h>
+#include <unordered_set> // Required for IsSystemCriticalProcess
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "Version.lib") // Required for GetFileVersionInfo
 
@@ -56,6 +57,24 @@ std::wstring ExeFromPath(const wchar_t* path)
     std::wstring s = name;
     asciiLower(s);
     return s;
+}
+
+bool IsSystemCriticalProcess(const std::wstring& exeName) {
+    // Centralized Safety List (Defender + OS Core)
+    // Ensures these processes are NEVER throttled, trimmed, or touched.
+    static const std::unordered_set<std::wstring> SYS_PROCS = {
+        // Windows Defender / Security
+        L"msmpeng.exe", L"nissrv.exe", L"securityhealthservice.exe",
+        L"sensecncproxy.exe", L"mpcmdrun.exe", L"smartscreen.exe",
+        L"sgrmbroker.exe", L"sihost.exe",
+        
+        // System Core
+        L"csrss.exe", L"lsass.exe", L"wininit.exe", L"services.exe",
+        L"smss.exe", L"winlogon.exe", L"dwm.exe", L"spoolsv.exe",
+        L"ntoskrnl.exe", L"system", L"fontdrvhost.exe", 
+        L"taskhostw.exe", L"runtimebroker.exe"
+    };
+    return SYS_PROCS.count(exeName);
 }
 
 // asciiLower is now templated in header
@@ -185,6 +204,56 @@ DWORD GetParentProcessId(DWORD pid)
         } while (Process32NextW(hSnap, &pe));
     }
     CloseHandle(hSnap);
+    return 0;
+}
+
+DWORD GetDwmProcessId()
+{
+    // Method 1: Registry (Fastest)
+    HKEY hKey;
+    DWORD dwmPid = 0;
+    DWORD size = sizeof(dwmPid);
+    
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, 
+                      L"Software\\Microsoft\\Windows\\DWM", 
+                      0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
+        if (RegQueryValueExW(hKey, L"ProcessId", NULL, NULL, 
+                        reinterpret_cast<LPBYTE>(&dwmPid), &size) == ERROR_SUCCESS) {
+            // Verify PID actually exists and is DWM (PID reuse protection)
+            ProcessIdentity id;
+            if (GetProcessIdentity(dwmPid, id)) {
+                // Double check name
+                HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, dwmPid);
+                if (hProc) {
+                    wchar_t path[MAX_PATH];
+                    DWORD sz = MAX_PATH;
+                    if (QueryFullProcessImageNameW(hProc, 0, path, &sz)) {
+                        if (ExeFromPath(path) == L"dwm.exe") {
+                            RegCloseKey(hKey);
+                            CloseHandle(hProc);
+                            return dwmPid;
+                        }
+                    }
+                    CloseHandle(hProc);
+                }
+            }
+        }
+        RegCloseKey(hKey);
+    }
+    
+    // Method 2: Snapshot Fallback
+    UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+    if (hSnap.get() == INVALID_HANDLE_VALUE) return 0;
+
+    PROCESSENTRY32W pe = {sizeof(pe)};
+    if (Process32FirstW(hSnap.get(), &pe)) {
+        do {
+            if (_wcsicmp(pe.szExeFile, L"dwm.exe") == 0) {
+                return pe.th32ProcessID;
+            }
+        } while (Process32NextW(hSnap.get(), &pe));
+    }
+    
     return 0;
 }
 

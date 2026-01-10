@@ -28,8 +28,14 @@
 #include <mutex>
 #include <chrono>
 #include <iomanip>
+#include <deque>
+#include <atomic>
 
+// Circular Buffer Settings
+static const size_t MAX_LOG_HISTORY = 2000; // Keep last 2000 lines in RAM
+static std::deque<std::string> g_logBuffer;
 static std::mutex g_logMtx;
+static std::atomic<bool> g_loggerInitialized{false};
 
 std::filesystem::path GetLogPath()
 {
@@ -44,82 +50,126 @@ std::filesystem::path GetLogPath()
     return std::filesystem::path(L"C:\\ProgramData\\PriorityMgr");
 }
 
-void Log(const std::string& msg)
+// Ensure Log Directory exists with correct permissions
+static void EnsureLogDirectory()
+{
+    std::filesystem::path dir = GetLogPath();
+    if (!std::filesystem::exists(dir))
+    {
+        PSECURITY_DESCRIPTOR pSD = nullptr;
+        // D:DACL, A:Allow, GA:GenericAll (Admins), GR:GenericRead (Users)
+        if (ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                L"D:(A;OICI;GA;;;BA)(A;OICI;GR;;;BU)", 
+                SDDL_REVISION_1, &pSD, nullptr))
+        {
+            SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), pSD, FALSE };
+            CreateDirectoryW(dir.c_str(), &sa);
+            LocalFree(pSD);
+        }
+        else
+        {
+            std::filesystem::create_directories(dir);
+        }
+    }
+}
+
+void FlushLogger()
 {
     std::lock_guard lg(g_logMtx);
-try
+    if (g_logBuffer.empty()) return;
+
+    try
     {
         std::filesystem::path dir = GetLogPath();
-        
-        // Fix: Secure Directory Creation (Admins: Full, Users: Read-Only)
-        if (!std::filesystem::exists(dir))
-        {
-            PSECURITY_DESCRIPTOR pSD = nullptr;
-            // D:DACL, A:Allow, GA:GenericAll (Admins), GR:GenericRead (Users)
-            if (ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                    L"D:(A;OICI;GA;;;BA)(A;OICI;GR;;;BU)", 
-                    SDDL_REVISION_1, &pSD, nullptr))
-            {
-                SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), pSD, FALSE };
-                CreateDirectoryW(dir.c_str(), &sa);
-                LocalFree(pSD);
-            }
-            else
-            {
-                // Fallback if security descriptor fails
-                std::filesystem::create_directories(dir);
-			}
-        }
-
         auto logPath = dir / L"log.txt";
 
-        // Fix Log rotation (Max 5MB)
-        try {
-            if (std::filesystem::exists(logPath) && std::filesystem::file_size(logPath) > 5 * 1024 * 1024) {
-                auto backupPath = dir / L"log.old.txt";
-                std::filesystem::copy_file(logPath, backupPath, std::filesystem::copy_options::overwrite_existing);
-                std::filesystem::resize_file(logPath, 0); // Truncate current log
-            }
-        } catch (...) {}
+        // Rotate if too big (>5MB)
+        if (std::filesystem::exists(logPath) && std::filesystem::file_size(logPath) > 5 * 1024 * 1024) {
+            auto backupPath = dir / L"log.old.txt";
+            std::filesystem::copy_file(logPath, backupPath, std::filesystem::copy_options::overwrite_existing);
+            std::filesystem::resize_file(logPath, 0); 
+        }
 
-       std::ofstream log(logPath, std::ios::app);
+        std::ofstream log(logPath, std::ios::app);
         if (log)
         {
-            auto now = std::chrono::system_clock::now();
-            std::time_t t = std::chrono::system_clock::to_time_t(now);
-            
-            // Safer buffer handling for timestamp
-            const size_t TIMEBUF_SIZE = 32;
-            char timebuf[TIMEBUF_SIZE] = {0};
-            struct tm timeinfo;
-            
-            if (localtime_s(&timeinfo, &t) == 0)
-            {
-				// Use strftime with explicit buffer size control
-                if (std::strftime(timebuf, TIMEBUF_SIZE, "%Y-%m-%d %H:%M:%S", &timeinfo) > 0)
-                {
-                    // Use \n instead of std::endl to let OS handle buffering (prevents disk thrashing)
-                    log << timebuf << "  " << msg << "\n";
-                }
-                else
-                {
-                    log << "[Timestamp Error] " << msg << "\n";
-                }
+            for (const auto& line : g_logBuffer) {
+                log << line << "\n";
             }
-            else
-            {
-                log << msg << "\n";
-            }
+            g_logBuffer.clear();
         }
     }
-	catch (const std::exception&) 
-    { 
-        // Silent in background mode - no console output
+    catch (...) {
+        // Disk I/O errors are suppressed in release build to prevent crashes
+    }
+}
+
+void InitLogger()
+{
+    EnsureLogDirectory();
+    g_loggerInitialized = true;
+    Log("--- Logger Initialized (Circular Buffer Mode) ---");
+}
+
+void ShutdownLogger()
+{
+    if (g_loggerInitialized) {
+        Log("--- Logger Shutdown (Flushing to disk) ---");
+        FlushLogger();
+        g_loggerInitialized = false;
+    }
+}
+
+void Log(const std::string& msg)
+{
+    // Format timestamp
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    char timebuf[32] = {0};
+    struct tm timeinfo;
+    
+    std::string formattedMsg;
+    if (localtime_s(&timeinfo, &t) == 0 && std::strftime(timebuf, 32, "%Y-%m-%d %H:%M:%S", &timeinfo) > 0)
+    {
+        formattedMsg = std::string(timebuf) + "  " + msg;
+    }
+    else
+    {
+        formattedMsg = msg;
     }
 
-    // Real-time update: Notify the viewer immediately if it exists
-    // This removes the need to wait for the 500ms polling timer
+    // Write to Circular Buffer
+    {
+        std::lock_guard lg(g_logMtx);
+        g_logBuffer.push_back(formattedMsg);
+        if (g_logBuffer.size() > MAX_LOG_HISTORY) {
+            g_logBuffer.pop_front();
+        }
+    }
+
+    // Telemetry Safety
+    // Only flush to disk if the Log Viewer is actually open (Debugging Mode).
+    // Otherwise, keep logs in RAM to prevent disk activity.
     static HWND hViewer = nullptr;
-    if (!IsWindow(hViewer)) hViewer = FindWindowW(L"PManLogViewer", nullptr);
-    if (hViewer) PostMessageW(hViewer, WM_LOG_UPDATED, 0, 0);
+    
+    // Fix: Rate limit Window search to avoid system-wide iteration on every log line
+    if (!IsWindow(hViewer)) {
+         static DWORD lastCheckTick = 0;
+         DWORD currentTick = GetTickCount();
+         if (currentTick - lastCheckTick > 2000) {
+             hViewer = FindWindowW(L"PManLogViewer", nullptr);
+             lastCheckTick = currentTick;
+         }
+    }
+    
+    if (hViewer && IsWindowVisible(hViewer)) {
+        // [PERF FIX] Rate limit disk flushing to 1 second
+        static uint64_t lastFlush = 0;
+        uint64_t nowTick = GetTickCount64();
+        if (nowTick - lastFlush > 1000) {
+            FlushLogger();
+            PostMessageW(hViewer, WM_LOG_UPDATED, 0, 0);
+            lastFlush = nowTick;
+        }
+    }
 }
