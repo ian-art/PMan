@@ -93,6 +93,7 @@ extern std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime;
 extern std::shared_mutex g_setMtx;
 extern std::unordered_set<std::wstring> g_games GUARDED_BY(g_setMtx);
 extern std::unordered_set<std::wstring> g_browsers GUARDED_BY(g_setMtx);
+extern std::unordered_set<std::wstring> g_videoPlayers GUARDED_BY(g_setMtx);
 extern std::unordered_set<std::wstring> g_gameWindows GUARDED_BY(g_setMtx);
 extern std::unordered_set<std::wstring> g_browserWindows GUARDED_BY(g_setMtx);
 extern std::unordered_set<std::wstring> g_customLaunchers GUARDED_BY(g_setMtx);

@@ -570,6 +570,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hConfigMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_GAMES, (L"Edit Games List" + editorName).c_str());
             AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_BROWSERS, (L"Edit Browsers List" + editorName).c_str());
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_VIDEO_PLAYERS, (L"Edit Video Players List" + editorName).c_str());
             AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_IGNORED, (L"Edit Ignored Processes" + editorName).c_str());
             AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_LAUNCHERS, (L"Edit Custom Launchers" + editorName).c_str());
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hConfigMenu, L"Configuration");
@@ -648,6 +649,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
             
             int line = GetConfigLineNumber(L"[browsers]");
+            OpenFileInEditor(CONFIG_FILENAME, path, line); 
+        }
+        else if (wmId == ID_TRAY_EDIT_VIDEO_PLAYERS) {
+            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
+            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
+            
+            int line = GetConfigLineNumber(L"[video_players]");
             OpenFileInEditor(CONFIG_FILENAME, path, line); 
         }
 		else if (wmId == ID_TRAY_EDIT_IGNORED) {

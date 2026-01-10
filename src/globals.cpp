@@ -75,6 +75,7 @@ std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime{0};
 std::shared_mutex g_setMtx;
 std::unordered_set<std::wstring> g_games;
 std::unordered_set<std::wstring> g_browsers;
+std::unordered_set<std::wstring> g_videoPlayers;
 std::unordered_set<std::wstring> g_gameWindows;
 std::unordered_set<std::wstring> g_browserWindows;
 std::unordered_set<std::wstring> g_customLaunchers;

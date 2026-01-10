@@ -60,6 +60,7 @@ static constexpr UINT    ID_TRAY_EDIT_GAMES     = 2004;
 static constexpr UINT    ID_TRAY_EDIT_BROWSERS  = 2005;
 static constexpr UINT    ID_TRAY_EDIT_IGNORED   = 2006;
 static constexpr UINT    ID_TRAY_EDIT_LAUNCHERS = 2007;
+static constexpr UINT    ID_TRAY_EDIT_VIDEO_PLAYERS = 2008;
 
 // PAYPAL
 static constexpr wchar_t SUPPORT_URL[]      = L"https://paypal.me/ianart/100";
@@ -223,6 +224,20 @@ msedge.exe
 brave.exe
 opera.exe
 vivaldi.exe
+
+[video_players]
+; Add video players here to boost them. Useful if you play 4k and 8k videos.
+vlc.exe
+mpv.exe
+potplayer.exe
+potplayermini.exe
+potplayermini64.exe
+mpc-hc.exe
+mpc-hc64.exe
+mpc-be.exe
+mpc-be64.exe
+kmplayer.exe
+gom.exe
 
 [game_windows]
 ; ==================== WINDOW CLASS/TITLE DETECTION ====================

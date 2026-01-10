@@ -177,6 +177,7 @@ static std::string BuildConfigOption(const std::string& comment, const std::stri
 static void WriteConfigurationFile(const std::filesystem::path& path, 
                                    const std::unordered_set<std::wstring>& games,
                                    const std::unordered_set<std::wstring>& browsers,
+                                   const std::unordered_set<std::wstring>& videoPlayers,
                                    const std::unordered_set<std::wstring>& oldGames, // New parameter
                                    const std::unordered_set<std::wstring>& gameWindows,
                                    const std::unordered_set<std::wstring>& browserWindows,
@@ -296,6 +297,12 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
     }
     buffer << BuildConfigSection("browsers", browsersSection.str());
 
+    std::ostringstream videoSection;
+    for (const auto& s : videoPlayers) {
+        videoSection << WideToUtf8(s.c_str()) << "\n";
+    }
+    buffer << BuildConfigSection("video_players", videoSection.str());
+
     std::ostringstream oldGamesSection;
     for (const auto& s : oldGames) {
         oldGamesSection << WideToUtf8(s.c_str()) << "\n";
@@ -371,7 +378,7 @@ void LoadConfig()
 	try
     {
         std::filesystem::path configPath = GetConfigPath();
-        std::unordered_set<std::wstring> games, browsers, oldGames, gameWindows, browserWindows, customLaunchers, ignoredProcesses;
+        std::unordered_set<std::wstring> games, browsers, videoPlayers, oldGames, gameWindows, browserWindows, customLaunchers, ignoredProcesses;
         bool ignoreNonInteractive = true;
         bool restoreOnExit = true;
 
@@ -397,7 +404,7 @@ void LoadConfig()
 		ExplorerConfig explorerConfig;
         
         std::wstring line;
-        enum Sect { NONE, META, GLOBAL, EXPLORER, G, B, OLD_G, GW, BW } sect = NONE;
+        enum Sect { NONE, META, GLOBAL, EXPLORER, G, B, VP, OLD_G, GW, BW } sect = NONE;
         int lineNum = 0;
         int configVersion = 0;
         
@@ -424,6 +431,7 @@ void LoadConfig()
 				else if (secName == L"meta") sect = META;
                 else if (secName == L"games") sect = G;
                 else if (secName == L"browsers") sect = B;
+                else if (secName == L"video_players") sect = VP;
                 else if (secName == L"old_games") sect = OLD_G;
                 else if (secName == L"game_windows") sect = GW;
                 else if (secName == L"browser_windows") sect = BW;
@@ -546,7 +554,7 @@ void LoadConfig()
             
 			asciiLower(item);
             
-            if (!IsValidExecutableName(item) && (sect == G || sect == B || sect == OLD_G))
+            if (!IsValidExecutableName(item) && (sect == G || sect == B || sect == VP || sect == OLD_G))
             {
                 if (!item.empty())
                     Log("[CFG] Skipped unsafe/invalid entry: " + WideToUtf8(item.c_str()));
@@ -555,6 +563,7 @@ void LoadConfig()
 
             if (sect == G && !item.empty()) games.insert(item);
             if (sect == B && !item.empty()) browsers.insert(item);
+            if (sect == VP && !item.empty()) videoPlayers.insert(item);
             if (sect == OLD_G && !item.empty()) oldGames.insert(item);
             if (sect == GW && !item.empty()) gameWindows.insert(item);
             if (sect == BW && !item.empty()) browserWindows.insert(item);
@@ -587,7 +596,7 @@ void LoadConfig()
             
 			// Write upgraded configuration
 			// Note: explorerConfig contains defaults at this point, which is exactly what we want for a fresh section
-			WriteConfigurationFile(configPath, games, browsers, oldGames, gameWindows, browserWindows,
+			WriteConfigurationFile(configPath, games, browsers, videoPlayers, oldGames, gameWindows, browserWindows,
                                   ignoreNonInteractive, restoreOnExit, lockPolicy, 
                                   g_suspendUpdatesDuringGames.load(),
                                   g_idleRevertEnabled.load(),
@@ -609,6 +618,7 @@ void LoadConfig()
 			std::unique_lock lg(g_setMtx);
             g_games = std::move(games);
             g_browsers = std::move(browsers);
+            g_videoPlayers = std::move(videoPlayers);
             g_oldGames = std::move(oldGames);
 			g_gameWindows = std::move(gameWindows);
             g_browserWindows = std::move(browserWindows);
@@ -638,6 +648,7 @@ void LoadConfig()
         
 		Log("Config loaded: " + std::to_string(g_games.size()) + " games, " +
             std::to_string(g_browsers.size()) + " browsers, " +
+            std::to_string(g_videoPlayers.size()) + " video players, " +
             std::to_string(g_oldGames.size()) + " legacy games, " +
             std::to_string(g_ignoredProcesses.size()) + " ignored, " +
             std::to_string(g_customLaunchers.size()) + " custom launchers, " +

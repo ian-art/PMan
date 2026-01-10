@@ -405,6 +405,7 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
     {
         std::shared_lock lg(g_setMtx);
         if (g_games.count(exe))   mode = 1;
+        else if (g_videoPlayers.count(exe)) mode = 1; // Treat Video Players as Games (High Perf)
         else if (g_browsers.count(exe)) mode = 2;
     }
 
@@ -566,7 +567,14 @@ apply_policy:  // FIX: Label for the goto jump
 
         if (modeChanged)
         {
-            Log((mode == 1 ? "[GAME] "s : "[BROWSER] "s) + WideToUtf8(exe.c_str()));
+            std::string prefix = "[BROWSER] ";
+            if (mode == 1) {
+                // Distinguish Game vs Video for logging
+                bool isVideo = false;
+                { std::shared_lock lg(g_setMtx); isVideo = g_videoPlayers.count(exe); }
+                prefix = isVideo ? "[VIDEO] " : "[GAME] ";
+            }
+            Log(prefix + WideToUtf8(exe.c_str()));
         }
         
 		// Apply TIERED Optimizations (CPU/IO Isolation)												
