@@ -217,7 +217,7 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
         Log("[MEMOPT] High Pressure Mitigation: Trimmed " + std::to_string(trimmedCount) + 
             " processes (" + std::to_string(totalFreedBytes / 1024 / 1024) + " MB)");
 
-        // Phase 3: Intelligent Standby Purge
+        // Intelligent Standby Purge
         auto timeSincePurge = std::chrono::duration_cast<std::chrono::seconds>(
             now - m_lastPurgeTime).count();
 
