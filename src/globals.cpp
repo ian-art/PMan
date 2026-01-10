@@ -18,6 +18,7 @@
  */
 
 #include "globals.h"
+#include "idle_affinity.h"
 
 // Service Manager
 WindowsServiceManager g_serviceManager;
@@ -28,6 +29,9 @@ PerformanceGuardian g_perfGuardian;
 
 // Explorer Booster
 ExplorerBooster g_explorerBooster;
+
+// Idle Core Parking
+IdleAffinityManager g_idleAffinityMgr;
 
 // RAM Cleaner
 MemoryOptimizer g_memoryOptimizer;

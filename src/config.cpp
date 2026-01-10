@@ -381,6 +381,11 @@ void LoadConfig()
         std::unordered_set<std::wstring> games, browsers, videoPlayers, oldGames, gameWindows, browserWindows, customLaunchers, ignoredProcesses;
         bool ignoreNonInteractive = true;
         bool restoreOnExit = true;
+        
+        // Idle Affinity Defaults
+        bool idleAffinityEnabled = true;
+        int idleReservedCores = 2;
+        uint32_t idleMinRam = 4;
 
         // Load custom launchers
 		LoadIgnoredProcesses(ignoredProcesses);
@@ -501,6 +506,11 @@ void LoadConfig()
                             }
                         }
                     }
+                    // Idle Affinity Configuration
+                    else if (key == L"enabled" && sect == GLOBAL) idleAffinityEnabled = ParseBool(value); // Context-aware check needed if sections overlap
+                    // To avoid section ambiguity, we rely on the specific keys below which are unique to idle_affinity in standard config
+                    else if (key == L"reserved_cores") idleReservedCores = std::stoi(value);
+                    else if (key == L"min_ram_gb") idleMinRam = std::stoi(value);
 				}
                 continue;
             }
@@ -629,6 +639,8 @@ void LoadConfig()
 		g_ignoreNonInteractive.store(ignoreNonInteractive);
         g_restoreOnExit.store(restoreOnExit);
         g_lockPolicy.store(lockPolicy);
+        
+        g_idleAffinityMgr.UpdateConfig(idleAffinityEnabled, idleReservedCores, idleMinRam);
         
 		// Finalize Explorer Config with Validations
         // Cross-validate with global idle settings

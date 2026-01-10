@@ -27,6 +27,7 @@
 #include "explorer_booster.h" // Smart Explorer Booster
 #include "memory_optimizer.h" // Smart RAM Cleaner
 #include "input_guardian.h"   // Input Responsiveness
+#include "idle_affinity.h"    // Idle Core Parking
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
@@ -57,6 +58,9 @@ extern ExplorerBooster g_explorerBooster;
 
 // Input Guardian
 extern InputGuardian g_inputGuardian;
+
+// Idle Core Parking
+extern IdleAffinityManager g_idleAffinityMgr;
 
 // Memory Optimizer
 extern MemoryOptimizer g_memoryOptimizer;

@@ -19,6 +19,7 @@
 
 #include "events.h"
 #include "globals.h"
+#include "idle_affinity.h"
 #include "constants.h"
 #include "logger.h"
 #include "utils.h"
@@ -296,9 +297,14 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
 
             if (opcode == 1)
             {
+                // [INTEGRATION] Idle Core Parking - Catch processes starting during sleep
+                if (g_idleAffinityMgr.IsIdle()) {
+                    g_idleAffinityMgr.OnProcessStart(pid);
+                }
+
                 // Process Start - Build Hierarchy
                 ProcessIdentity identity;
-                if (GetProcessIdentity(pid, identity)) 
+                if (GetProcessIdentity(pid, identity))
                 {
                     std::unique_lock lg(g_hierarchyMtx);
                     
@@ -824,86 +830,101 @@ void AntiInterferenceWatchdog()
 		else if (waitResult == WAIT_TIMEOUT) // Heartbeat
         {
             // 0a. Update BITS Metrics (Background)
-            // This prevents blocking critical paths (like CaptureSnapshot) with Sleep(100)
             g_serviceManager.UpdateBitsMetrics();
 
-            // 0b. Idle Revert Logic
-			if (g_idleRevertEnabled.load())
+            // 0b. Unified Idle Detection
+            // Calculate once to share between Core Parking and Mode Revert logic
+            uint64_t idleMs = 0;
+            bool isIdleInfoValid = false;
+            
+            LASTINPUTINFO lii = { sizeof(LASTINPUTINFO) };
+            if (GetLastInputInfo(&lii))
             {
-                LASTINPUTINFO lii = { sizeof(LASTINPUTINFO) };
-                if (GetLastInputInfo(&lii))
-                {
-                    uint64_t now = GetTickCount64();
-                    uint32_t lastInput = lii.dwTime;
-                    
-                    // Handle 32-bit wraparound
-                    uint64_t idleMs;
-                    if (now - lastInput > (1ULL << 32))
-                    {
-                        // Wrapped: need full 64-bit calculation
-                        idleMs = now - (0xFFFFFFFFULL - lastInput + 1ULL);
-                    }
-                    else
-                    {
-                        idleMs = now - lastInput;
-                    }
-                    DWORD thresholdMs = g_idleTimeoutMs.load(); // Use the parsed MS value
-                    int currentMode = g_lastMode.load();
+                uint64_t now = GetTickCount64();
+                uint32_t lastInput = lii.dwTime;
+                
+                // Handle 32-bit wraparound
+                if (now - lastInput > (1ULL << 32)) {
+                    idleMs = now - (0xFFFFFFFFULL - lastInput + 1ULL);
+                } else {
+                    idleMs = now - lastInput;
+                }
+                isIdleInfoValid = true;
+            }
 
-                    // Trigger if NOT already in browser mode (2) and idle time exceeded
-                    if (currentMode == 1 && idleMs >= thresholdMs)
+            // [INTEGRATION] Idle Core Parking Trigger
+            // Park if idle > 30s AND not in Game Mode
+            if (isIdleInfoValid) 
+            {
+                static bool lastIdleState = false;
+                // Hardcoded 30s threshold for core parking (separate from revert policy)
+                bool currentIdleState = (idleMs >= 30000) && (g_lastMode.load() != 1);
+                
+                if (currentIdleState != lastIdleState) {
+                    g_idleAffinityMgr.OnIdleStateChanged(currentIdleState);
+                    lastIdleState = currentIdleState;
+                }
+            }
+
+            // [LOGIC] Idle Revert (Browser Mode Revert)
+            if (g_idleRevertEnabled.load() && isIdleInfoValid)
+            {
+                DWORD thresholdMs = g_idleTimeoutMs.load(); 
+                int currentMode = g_lastMode.load();
+
+                // Trigger if NOT already in browser mode (2) and idle time exceeded
+                if (currentMode == 1 && idleMs >= thresholdMs)
+                {
+                    bool gameIsPresent = false;
+                    
+                    // Strict check: Is a game actually running?
+                    if (g_sessionLocked.load())
                     {
-                        bool gameIsPresent = false;
-                        
-                        // Strict check: Is a game actually running?
-                        if (currentMode == 1 && g_sessionLocked.load())
+                        DWORD gamePid = g_lockedGamePid.load();
+                        if (gamePid != 0)
                         {
-                            DWORD gamePid = g_lockedGamePid.load();
-                            if (gamePid != 0)
+                            HANDLE hGame = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, gamePid);
+                            if (hGame)
                             {
-                                HANDLE hGame = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, gamePid);
-                                if (hGame)
+                                DWORD exitCode = 0;
+                                if (GetExitCodeProcess(hGame, &exitCode) && exitCode == STILL_ACTIVE)
                                 {
-                                    DWORD exitCode = 0;
-                                    if (GetExitCodeProcess(hGame, &exitCode) && exitCode == STILL_ACTIVE)
-                                    {
-                                        gameIsPresent = true;
-                                    }
-                                    CloseHandle(hGame);
+                                    gameIsPresent = true;
                                 }
+                                CloseHandle(hGame);
                             }
                         }
+                    }
 
-                        if (!gameIsPresent)
+                    if (!gameIsPresent)
+                    {
+                        Log("[IDLE] System idle for " + std::to_string(thresholdMs / 1000) + "s with no game running. Reverting to Browser Mode.");
+                        
+                        // Apply Browser Mode System Settings
+                        if (g_caps.hasAdminRights)
                         {
-                            Log("[IDLE] System idle for " + std::to_string(thresholdMs / 1000) + "s with no game running. Reverting to Browser Mode.");
-                            
-                            // Apply Browser Mode System Settings
-                            if (g_caps.hasAdminRights)
-                            {
-                                SetPrioritySeparation(VAL_BROWSER);
-                                SetNetworkQoS(2);
-                                SetMemoryCompression(2);
-                                SetTimerResolution(2);
-                                SetTimerCoalescingControl(2);
-                            }
-                            
-                            // Update State
-                            g_lastMode.store(2);
-                            
-                            // Release locks
-                            if (g_sessionLocked.load())
-                            {
-                                g_sessionLocked.store(false);
-                                g_lockedGamePid.store(0);
-                                ResumeBackgroundServices();
-                            }
+                            SetPrioritySeparation(VAL_BROWSER);
+                            SetNetworkQoS(2);
+                            SetMemoryCompression(2);
+                            SetTimerResolution(2);
+                            SetTimerCoalescingControl(2);
+                        }
+                        
+                        // Update State
+                        g_lastMode.store(2);
+                        
+                        // Release locks
+                        if (g_sessionLocked.load())
+                        {
+                            g_sessionLocked.store(false);
+                            g_lockedGamePid.store(0);
+                            ResumeBackgroundServices();
                         }
                     }
                 }
             }
 
-			// 1. Health Checks
+            // 1. Health Checks
             if (!g_hIocp || g_hIocp == INVALID_HANDLE_VALUE)
             {
                 Log("[HEALTH] CRITICAL: IOCP handle is invalid. Initiating shutdown.");
@@ -911,16 +932,12 @@ void AntiInterferenceWatchdog()
                 break;
             }
 
-			// ETW Health Check & Auto-Recovery
+            // ETW Health Check & Auto-Recovery
             if (g_caps.canUseEtw && g_running)
             {
-                // Fix: Removed 60s silence timeout.
-                // Process events are sporadic; silence does not mean the thread is dead.
-                // Only restart if the session handle is invalid (0), meaning the thread actually exited.
-                
-			if (g_etwSession.load() == 0)
+                if (g_etwSession.load() == 0)
                 {
-                    // Fix Prevent infinite thread spawning loop (Use atomic to prevent races)
+                    // Prevent infinite thread spawning loop
                     static std::atomic<int> retryCount{0};
                     static std::atomic<uint64_t> lastRestartAttempt{0};
                     uint64_t now = GetTickCount64();
@@ -937,10 +954,9 @@ void AntiInterferenceWatchdog()
                         });
                         restartThread.detach();
                     }
-                    else if (retryCount >= 3 && (now - lastRestartAttempt > 5000))
+                    else if (retryCount >= 3 && (now - lastRestartAttempt > 3600000))
                     {
-                        // Reset if it's been a long time (e.g. 1 hour), otherwise stay silent
-                        if (now - lastRestartAttempt > 3600000) retryCount = 0;
+                        retryCount = 0; // Reset after 1 hour
                     }
                 }
             }
@@ -951,8 +967,7 @@ void AntiInterferenceWatchdog()
             {
                 gcCycles = 0;
                 
-				// Clean up Working Set Tracking (Budgeted)
-                // FIX: Limit iterations to prevent watchdog CPU spikes (Claim 1.3)
+                // Clean up Working Set Tracking
                 {
                     std::lock_guard lock(g_workingSetMtx);
                     int itemsChecked = 0;
@@ -961,7 +976,6 @@ void AntiInterferenceWatchdog()
                         itemsChecked++;
                         DWORD exitCode = 0;
                         HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, it->first);
-                        // ... existing logic ...
                         if (!hProcess || (GetExitCodeProcess(hProcess, &exitCode) && exitCode != STILL_ACTIVE))
                         {
                             if (hProcess) CloseHandle(hProcess);
@@ -1011,11 +1025,11 @@ void AntiInterferenceWatchdog()
                         {
                             if (hProcess) CloseHandle(hProcess);
                             ++it;
-}
+                        }
                     }
                 }
                 
-                // Clean up Process Hierarchy (Leak Protection)
+                // Clean up Process Hierarchy
                 {
                     std::unique_lock lh(g_hierarchyMtx);
                     for (auto it = g_processHierarchy.begin(); it != g_processHierarchy.end(); ) 
@@ -1028,15 +1042,14 @@ void AntiInterferenceWatchdog()
                             }
                             it = g_processHierarchy.erase(it);
                         } 
-						else 
+                        else 
                         {
                             ++it;
                         }
                     }
                     
-                    // Safety Cap: Prevent infinite growth if GC fails
                     if (g_processHierarchy.size() > 2000) {
-                        Log("[GC] Hierarchy safety limit reached (2000+). Clearing cache to prevent bloat.");
+                        Log("[GC] Hierarchy safety limit reached. Clearing cache.");
                         g_processHierarchy.clear();
                         g_inheritedGamePids.clear();
                     }
