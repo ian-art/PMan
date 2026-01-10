@@ -396,6 +396,20 @@ void SuspendBackgroundServices()
     {
         hasAnyService = true;
     }
+
+    // Block Delivery Optimization (The main cause of "Online Lag")
+    if (g_serviceManager.AddService(L"dosvc", 
+        SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
+    {
+        hasAnyService = true;
+    }
+
+    // Block Office Background Updates
+    if (g_serviceManager.AddService(L"clicktorunsvc", 
+        SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
+    {
+        hasAnyService = true;
+    }
     
     if (!hasAnyService)
     {
