@@ -54,6 +54,7 @@
 HINSTANCE g_hInst = nullptr;
 static UINT g_wmTaskbarCreated = 0;
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
+static std::atomic<bool> g_isCheckingUpdate{false};
 
 // --- Helper: Detect External Editors (Notepad++, VS Code, etc.) ---
 static std::wstring GetRegisteredAppPath(const wchar_t* exeName) {
@@ -597,7 +598,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             // 5. Help Submenu
             HMENU hHelpMenu = CreatePopupMenu();
             AppendMenuW(hHelpMenu, MF_STRING, ID_TRAY_HELP_USAGE, L"Help");
-            AppendMenuW(hHelpMenu, MF_STRING, ID_TRAY_UPDATE, L"Check for Updates");
+            AppendMenuW(hHelpMenu, MF_STRING | (g_isCheckingUpdate.load() ? MF_GRAYED : 0), ID_TRAY_UPDATE, L"Check for Updates");
             AppendMenuW(hHelpMenu, MF_STRING, ID_TRAY_ABOUT, L"About");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hHelpMenu, L"Help");
             
@@ -712,7 +713,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             MessageBoxW(hwnd, msg.c_str(), L"Priority Manager - Help", MB_OK | MB_ICONINFORMATION);
         }
         else if (wmId == ID_TRAY_UPDATE) {
+            if (g_isCheckingUpdate.exchange(true)) return 0;
+            
             std::thread([hwnd]{
+                // RAII guard to reset flag when thread exits (after message box closes)
+                struct UpdateFlagGuard { ~UpdateFlagGuard() { g_isCheckingUpdate.store(false); } } guard;
+
                 if (!VerifyUpdateConnection()) {
                     MessageBoxW(hwnd, L"Unable to connect to the update server.\n\nPlease check your internet connection.", 
                         L"Connection Error", MB_OK | MB_ICONWARNING);
