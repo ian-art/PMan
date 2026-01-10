@@ -1015,35 +1015,40 @@ if (!taskExists)
         SC_HANDLE scManager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
         if (scManager)
         {
-            SC_HANDLE wuauserv = OpenServiceW(scManager, L"wuauserv", SERVICE_QUERY_STATUS | SERVICE_START);
-            if (wuauserv)
-            {
-                SERVICE_STATUS status;
-                if (QueryServiceStatus(wuauserv, &status))
+            auto CheckAndRecover = [&](const wchar_t* name) {
+                SC_HANDLE hSvc = OpenServiceW(scManager, name, SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG | SERVICE_START);
+                if (hSvc)
                 {
-                    if (status.dwCurrentState == SERVICE_STOPPED || status.dwCurrentState == SERVICE_PAUSED)
-                    {
-                        Log("[STARTUP] WARNING: wuauserv was stopped/paused - attempting recovery");
-                        StartServiceW(wuauserv, 0, nullptr);
+                    // 1. Check if DISABLED first
+                    DWORD bytesNeeded = 0;
+                    QueryServiceConfigW(hSvc, nullptr, 0, &bytesNeeded);
+                    if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+                        std::vector<BYTE> buffer(bytesNeeded);
+                        LPQUERY_SERVICE_CONFIGW config = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(buffer.data());
+                        if (QueryServiceConfigW(hSvc, config, bytesNeeded, &bytesNeeded)) {
+                            if (config->dwStartType == SERVICE_DISABLED) {
+                                CloseServiceHandle(hSvc);
+                                return; // Ignore disabled services
+                            }
+                        }
                     }
-                }
-                CloseServiceHandle(wuauserv);
-            }
-            
-            SC_HANDLE bits = OpenServiceW(scManager, L"BITS", SERVICE_QUERY_STATUS | SERVICE_START);
-            if (bits)
-            {
-                SERVICE_STATUS status;
-                if (QueryServiceStatus(bits, &status))
-                {
-                    if (status.dwCurrentState == SERVICE_STOPPED || status.dwCurrentState == SERVICE_PAUSED)
+
+                    // 2. Check Status and Recover
+                    SERVICE_STATUS status;
+                    if (QueryServiceStatus(hSvc, &status))
                     {
-                        Log("[STARTUP] WARNING: BITS was stopped/paused - attempting recovery");
-                        StartServiceW(bits, 0, nullptr);
+                        if (status.dwCurrentState == SERVICE_STOPPED || status.dwCurrentState == SERVICE_PAUSED)
+                        {
+                            Log(std::string("[STARTUP] WARNING: ") + WideToUtf8(name) + " was stopped/paused - attempting recovery");
+                            StartServiceW(hSvc, 0, nullptr);
+                        }
                     }
+                    CloseServiceHandle(hSvc);
                 }
-                CloseServiceHandle(bits);
-            }
+            };
+
+            CheckAndRecover(L"wuauserv");
+            CheckAndRecover(L"BITS");
             
             CloseServiceHandle(scManager);
         }
