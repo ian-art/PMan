@@ -28,6 +28,7 @@
 #include <vector>
 #include <string>
 #include <algorithm> // For std::max
+#include <bitset>
 #include <unordered_map>
 #include <mutex>
 #include <thread> // For async trimming
@@ -750,55 +751,59 @@ void SetTimerResolution(int mode)
 
 void SetProcessAffinity(DWORD pid, int mode)
 {
-    if (g_physicalCoreCount == 0) return;
-	if (g_isLowCoreCount) return; // Fix Skip affinity on single-core systems
-    
-	// Fix Better error handling/recovery
-    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, 
-                                   FALSE, pid);
-if (!hProcess) 
-    {
-        DWORD err = GetLastError();
-        if (err != ERROR_ACCESS_DENIED)
-        {
-            Log("[AFFINITY] OpenProcess failed for PID " + std::to_string(pid) + ": " + std::to_string(err));
-        }
-#ifdef _DEBUG
-        else
-        {
-            Log("[DEBUG] [AFFINITY] OpenProcess Access Denied for PID " + std::to_string(pid));
-        }
-#endif
-        return;
-    }
-    
-    DWORD_PTR affinityMask = 0;
-    
-    if (mode == 1)
-    {
-        affinityMask = g_physicalCoreMask;
-        
-        if (SetProcessAffinityMask(hProcess, affinityMask))
-        {
-            Log("[AFFINITY] Game pinned to " + std::to_string(g_physicalCoreCount) + 
-                " physical cores (HT disabled for game)");
-        }
-    }
-	else if (mode == 2)
-    {
-		// Fix: Prevent overflow on 64-core systems (1ULL << 64 is UB)
-        if (g_logicalCoreCount > 0 && g_logicalCoreCount < (sizeof(DWORD_PTR) * 8))
-            affinityMask = (1ULL << g_logicalCoreCount) - 1;
-        else
-            affinityMask = static_cast<DWORD_PTR>(-1);
+    // SAFETY: Use strategy selector to filter ineligible CPUs
+    // Hybrid cores are handled by SetHybridCoreAffinity, not here.
+    if (g_caps.hasHybridCores || g_isLowCoreCount) return;
 
-        if (SetProcessAffinityMask(hProcess, affinityMask))
-        {
-            Log("[AFFINITY] Browser using all " + std::to_string(g_logicalCoreCount) + 
-                " logical cores (HT enabled)");
+    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProcess) return;
+
+    // 1. Calculate Reservation Layout
+    // If we have 6+ cores, we can afford to sacrifice 2 for background.
+    // If we only have 4 cores, we only sacrifice 1 (otherwise Game gets only 2 cores, which is bad).
+    int reservedCount = (g_physicalCoreCount >= 6) ? 2 : 1;
+    
+    // Create mask for the LAST 'n' cores
+    DWORD_PTR fullMask = g_physicalCoreMask;
+    DWORD_PTR reservedMask = 0;
+    
+    // Logic to build the reserved mask (e.g., last 2 bits)
+    for (int i = 0; i < reservedCount; i++) {
+        reservedMask |= (1ULL << (g_physicalCoreCount - 1 - i));
+    }
+
+    // 2. Determine Target Mask based on Mode
+    DWORD_PTR targetMask = 0;
+    
+    if (mode == 1) // GAME MODE
+    {
+        // Give Game ALL cores EXCEPT the reserved ones
+        targetMask = fullMask & ~reservedMask;
+    }
+    else if (mode == 2) // BACKGROUND/BROWSER MODE
+    {
+        // Confine Background to ONLY the reserved ones
+        targetMask = reservedMask;
+    }
+
+    // 3. Apply (with Intelligent Skip Check)
+    if (targetMask != 0) {
+        DWORD_PTR currentMask = 0, systemMask = 0;
+        if (GetProcessAffinityMask(hProcess, &currentMask, &systemMask)) {
+            
+            // Respect system limits (e.g., if OS limits process to fewer cores externally)
+            targetMask &= systemMask;
+
+            if (currentMask != targetMask && targetMask != 0) {
+                if (SetProcessAffinityMask(hProcess, targetMask)) {
+                    Log("[AFFINITY] PID " + std::to_string(pid) + " isolated to " + 
+                        std::to_string(std::bitset<64>(targetMask).count()) + 
+                        " cores (Mode " + std::to_string(mode) + ")");
+                }
+            }
         }
     }
-    
+
     CloseHandle(hProcess);
 }
 

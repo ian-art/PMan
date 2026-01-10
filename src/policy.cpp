@@ -25,6 +25,7 @@
 #include "utils.h"
 #include "tweaks.h"
 #include "services.h"
+#include "sysinfo.h"
 #include <wtsapi32.h>
 #include <mutex>
 #include <shared_mutex>
@@ -643,7 +644,22 @@ apply_policy:  // FIX: Label for the goto jump
             Log(prefix + WideToUtf8(exe.c_str()));
         }
         
-		// Apply TIERED Optimizations (CPU/IO Isolation)												
+		// --- CPU Affinity Strategy ---
+        AffinityStrategy strategy = GetRecommendedStrategy();
+
+        if (strategy == AffinityStrategy::HybridPinning) 
+        {
+            // Intel 12th+ Gen: Use P-Cores for Game, E-Cores for Background
+            SetHybridCoreAffinity(pid, mode);
+        } 
+        else if (strategy == AffinityStrategy::GameIsolation) 
+        {
+            // Homogeneous (Old Intel/AMD): Use Core Partitioning
+            SetProcessAffinity(pid, mode);
+        }
+        // else: Strategy::None -> Do nothing
+
+        // Apply TIERED Optimizations (CPU/IO Isolation)												
         if (mode == 1) 
         {
             ApplyTieredOptimization(pid, mode, isGameChild);
@@ -651,12 +667,8 @@ apply_policy:  // FIX: Label for the goto jump
 			// Apply supplementary optimizations									
             if (!isGameChild) {
                 SetGpuPriority(pid, mode); 
-                SetProcessAffinity(pid, mode); 
                 SetWorkingSetLimits(pid, mode);
                 OptimizeDpcIsrLatency(pid, mode);
-            } else {
-				// Tier 2 gets standard affinity fallback but no GPU boost														  
-                 SetProcessAffinity(pid, mode);
             }
             
 			// Special handling for AMD 3D V-Cache (Tier 1 Only)													
@@ -671,9 +683,18 @@ apply_policy:  // FIX: Label for the goto jump
             // FIX: Do not apply browser optimizations (Low I/O) to Desktop/Explorer (Mode 0)
             if (mode != 0)
             {
-                SetHybridCoreAffinity(pid, mode);
+                // Apply strategy-based affinity
+                
+                if (strategy == AffinityStrategy::HybridPinning) 
+                {
+                    SetHybridCoreAffinity(pid, mode);
+                } 
+                else if (strategy == AffinityStrategy::GameIsolation) 
+                {
+                    SetProcessAffinity(pid, mode);
+                }
+                
                 SetProcessIoPriority(pid, mode);
-                SetProcessAffinity(pid, mode);
                 SetWorkingSetLimits(pid, mode);
                 OptimizeDpcIsrLatency(pid, mode);
             }

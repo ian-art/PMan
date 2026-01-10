@@ -20,12 +20,22 @@
 #ifndef PMAN_SYSINFO_H
 #define PMAN_SYSINFO_H
 
+#include <string>
+#include <windows.h>
 #include "types.h"
+
+enum class AffinityStrategy {
+    None,           // Don't touch affinity (Low core count)
+    GameIsolation,  // Reserve cores for game (Homogeneous CPUs >= 4 cores)
+    HybridPinning   // P/E core pinning (Intel 12th+ gen)
+};
 
 // Core detection functions
 void DetectOSCapabilities();
 void DetectHybridCoreSupport();
 bool DetectIoPrioritySupport();
 bool DetectGameIoPrioritySupport();
+
+AffinityStrategy GetRecommendedStrategy();
 
 #endif // PMAN_SYSINFO_H

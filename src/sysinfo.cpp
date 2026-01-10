@@ -30,6 +30,7 @@
 #include <unordered_map>
 #include <iostream>
 #include <intrin.h>
+#include <thread>
 #include <bitset> // Use bitset for C++17 compatibility
 
 // Forward declarations
@@ -800,4 +801,20 @@ void DetectOSCapabilities()
     }
     
     Log("-------------------------------------");
+}
+
+AffinityStrategy GetRecommendedStrategy()
+{
+    // 1. Hybrid Architecture (Intel 12th+) -> Always use P/E Logic
+    if (g_caps.hasHybridCores) return AffinityStrategy::HybridPinning;
+
+    // 2. Homogeneous High Core Count (>= 6) -> Strong Isolation
+    if (g_physicalCoreCount >= 6) return AffinityStrategy::GameIsolation;
+
+    // 3. Homogeneous Quad Core (4) -> Mild Isolation (Reserve 1 core)
+    // We enable this for your i7 Q 740 to get benefits.
+    if (g_physicalCoreCount >= 4) return AffinityStrategy::GameIsolation;
+
+    // 4. Dual Core or Single Core -> Do nothing (Affinity hurts here)
+    return AffinityStrategy::None;
 }
