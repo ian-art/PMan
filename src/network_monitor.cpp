@@ -24,6 +24,7 @@
 #include "globals.h" // For g_activeNetPids
 #include <winsock2.h>
 #include <iphlpapi.h>
+#include <shellapi.h>
 #include <icmpapi.h>
 #include <vector>
 #include <netlistmgr.h>
@@ -92,6 +93,64 @@ bool NetworkMonitor::PerformLatencyProbe() {
     
     DWORD avgLatency = totalTime / successCount;
     return (avgLatency <= 150);
+}
+
+bool NetworkMonitor::ExecuteNetCommand(const wchar_t* cmd) {
+    STARTUPINFOW si = { sizeof(si) };
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE; // Run completely silent
+    PROCESS_INFORMATION pi = {};
+    
+    // Create a mutable copy of the command string
+    std::wstring cmdStr = cmd;
+    
+    if (CreateProcessW(nullptr, cmdStr.data(), nullptr, nullptr, FALSE, 
+                      CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        WaitForSingleObject(pi.hProcess, 10000); // 10s timeout
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return true;
+    }
+    return false;
+}
+
+void NetworkMonitor::AttemptAutoRepair() {
+    uint64_t now = GetTickCount64();
+    
+    // Safety Cooldown: Wait 5 minutes between full repair cycles
+    if (now - m_lastRepairTime < 300000) return;
+
+    m_repairStage++;
+    Log("[NET_REPAIR] Connection dead > 5s. Attempting Auto-Repair Stage " + std::to_string(m_repairStage));
+
+    switch (m_repairStage) {
+        case 1: // Soft Fix: DNS Flush
+            Log("[NET_REPAIR] Flushing DNS Cache...");
+            ExecuteNetCommand(L"cmd.exe /c ipconfig /flushdns");
+            break;
+
+        case 2: // Medium Fix: Release/Renew IP
+            Log("[NET_REPAIR] Renewing IP Address...");
+            ExecuteNetCommand(L"cmd.exe /c ipconfig /release && ipconfig /renew");
+            break;
+
+        case 3: // Hard Fix: Reset Adapter (Requires Admin)
+            if (g_caps.hasAdminRights) {
+                Log("[NET_REPAIR] Resetting Network Adapter (Winsock Reset)...");
+                ExecuteNetCommand(L"cmd.exe /c netsh winsock reset && netsh int ip reset");
+            } else {
+                Log("[NET_REPAIR] Skipping Stage 3 (Requires Admin Rights)");
+            }
+            // End of cycle, start cooldown
+            m_lastRepairTime = now;
+            m_repairStage = 0; 
+            break;
+            
+        default:
+            m_repairStage = 0;
+            m_lastRepairTime = now;
+            break;
+    }
 }
 
 // Scan for bandwidth-hogging processes
@@ -176,6 +235,7 @@ void NetworkMonitor::WorkerThread() {
     while (m_running) {
         NetworkState newState = CheckConnectivity();
         NetworkState oldState = g_networkState.load();
+        uint64_t now = GetTickCount64();
 
         if (newState != oldState) {
             g_networkState.store(newState);
@@ -188,8 +248,30 @@ void NetworkMonitor::WorkerThread() {
             }
             Log("[NET] State changed to: " + stateStr);
             
+            // Reset repair logic when connection returns
+            if (newState != NetworkState::Offline) {
+                m_offlineStartTime = 0;
+                m_repairStage = 0;
+            }
+            
             // Trigger Adaptive Throttling
             g_throttleManager.OnNetworkStateChange(newState);
+        }
+
+        // Auto-Repair Logic
+        if (newState == NetworkState::Offline) {
+            if (m_offlineStartTime == 0) {
+                m_offlineStartTime = now;
+            } else if (now - m_offlineStartTime > 5000) { 
+                // Offline for > 5 seconds, trigger repair
+                AttemptAutoRepair();
+                
+                // Reset timer to allow time for the repair to work before trying next stage
+                // Give it 10s grace period after a repair attempt
+                m_offlineStartTime = now + 10000; 
+            }
+        } else {
+            m_offlineStartTime = 0;
         }
 
         // Update Process Network Map

@@ -37,8 +37,17 @@ private:
     bool PerformLatencyProbe(); // Returns true if Stable, false if Unstable
     void UpdateNetworkActivityMap(); // Scan active TCP connections
 
+    // Smart Network Repair
+    void AttemptAutoRepair();
+    bool ExecuteNetCommand(const wchar_t* cmd);
+
     std::thread m_thread;
     std::atomic<bool> m_running{false};
+    
+    // Repair State Tracking
+    uint64_t m_offlineStartTime{0};
+    uint64_t m_lastRepairTime{0};
+    int m_repairStage{0}; // 0=None, 1=FlushDNS, 2=RenewIP, 3=ResetAdapter
     std::mutex m_mtx;
     std::condition_variable m_cv;
 };
