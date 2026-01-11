@@ -158,6 +158,9 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     // Enable Input Interference Blocker (WinKey / StickyKeys)
     g_inputGuardian.SetGameMode(true);
 
+    // Disk Thrashing Silencer (Stop Search/SysMain/Updates)
+    SuspendBackgroundServices();
+
     if (it != m_profiles.end()) {
         // Existing profile found
         GameProfile& profile = it->second;
@@ -319,6 +322,9 @@ void PerformanceGuardian::OnGameStop(DWORD pid) {
 
         // Disable Input Interference Blocker
         g_inputGuardian.SetGameMode(false);
+
+        // Resume Background Services
+        ResumeBackgroundServices();
         
         //Generate Post-Session Report
         // Only report if session lasted longer than 1 minute to avoid noise
