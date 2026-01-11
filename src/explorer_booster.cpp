@@ -371,24 +371,31 @@ void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
     PROCESS_MEMORY_COUNTERS pmc;
     if (!GetProcessMemoryInfo(hProcess, &pmc, sizeof(pmc))) return;
     
-    // Reduce locked memory: 32MB min, 96MB max (was 64-192)
+    // Reduce locked memory: 32MB min, 96MB max
     SIZE_T currentWS = pmc.WorkingSetSize;
     SIZE_T minWS = (currentWS > 32 * 1024 * 1024) ? currentWS : 32 * 1024 * 1024;
-    SIZE_T maxWS = minWS + 64 * 1024 * 1024; // 64MB growth headroom
+    SIZE_T maxWS = minWS + 64 * 1024 * 1024; 
     
-    // Soft limits instead of hard: remove HARDWS_MIN flag
     DWORD flags = QUOTA_LIMITS_HARDWS_MAX_DISABLE;
-    
-    if (SetProcessWorkingSetSizeEx(hProcess, minWS, maxWS, flags)) {
-        // SUCCESS: Do nothing. (Silence the spam)
-        // We verified this works via previous debug logs.
-    } else {
-        // FAILURE: Capture error immediately
-        DWORD err = GetLastError();
-        // Error 5 (Access Denied) is expected for DWM (Protected Process Light) - suppress it
-        if (err != ERROR_ACCESS_DENIED) {
-            Log("[EXPLORER] Memory Guard FAILED for PID " + std::to_string(pid) + 
-                " Error: " + std::to_string(err));
+
+    // [PERF FIX] Cache last applied values to prevent syscall spam
+    static std::mutex cacheMtx;
+    static std::unordered_map<DWORD, std::pair<SIZE_T, SIZE_T>> lastApplied;
+
+    {
+        std::lock_guard lock(cacheMtx);
+        auto& last = lastApplied[pid];
+        // If values are identical to last successful application, skip
+        if (last.first == minWS && last.second == maxWS) return;
+        
+        if (SetProcessWorkingSetSizeEx(hProcess, minWS, maxWS, flags)) {
+            last = { minWS, maxWS };
+        } else {
+            // On failure, do not update cache so we retry
+            DWORD err = GetLastError();
+            if (err != ERROR_ACCESS_DENIED) {
+                 // Suppress log spam here too if needed, or rely on rate limiting implied by OnTick
+            }
         }
     }
 }

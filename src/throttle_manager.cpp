@@ -52,11 +52,20 @@ void ThrottleManager::OnNetworkStateChange(NetworkState newState) {
     std::lock_guard lock(m_mtx);
     
     // Strategy: Throttling is ACTIVE only when Network is UNSTABLE.
-    // Offline = Release (Fail fast). Stable = Release.
     bool shouldThrottle = (newState == NetworkState::Unstable);
 
     if (m_isThrottling != shouldThrottle) {
+        // [PERF FIX] Hysteresis: Prevent flapping on jittery connections
+        // Wait at least 10 seconds before toggling state
+        static uint64_t lastToggleTime = 0;
+        uint64_t now = GetTickCount64();
+        
+        if (now - lastToggleTime < 10000) {
+            return; // Ignore rapid changes
+        }
+        
         m_isThrottling = shouldThrottle;
+        lastToggleTime = now;
         
         Log(std::string("[THROTTLE] Global Throttling ") + (m_isThrottling ? "ENGAGED" : "DISENGAGED"));
 

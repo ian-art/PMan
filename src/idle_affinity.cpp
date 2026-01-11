@@ -141,6 +141,12 @@ void IdleAffinityManager::OnProcessStart(DWORD pid)
 
 void IdleAffinityManager::ApplyIdleAffinity()
 {
+	// [PERF FIX] Rate limit to prevent thrashing if idle state flickers
+    static uint64_t lastRun = 0;
+    uint64_t now = GetTickCount64();
+    if (now - lastRun < 10000) return; // Max once every 10s
+    lastRun = now;
+	
     // [CRASH FIX] Wrap in try-catch to prevent thread termination on std::bad_alloc
     try {
         // Calculate Park Mask

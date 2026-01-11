@@ -353,23 +353,39 @@ void SetProcessIoPriority(DWORD pid, int mode)
     
     bool ioPrioritySet = false;
     
-	// Method 1: Try NtSetInformationProcess (most compatible)
+    // Method 1: Try NtSetInformationProcess (most compatible)
     typedef NTSTATUS (NTAPI *NtSetInformationProcessPtr)(HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG);
     auto pNtSetInformationProcess = reinterpret_cast<NtSetInformationProcessPtr>(GetNtProc("NtSetInformationProcess"));
     
     if (pNtSetInformationProcess)
+    {
+        ULONG ioPriority;
+        if (mode == 1) 
         {
-            ULONG ioPriority;
-            if (mode == 1) 
-            {
-                ioPriority = IoPriorityHigh;
-            }
-            else 
-            {
-                ioPriority = IoPriorityLow;
-            }
-            
-            NTSTATUS status = pNtSetInformationProcess(
+            ioPriority = IoPriorityHigh;
+        }
+        else 
+        {
+            ioPriority = IoPriorityLow;
+        }
+        
+        NTSTATUS status = pNtSetInformationProcess(
+            hProcess,
+            ProcessIoPriority,
+            &ioPriority,
+            sizeof(ioPriority)
+        );
+        
+        if (NT_SUCCESS(status))
+        {
+            Log("[I/O] Priority set: " + 
+                std::string(mode == 1 ? "HIGH (game)" : "LOW (browser)") + " using NtSetInformationProcess");
+            ioPrioritySet = true;
+        }
+        else if (status == 0xC00000C9 && mode == 1)
+        {
+            ioPriority = IoPriorityNormal;
+            status = pNtSetInformationProcess(
                 hProcess,
                 ProcessIoPriority,
                 &ioPriority,
@@ -378,92 +394,42 @@ void SetProcessIoPriority(DWORD pid, int mode)
             
             if (NT_SUCCESS(status))
             {
-                Log("[I/O] Priority set: " + 
-                    std::string(mode == 1 ? "HIGH (game)" : "LOW (browser)") + " using NtSetInformationProcess");
+                Log("[I/O] High priority unavailable, fallback: NORMAL (game) using NtSetInformationProcess");
                 ioPrioritySet = true;
             }
-            else if (status == 0xC00000C9 && mode == 1)
-            {
-                ioPriority = IoPriorityNormal;
-                status = pNtSetInformationProcess(
-                    hProcess,
-                    ProcessIoPriority,
-                    &ioPriority,
-                    sizeof(ioPriority)
-                );
-                
-                if (NT_SUCCESS(status))
-                {
-                    Log("[I/O] High priority unavailable, fallback: NORMAL (game) using NtSetInformationProcess");
-                    ioPrioritySet = true;
-                }
-            }
         }
+    }
 
-	if (!ioPrioritySet)
-	{
-		if (IsIoPriorityBlockedBySystem())
-		{
-			Log("[I/O] I/O priority APIs blocked by system - using enhanced thread priority fallback");
-		}
-		else
-		{
-			Log("[I/O] I/O priority setting failed - using enhanced fallback strategy");
-		}
-
-        // Method 2: Thread Priority
-        HANDLE hThreadSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if (hThreadSnap != INVALID_HANDLE_VALUE)
+    if (!ioPrioritySet)
+    {
+        if (IsIoPriorityBlockedBySystem())
         {
-            THREADENTRY32 te32 = {0};
-            te32.dwSize = sizeof(THREADENTRY32);
-            
-            if (Thread32First(hThreadSnap, &te32))
-            {
-                do
-                {
-                    if (te32.th32OwnerProcessID == pid)
-                    {
-                        HANDLE hThread = OpenThread(THREAD_SET_INFORMATION, FALSE, te32.th32ThreadID);
-                        if (hThread)
-                        {
-                            int threadPriority = (mode == 1) ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_LOWEST;
-                            if (SetThreadPriority(hThread, threadPriority))
-                            {
-                                ioPrioritySet = true;
-                            }
-                            CloseHandle(hThread);
-                        }
-                    }
-                } while (Thread32Next(hThreadSnap, &te32));
-            }
-            CloseHandle(hThreadSnap);
-            
-            if (ioPrioritySet)
-            {
-                Log("[I/O] Thread priority set: " + 
-                    std::string(mode == 1 ? "HIGHEST (game)" : "LOWEST (browser)") + " for process threads");
-            }
+            Log("[I/O] I/O priority APIs blocked by system - using enhanced thread priority fallback");
         }
+        else
+        {
+            Log("[I/O] I/O priority setting failed - using enhanced fallback strategy");
+        }
+
+        // Method 2: Thread Priority (SNAPSHOT REMOVED)
+        // Previous implementation used CreateToolhelp32Snapshot which caused massive stuttering.
+        Log("[I/O] Advanced I/O Priority unavailable (access denied) - skipping expensive thread fallback");
         
         // Method 3: Process Priority Class
-        if (!ioPrioritySet)
+        DWORD priorityClass = (mode == 1) ? HIGH_PRIORITY_CLASS : IDLE_PRIORITY_CLASS;
+        if (SetPriorityClass(hProcess, priorityClass))
         {
-            DWORD priorityClass = (mode == 1) ? HIGH_PRIORITY_CLASS : IDLE_PRIORITY_CLASS;
+            Log("[I/O] Process priority set: " + 
+                std::string(mode == 1 ? "HIGH (game)" : "IDLE (browser)") + " using SetPriorityClass");
+        }
+        else
+        {
+            priorityClass = (mode == 1) ? ABOVE_NORMAL_PRIORITY_CLASS : BELOW_NORMAL_PRIORITY_CLASS;
             if (SetPriorityClass(hProcess, priorityClass))
             {
-                Log("[I/O] Process priority set: " + 
-                    std::string(mode == 1 ? "HIGH (game)" : "IDLE (browser)") + " using SetPriorityClass");
+                Log("[I/O] Fallback priority set: " + 
+                    std::string(mode == 1 ? "ABOVE_NORMAL (game)" : "BELOW_NORMAL (browser)") + " using SetPriorityClass");
             }
-            else
-            {
-                priorityClass = (mode == 1) ? ABOVE_NORMAL_PRIORITY_CLASS : BELOW_NORMAL_PRIORITY_CLASS;
-                if (SetPriorityClass(hProcess, priorityClass))
-                {
-                    Log("[I/O] Fallback priority set: " + 
-                        std::string(mode == 1 ? "ABOVE_NORMAL (game)" : "BELOW_NORMAL (browser)") + " using SetPriorityClass");
-				}
-			}
         }
     }
 
@@ -472,9 +438,9 @@ void SetProcessIoPriority(DWORD pid, int mode)
         std::lock_guard lock(g_ioPriorityCacheMtx);
         g_ioPriorityCache[pid] = mode;
     }
+}
 	
     // CloseHandle(hProcess); // REMOVED: Managed by UniqueHandle hGuard to prevent double-free crash
-}
 
 void SetNetworkQoS(int mode)
 {
