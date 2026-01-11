@@ -584,6 +584,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             HMENU hControlMenu = CreatePopupMenu();
             AppendMenuW(hControlMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Activity" : L"Pause Activity");
             AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_APPLY_TWEAKS, L"Boost System Now");
+            AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_REFRESH_GPU, L"Refresh GPU");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hControlMenu, L"Controls");
 
 			AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
@@ -779,6 +781,28 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 }).detach();
             }
         } 
+        else if (wmId == ID_TRAY_REFRESH_GPU) {
+            // Simulate Win+Ctrl+Shift+B to reset graphics driver
+            INPUT inputs[8] = {};
+
+            // Press
+            inputs[0].type = INPUT_KEYBOARD; inputs[0].ki.wVk = VK_LCONTROL;
+            inputs[1].type = INPUT_KEYBOARD; inputs[1].ki.wVk = VK_LSHIFT;
+            inputs[2].type = INPUT_KEYBOARD; inputs[2].ki.wVk = VK_LWIN;
+            inputs[3].type = INPUT_KEYBOARD; inputs[3].ki.wVk = 0x42; // 'B' key
+
+            // Release (Reverse order)
+            inputs[4] = inputs[3]; inputs[4].ki.dwFlags = KEYEVENTF_KEYUP;
+            inputs[5] = inputs[2]; inputs[5].ki.dwFlags = KEYEVENTF_KEYUP;
+            inputs[6] = inputs[1]; inputs[6].ki.dwFlags = KEYEVENTF_KEYUP;
+            inputs[7] = inputs[0]; inputs[7].ki.dwFlags = KEYEVENTF_KEYUP;
+
+            if (SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT)) == ARRAYSIZE(inputs)) {
+                Log("[USER] GPU Driver Refresh triggered manually.");
+            } else {
+                Log("[ERROR] Failed to send GPU refresh keystrokes: " + std::to_string(GetLastError()));
+            }
+        }
         else if (wmId == ID_TRAY_PAUSE) {
             bool p = !g_userPaused.load();
             g_userPaused.store(p);
