@@ -20,9 +20,9 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#define PMAN_VERSION_MAJOR 2
-#define PMAN_VERSION_MINOR 4
-#define PMAN_VERSION_PATCH 1
+#define PMAN_VERSION_MAJOR 3
+#define PMAN_VERSION_MINOR 0
+#define PMAN_VERSION_PATCH 0
 #define PMAN_VERSION_BUILD 2026
 
 // Helper macros to turn numbers into strings
