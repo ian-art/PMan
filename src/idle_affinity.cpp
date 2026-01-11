@@ -141,61 +141,71 @@ void IdleAffinityManager::OnProcessStart(DWORD pid)
 
 void IdleAffinityManager::ApplyIdleAffinity()
 {
-    // Calculate Park Mask
-    int reserved = m_reservedCores.load();
-    if (reserved >= static_cast<int>(g_physicalCoreCount)) reserved = g_physicalCoreCount - 1;
-    
-    DWORD_PTR parkMask = 0;
-    for (int i = 0; i < reserved; i++) {
-        parkMask |= (1ULL << (g_physicalCoreCount - 1 - i));
+    // [CRASH FIX] Wrap in try-catch to prevent thread termination on std::bad_alloc
+    try {
+        // Calculate Park Mask
+        int reserved = m_reservedCores.load();
+        if (reserved >= static_cast<int>(g_physicalCoreCount)) reserved = g_physicalCoreCount - 1;
+        
+        DWORD_PTR parkMask = 0;
+        for (int i = 0; i < reserved; i++) {
+            parkMask |= (1ULL << (g_physicalCoreCount - 1 - i));
+        }
+
+        std::lock_guard lock(m_mtx);
+        m_originalAffinity.clear();
+
+        // [CRASH FIX] Use UniqueHandle for RAII safety (prevents leaks on exception)
+        UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+        if (hSnap.get() == INVALID_HANDLE_VALUE) return;
+
+        PROCESSENTRY32W pe = {sizeof(pe)};
+        if (Process32FirstW(hSnap.get(), &pe)) {
+            do {
+                // Safety Checks
+                if (pe.th32ProcessID <= 4) continue;
+                if (pe.th32ProcessID == GetCurrentProcessId()) continue; // Never park self
+
+                // [PERF] Use raw string reference if possible, but wstring is safer for utils
+                std::wstring exe = pe.szExeFile;
+                asciiLower(exe);
+                
+                if (IsSystemCriticalProcess(exe)) continue; // Never touch Defender/OS
+                
+                // Classification Check
+                ProcessNetClass type = ClassifyProcessActivity(pe.th32ProcessID, exe);
+                
+                // Only park background/network/unknown. SKIP UserCritical (Games) and LatencySensitive (VoIP).
+                if (type == ProcessNetClass::NetworkBound || 
+                    type == ProcessNetClass::Unknown || 
+                    type == ProcessNetClass::BulkBackground) 
+                {
+                    SetProcessIdleAffinity(pe.th32ProcessID, parkMask);
+                }
+
+            } while (Process32NextW(hSnap.get(), &pe));
+        }
+    } catch (const std::exception& e) {
+        Log("[IDLE-PARK] Error applying affinity: " + std::string(e.what()));
+    } catch (...) {
+        Log("[IDLE-PARK] Unknown error applying affinity");
     }
-
-    std::lock_guard lock(m_mtx);
-    m_originalAffinity.clear();
-
-    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnap == INVALID_HANDLE_VALUE) return;
-
-    PROCESSENTRY32W pe = {sizeof(pe)};
-    if (Process32FirstW(hSnap, &pe)) {
-        do {
-            // Safety Checks
-            if (pe.th32ProcessID <= 4) continue;
-            
-            std::wstring exe = pe.szExeFile;
-            asciiLower(exe);
-            if (IsSystemCriticalProcess(exe)) continue; // Never touch Defender/OS
-            
-            // Classification Check
-            ProcessNetClass type = ClassifyProcessActivity(pe.th32ProcessID, exe);
-            
-            // Only park background/network/unknown. SKIP UserCritical (Games) and LatencySensitive (VoIP).
-            if (type == ProcessNetClass::NetworkBound || 
-                type == ProcessNetClass::Unknown || 
-                type == ProcessNetClass::BulkBackground) 
-            {
-                SetProcessIdleAffinity(pe.th32ProcessID, parkMask);
-            }
-
-        } while (Process32NextW(hSnap, &pe));
-    }
-    CloseHandle(hSnap);
 }
 
 void IdleAffinityManager::SetProcessIdleAffinity(DWORD pid, DWORD_PTR targetMask)
 {
-    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    // [CRASH FIX] Use UniqueHandle to guarantee closure
+    UniqueHandle hProcess(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!hProcess) return;
 
     DWORD_PTR processAffinity = 0;
     DWORD_PTR systemAffinity = 0;
 
-    if (GetProcessAffinityMask(hProcess, &processAffinity, &systemAffinity))
+    if (GetProcessAffinityMask(hProcess.get(), &processAffinity, &systemAffinity))
     {
         // Don't touch if already set or incompatible
         if ((processAffinity & targetMask) == 0) {
-             CloseHandle(hProcess);
-             return; 
+             return; // UniqueHandle closes hProcess automatically
         }
 
         // Store original (if not already stored)
@@ -207,9 +217,8 @@ void IdleAffinityManager::SetProcessIdleAffinity(DWORD pid, DWORD_PTR targetMask
         }
 
         // Apply Park Mask
-        SetProcessAffinityMask(hProcess, targetMask & systemAffinity);
+        SetProcessAffinityMask(hProcess.get(), targetMask & systemAffinity);
     }
-    CloseHandle(hProcess);
 }
 
 void IdleAffinityManager::RestoreAllAffinity()
@@ -219,10 +228,9 @@ void IdleAffinityManager::RestoreAllAffinity()
 
     for (const auto& [pid, originalMask] : m_originalAffinity)
     {
-        HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
+        UniqueHandle hProcess(OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid));
         if (hProcess) {
-            SetProcessAffinityMask(hProcess, originalMask);
-            CloseHandle(hProcess);
+            SetProcessAffinityMask(hProcess.get(), originalMask);
         }
     }
     m_originalAffinity.clear();
