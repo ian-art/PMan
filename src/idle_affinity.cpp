@@ -152,8 +152,11 @@ void IdleAffinityManager::ApplyIdleAffinity()
             parkMask |= (1ULL << (g_physicalCoreCount - 1 - i));
         }
 
-        std::lock_guard lock(m_mtx);
-        m_originalAffinity.clear();
+        // [FIX] Scoped lock to prevent recursive deadlock when calling SetProcessIdleAffinity
+        {
+            std::lock_guard lock(m_mtx);
+            m_originalAffinity.clear();
+        }
 
         // [CRASH FIX] Use UniqueHandle for RAII safety (prevents leaks on exception)
         UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
