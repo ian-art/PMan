@@ -771,7 +771,7 @@ apply_policy:  // FIX: Label for the goto jump
                 }
             }
         }
-    } // <-- ADD THIS: Closes if (changeSuccess) block
+    }
     
     } catch (const std::exception& e) {
         Log("[POLICY] Exception in policy thread: " + std::string(e.what()));
