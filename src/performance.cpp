@@ -181,6 +181,9 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     }
     
     m_sessions[pid] = session;
+
+    // [AUDIO ISOLATION] Optimize Audio Engine for low latency
+    OptimizeAudioService(true);
 }
 
 void PerformanceGuardian::ApplyProfile(DWORD pid, const GameProfile& profile) {
@@ -320,6 +323,9 @@ void PerformanceGuardian::OnGameStop(DWORD pid) {
         SetProcessAffinity(pid, 2); 
         SetProcessIoPriority(pid, 2);
         SetMemoryCompression(2);
+
+        // Revert Audio Optimization
+        OptimizeAudioService(false);
         
         m_sessions.erase(it);
     }
@@ -437,6 +443,48 @@ void PerformanceGuardian::LogStutterData(const std::wstring& exeName, const Syst
     msg += "DPC: " + std::to_string(snap.dpcLatencyUs) + " us | ";
     msg += "CPU: " + std::to_string(snap.cpuLoad) + "%";
     Log(msg);
+}
+
+void PerformanceGuardian::OptimizeAudioService(bool enable) {
+    DWORD pid = GetProcessIdByName(L"audiodg.exe");
+    if (pid == 0) return;
+
+    HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc) {
+        // Audio service is protected, usually requires SYSTEM/Admin.
+        // If we fail, it's likely due to permissions.
+        return; 
+    }
+
+    if (enable) {
+        // 1. Priority: High (Not Realtime, to avoid locking system)
+        SetPriorityClass(hProc, HIGH_PRIORITY_CLASS);
+        
+        // 2. Affinity: Pin to the specific last core only
+        // This isolates audio from the Game (usually early cores) and OS Interrupts (Core 0)
+        DWORD_PTR processAffinity, systemAffinity;
+        if (GetProcessAffinityMask(hProc, &processAffinity, &systemAffinity)) {
+            // Find the highest bit set in system affinity (Last Logical Core)
+            DWORD_PTR mask = 1;
+            DWORD_PTR lastCore = 1;
+            while (mask != 0 && mask <= systemAffinity) {
+                if (systemAffinity & mask) lastCore = mask;
+                mask <<= 1;
+            }
+            SetProcessAffinityMask(hProc, lastCore);
+        }
+        Log("[AUDIO] Optimized audiodg.exe (High Priority + Isolated Core)");
+    } else {
+        // Revert to Normal
+        SetPriorityClass(hProc, NORMAL_PRIORITY_CLASS);
+        
+        // Restore all allowed cores
+        DWORD_PTR processAffinity, systemAffinity;
+        if (GetProcessAffinityMask(hProc, &processAffinity, &systemAffinity)) {
+            SetProcessAffinityMask(hProc, systemAffinity);
+        }
+    }
+    CloseHandle(hProc);
 }
 
 void PerformanceGuardian::TriggerEmergencyBoost(DWORD pid) {

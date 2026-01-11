@@ -257,6 +257,22 @@ DWORD GetDwmProcessId()
     return 0;
 }
 
+DWORD GetProcessIdByName(const std::wstring& exeName)
+{
+    UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+    if (hSnap.get() == INVALID_HANDLE_VALUE) return 0;
+
+    PROCESSENTRY32W pe = { sizeof(pe) };
+    if (Process32FirstW(hSnap.get(), &pe)) {
+        do {
+            if (_wcsicmp(pe.szExeFile, exeName.c_str()) == 0) {
+                return pe.th32ProcessID;
+            }
+        } while (Process32NextW(hSnap.get(), &pe));
+    }
+    return 0;
+}
+
 // FIX: Removed static to allow usage in performance.cpp
 ULONGLONG FileTimeToULL(const FILETIME& ft) {
     return (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;

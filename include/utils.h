@@ -105,4 +105,7 @@ DWORD GetParentProcessId(DWORD pid);
 // Get DWM Process ID (Shared Utility)
 DWORD GetDwmProcessId();
 
+// Generic helper to find system processes (e.g., audiodg.exe)
+DWORD GetProcessIdByName(const std::wstring& exeName);
+
 #endif // PMAN_UTILS_H

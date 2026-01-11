@@ -130,6 +130,7 @@ bool WindowsServiceManager::SuspendService(const std::wstring& serviceName)
         L"bits",          // Background Intelligent Transfer
         L"dosvc",         // Delivery Optimization
         L"sysmain",       // Superfetch/SysMain
+        L"wsearch",       // Windows Search (Disk Indexer)
         L"clicktorunsvc", // Office Updates
         L"windefend"      // Just kidding - blocked by Admin logic anyway, but good practice
     };
@@ -409,6 +410,20 @@ void SuspendBackgroundServices()
 
     // Block Office Background Updates
     if (g_serviceManager.AddService(L"clicktorunsvc", 
+        SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
+    {
+        hasAnyService = true;
+    }
+
+    // [DISK SILENCER] Block Search Indexing to prevent 100% Disk Usage
+    if (g_serviceManager.AddService(L"wsearch", 
+        SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
+    {
+        hasAnyService = true;
+    }
+
+    // [DISK SILENCER] Block Superfetch to prevent random RAM compression/paging
+    if (g_serviceManager.AddService(L"sysmain", 
         SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
     {
         hasAnyService = true;

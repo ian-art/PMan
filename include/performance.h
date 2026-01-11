@@ -132,6 +132,9 @@ public:
     // Returns true if specific optimization is allowed based on learned profile
     bool IsOptimizationAllowed(const std::wstring& exeName, const std::string& feature);
     
+    // Audio Isolation
+    void OptimizeAudioService(bool enable);
+
     // Emergency response
     void TriggerEmergencyBoost(DWORD pid);
 };
