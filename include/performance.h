@@ -81,6 +81,9 @@ private:
 		// Fix: Per-session CPU tracking
         uint64_t lastCpuTime = 0;
         uint64_t lastCpuTimestamp = 0;
+
+        // Emergency Boost Cooldown
+        uint64_t lastEmergencyBoostTime = 0;
     };
 
     // Root Cause Correlation

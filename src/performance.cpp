@@ -394,6 +394,14 @@ void PerformanceGuardian::AnalyzeStutter(GameSession& session, DWORD pid) {
     
     // Emergency Threshold: 5% of frames are stutters OR variance is huge
     if (spikeCount > (session.frameHistory.size() * 0.05) || stdDev > 8.0) {
+        
+        // FIX: Enforce 30s cooldown to prevent log spam and redundant boosts
+        uint64_t now = GetTickCount64();
+        if (now - session.lastEmergencyBoostTime < 30000) { 
+            return;
+        }
+        session.lastEmergencyBoostTime = now;
+
         session.sessionStutterCount++; // Track
 
         // Capture system snapshot
