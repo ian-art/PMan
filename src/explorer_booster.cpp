@@ -383,9 +383,13 @@ void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
         // SUCCESS: Do nothing. (Silence the spam)
         // We verified this works via previous debug logs.
     } else {
-        // FAILURE: Log this, as it indicates a problem (e.g. permission loss)
-        Log("[EXPLORER] Memory Guard FAILED for PID " + std::to_string(pid) + 
-            " Error: " + std::to_string(GetLastError()));
+        // FAILURE: Capture error immediately
+        DWORD err = GetLastError();
+        // Error 5 (Access Denied) is expected for DWM (Protected Process Light) - suppress it
+        if (err != ERROR_ACCESS_DENIED) {
+            Log("[EXPLORER] Memory Guard FAILED for PID " + std::to_string(pid) + 
+                " Error: " + std::to_string(err));
+        }
     }
 }
 
