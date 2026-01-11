@@ -294,8 +294,9 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
 
     // [PERF FIX] Offload to background thread to prevent UI blocking
     std::thread([pid, hwnd]() mutable {
-        // Re-verify flags inside thread
-        if (!g_running || g_userPaused.load()) return;
+        try {
+            // Re-verify flags inside thread
+            if (!g_running || g_userPaused.load()) return;
 
         // Session-scoped filtering
         if (!hwnd && g_ignoreNonInteractive.load() && !g_sessionLocked.load())
@@ -495,6 +496,9 @@ apply_policy:  // FIX: Label for the goto jump
     uint64_t state = g_policyState.load();
     DWORD lastPid = static_cast<DWORD>(state >> 32);
     int lastMode = static_cast<int>(state & 0xFFFFFFFF);
+
+    // FIX: Check cooldown BEFORE modifying ExplorerBooster state to prevent desync
+    if (!forceOverride && !IsPolicyChangeAllowed(mode)) return;
     
     // CRITICAL: Revert Explorer BEFORE game mode applies to prevent conflict
     if (mode == 1) {
@@ -503,9 +507,6 @@ apply_policy:  // FIX: Label for the goto jump
     } else if (mode == 2) {
         g_explorerBooster.OnBrowserStart(pid);
     }
-    
-	// Check cooldown
-    if (!forceOverride && !IsPolicyChangeAllowed(mode)) return;
     
     // 1. Exact same process and mode - skip entirely
     if (mode == lastMode && pid == lastPid)
@@ -748,7 +749,7 @@ apply_policy:  // FIX: Label for the goto jump
             }
 
             if (g_sessionLocked.load())
-            {
+			{
 				// Notify Performance Guardian and generate report												  
                 DWORD stoppingPid = g_lockedGamePid.load();
                 if (stoppingPid != 0) g_perfGuardian.OnGameStop(stoppingPid);
@@ -770,6 +771,12 @@ apply_policy:  // FIX: Label for the goto jump
                 }
             }
         }
+    } // <-- ADD THIS: Closes if (changeSuccess) block
+    
+    } catch (const std::exception& e) {
+        Log("[POLICY] Exception in policy thread: " + std::string(e.what()));
+    } catch (...) {
+        Log("[POLICY] Unknown exception in policy thread");
     }
-	}).detach(); // End of async thread
+}).detach(); // End of async thread
 }
