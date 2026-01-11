@@ -24,6 +24,7 @@
 #include "tweaks.h"
 #include "utils.h"
 #include "services.h" // For GetBitsBandwidth
+#include "input_guardian.h" // Integration
 #include <fstream>
 #include <numeric>
 #include <cmath>
@@ -154,6 +155,9 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     
     // Check if we have a profile
     auto it = m_profiles.find(exeName);
+    // Enable Input Interference Blocker (WinKey / StickyKeys)
+    g_inputGuardian.SetGameMode(true);
+
     if (it != m_profiles.end()) {
         // Existing profile found
         GameProfile& profile = it->second;
@@ -312,6 +316,9 @@ void PerformanceGuardian::OnGameStop(DWORD pid) {
     auto it = m_sessions.find(pid);
     if (it != m_sessions.end()) {
         GameSession& session = it->second;
+
+        // Disable Input Interference Blocker
+        g_inputGuardian.SetGameMode(false);
         
         //Generate Post-Session Report
         // Only report if session lasted longer than 1 minute to avoid noise

@@ -25,14 +25,77 @@
 
 InputGuardian g_inputGuardian;
 
+// Low-Level Keyboard Hook
+// Blocks Windows Key (Left/Right) when Game Mode is active
+static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode == HC_ACTION) {
+        KBDLLHOOKSTRUCT* p = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+        if (p->vkCode == VK_LWIN || p->vkCode == VK_RWIN) {
+            // Eat the key message
+            return 1;
+        }
+    }
+    return CallNextHookEx(nullptr, nCode, wParam, lParam);
+}
+
 void InputGuardian::Initialize() {
     m_active = true;
     m_dwmPid = GetDwmProcessId();
+    
+    // Capture original accessibility states (Sticky/Filter/Toggle keys)
+    SystemParametersInfoW(SPI_GETSTICKYKEYS, sizeof(m_startupSticky), &m_startupSticky, 0);
+    SystemParametersInfoW(SPI_GETTOGGLEKEYS, sizeof(m_startupToggle), &m_startupToggle, 0);
+    SystemParametersInfoW(SPI_GETFILTERKEYS, sizeof(m_startupFilter), &m_startupFilter, 0);
+
     Log("[INPUT] Input Responsiveness Guard Initialized");
 }
 
 void InputGuardian::Shutdown() {
     m_active = false;
+    SetGameMode(false); // Ensure hooks/settings are restored
+}
+
+void InputGuardian::SetGameMode(bool enabled) {
+    if (m_blockingEnabled == enabled) return;
+    ToggleInterferenceBlocker(enabled);
+}
+
+void InputGuardian::ToggleInterferenceBlocker(bool enable) {
+    if (enable) {
+        // 1. Disable Windows Key Hook
+        if (!m_hKeyHook) {
+            m_hKeyHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(nullptr), 0);
+        }
+
+        // 2. Disable Sticky Keys / Filter Keys Hotkeys
+        STICKYKEYS sk = { sizeof(STICKYKEYS), 0 };
+        sk.dwFlags = SKF_CONFIRMHOTKEY; // Disable SKF_HOTKEYACTIVE
+        SystemParametersInfoW(SPI_SETSTICKYKEYS, sizeof(sk), &sk, 0);
+
+        TOGGLEKEYS tk = { sizeof(TOGGLEKEYS), 0 };
+        tk.dwFlags = TKF_CONFIRMHOTKEY;
+        SystemParametersInfoW(SPI_SETTOGGLEKEYS, sizeof(tk), &tk, 0);
+
+        FILTERKEYS fk = { sizeof(FILTERKEYS), 0 };
+        fk.dwFlags = FKF_CONFIRMHOTKEY;
+        SystemParametersInfoW(SPI_SETFILTERKEYS, sizeof(fk), &fk, 0);
+
+        Log("[INPUT] Game Mode: Blocked Windows Key & Sticky Keys");
+    } else {
+        // 1. Remove Hook
+        if (m_hKeyHook) {
+            UnhookWindowsHookEx(m_hKeyHook);
+            m_hKeyHook = nullptr;
+        }
+
+        // 2. Restore Original Accessibility Settings
+        SystemParametersInfoW(SPI_SETSTICKYKEYS, sizeof(m_startupSticky), &m_startupSticky, 0);
+        SystemParametersInfoW(SPI_SETTOGGLEKEYS, sizeof(m_startupToggle), &m_startupToggle, 0);
+        SystemParametersInfoW(SPI_SETFILTERKEYS, sizeof(m_startupFilter), &m_startupFilter, 0);
+
+        Log("[INPUT] Game Mode: Restored Input Settings");
+    }
+    m_blockingEnabled = enable;
 }
 
 void InputGuardian::OnInput(DWORD msgTime) {

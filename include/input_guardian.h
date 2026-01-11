@@ -32,9 +32,21 @@ public:
     // Called from Main Loop on WM_INPUT
     void OnInput(DWORD msgTime);
 
+    // Game Mode Integration
+    void SetGameMode(bool enabled);
+
 private:
     std::atomic<bool> m_active{false};
     DWORD m_dwmPid{0};
+    
+    // Input Interference Blocking
+    HHOOK m_hKeyHook{nullptr};
+    STICKYKEYS m_startupSticky{sizeof(STICKYKEYS), 0};
+    TOGGLEKEYS m_startupToggle{sizeof(TOGGLEKEYS), 0};
+    FILTERKEYS m_startupFilter{sizeof(FILTERKEYS), 0};
+    bool m_blockingEnabled{false};
+
+    void ToggleInterferenceBlocker(bool enable);
     
     // State Tracking
     DWORD m_lastForegroundTid{0};
