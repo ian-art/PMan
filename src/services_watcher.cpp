@@ -30,10 +30,8 @@ void ServiceWatcher::Initialize() {
 }
 
 void ServiceWatcher::OnTick() {
-    // Only run if service suspension is allowed by config
     if (!g_suspendUpdatesDuringGames.load()) return;
     
-    // Rate limit: Check every 30 seconds
     static uint64_t lastCheck = 0;
     uint64_t now = GetTickCount64();
     if (now - lastCheck < 30000) return; 
@@ -42,83 +40,19 @@ void ServiceWatcher::OnTick() {
     ScanAndTrimManualServices();
 }
 
-bool ServiceWatcher::IsSafeToStop(const std::wstring& name) {
-    // CRITICAL WHITELIST: Services that must NEVER be killed even if "Idle"
-    // Based on Black Viper's "Safe" Configuration & Windows Internals
-    static const std::unordered_set<std::wstring> CRITICAL_WHITELIST = {
-        // --- Core Windows Infrastructure ---
-        L"RpcSs",              // Remote Procedure Call (RPC) - KILLING THIS BSODs SYSTEM
-        L"RpcEptMapper",       // RPC Endpoint Mapper
-        L"DcomLaunch",         // DCOM Server Process Launcher
-        L"LSM",                // Local Session Manager
-        L"SamSs",              // Security Accounts Manager
-        L"PlugPlay",           // Plug and Play
-        L"Power",              // Power Management
-        L"SystemEventsBroker", // System Events Broker
-        L"TimeBrokerSvc",      // Time Broker
-        L"KeyIso",             // CNG Key Isolation
-        L"CryptSvc",           // Cryptographic Services
-        L"ProfSvc",            // User Profile Service
-        L"SENS",               // System Event Notification Service
-        L"Schedule",           // Task Scheduler
-        L"BrokerInfrastructure", // Background Tasks Infrastructure
-        L"StateRepository",    // State Repository Service (Required for UWP/Start Menu)
-        
-        // --- Network & Connectivity ---
-        L"Dhcp",               // DHCP Client
-        L"Dnscache",           // DNS Client
-        L"NlaSvc",             // Network Location Awareness
-        L"Nsi",                // Network Store Interface
-        L"Netman",             // Network Connections
-        L"WlanSvc",            // WLAN AutoConfig (WiFi)
-        L"WwanSvc",            // WWAN AutoConfig (Cellular)
-        L"BFE",                // Base Filtering Engine
-        L"MpsSvc",             // Windows Defender Firewall
-        L"WinHttpAutoProxySvc",// WinHTTP Web Proxy Auto-Discovery Service
-        L"LanmanWorkstation",  // Workstation (SMB/File Sharing)
-        L"LanmanServer",       // Server (SMB)
-        
-        // --- Hardware & Audio ---
-        L"Audiosrv",           // Windows Audio
-        L"AudioEndpointBuilder",// Windows Audio Endpoint Builder
-        L"BthServ",            // Bluetooth Support Service
-        L"BthHFSrv",           // Bluetooth Handsfree Service
-        L"ShellHWDetection",   // Shell Hardware Detection (Autoplay/Hardware events)
-        L"Themes",             // Themes (Killing this breaks UI composition)
-        L"FontCache",          // Windows Font Cache Service
-        L"Spooler",            // Print Spooler (Keep alive to avoid printing errors)
-        L"WiaRpc",             // Still Image Acquisition Events
-        
-        // --- Security & Updates ---
-        L"WinDefend",          // Microsoft Defender Antivirus Service
-        L"MsMpSvc",            // Microsoft Defender Antivirus Service (New Name)
-        L"SecurityHealthService", // Windows Security Service
-        L"Sppsvc",             // Software Protection (Windows Activation)
-        L"wuauserv",           // Windows Update (Let SuspendBackgroundServices handle this)
-        L"AppInfo",            // Application Information (Required for Admin/UAC)
-        
-        // --- Remote Access ---
-        L"TermService",        // Remote Desktop Services
-        L"UmRdpService",       // Remote Desktop Services UserMode Port Redirector
-    };
-
-    // Fast lookup
-    if (CRITICAL_WHITELIST.count(name)) return false;
-
-    // Safety: Ignore per-user services (e.g., CDPUserSvc_1a2b3, WpnUserService_1a2b3)
-    // These are often critical for the current user session (Notifications, Clipboard, etc.)
-    if (name.find(L"User_") != std::wstring::npos || 
-        name.find(L"_") != std::wstring::npos) { 
-        
-        // Exception: Known bloatware with suffixes can be killed
-        if (name.find(L"CDPUserSvc") != std::wstring::npos) return true; // Connected Devices (High CPU)
-        if (name.find(L"OneSyncSvc") != std::wstring::npos) return true; // Outlook Sync
-        if (name.find(L"ContactData") != std::wstring::npos) return true;
-        
-        return false; // Default safe
-    }
+// Check if other running services depend on this one
+static bool HasActiveDependents(SC_HANDLE hSvc) {
+    DWORD bytesNeeded = 0;
+    DWORD count = 0;
     
-    return true;
+    // First call to determine buffer size
+    EnumDependentServicesW(hSvc, SERVICE_ACTIVE, nullptr, 0, &bytesNeeded, &count);
+    
+    if (GetLastError() == ERROR_MORE_DATA && bytesNeeded > 0) {
+        // If we have data, it means there ARE active dependents
+        return true; 
+    }
+    return false;
 }
 
 void ServiceWatcher::ScanAndTrimManualServices() {
@@ -129,7 +63,6 @@ void ServiceWatcher::ScanAndTrimManualServices() {
     DWORD servicesReturned = 0;
     DWORD resumeHandle = 0;
     
-    // First call to get size
     EnumServicesStatusExW(hSc, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL, 
         nullptr, 0, &bytesNeeded, &servicesReturned, &resumeHandle, nullptr);
 
@@ -139,53 +72,67 @@ void ServiceWatcher::ScanAndTrimManualServices() {
     }
 
     std::vector<BYTE> buffer(bytesNeeded);
-    LPENUM_SERVICE_STATUS_PROCESSW services = reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buffer.data());
-
     if (EnumServicesStatusExW(hSc, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL, 
         buffer.data(), bytesNeeded, &bytesNeeded, &servicesReturned, &resumeHandle, nullptr))
     {
+        LPENUM_SERVICE_STATUS_PROCESSW services = reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buffer.data());
+
         for (DWORD i = 0; i < servicesReturned; i++) {
             std::wstring svcName = services[i].lpServiceName;
-            
-            // Optimization: Skip if not running
+            DWORD pid = services[i].ServiceStatusProcess.dwProcessId;
+
             if (services[i].ServiceStatusProcess.dwCurrentState != SERVICE_RUNNING) continue;
             
-            // Safety: Skip Critical Whitelist
-            if (!IsSafeToStop(svcName)) continue;
+            // 1. Safety: Check Central Critical Whitelist
+            if (g_serviceManager.IsCriticalService(svcName)) continue;
 
-            // Check Start Type (Is it Manual?)
-            SC_HANDLE hSvc = OpenServiceW(hSc, svcName.c_str(), SERVICE_QUERY_CONFIG);
-            if (hSvc) {
-                DWORD configSize = 0;
-                QueryServiceConfigW(hSvc, nullptr, 0, &configSize);
+            SC_HANDLE hSvc = OpenServiceW(hSc, svcName.c_str(), SERVICE_QUERY_CONFIG | SERVICE_ENUMERATE_DEPENDENTS);
+            if (!hSvc) {
+                 // Log failure for debugging (Review Point 3)
+                 // Log("[WATCHER] Failed to open " + WideToUtf8(svcName.c_str()));
+                 continue;
+            }
+
+            // 2. Safety: Check Dependencies (Review Point A)
+            if (HasActiveDependents(hSvc)) {
+                CloseServiceHandle(hSvc);
+                continue;
+            }
+
+            DWORD configSize = 0;
+            QueryServiceConfigW(hSvc, nullptr, 0, &configSize);
+            
+            if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+                std::vector<BYTE> cfgBuf(configSize);
+                LPQUERY_SERVICE_CONFIGW config = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(cfgBuf.data());
                 
-                if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
-                    std::vector<BYTE> cfgBuf(configSize);
-                    LPQUERY_SERVICE_CONFIGW config = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(cfgBuf.data());
+                if (QueryServiceConfigW(hSvc, config, configSize, &configSize)) {
                     
-                    if (QueryServiceConfigW(hSvc, config, configSize, &configSize)) {
+                    // 3. Logic: Manual Start?
+                    if (config->dwStartType == SERVICE_DEMAND_START) {
                         
-                        // LOGIC: If Manual (Demand Start) AND Idle -> Stop it
-                        if (config->dwStartType == SERVICE_DEMAND_START) {
+                        // 4. Heuristic: Is it truly idle?
+                        if (IsProcessIdle(pid)) {
                             
-                            // Check Process Idle State (0% CPU usage history)
-                            if (IsProcessIdle(services[i].ServiceStatusProcess.dwProcessId)) {
-                                
+                            // 5. Safety: Anti-Race Condition (Review Point 1)
+                            // Wait 500ms and re-check to ensure it didn't just wake up
+                            Sleep(500); 
+                            
+                            if (IsProcessIdle(pid)) {
                                 Log("[AUTO-TRIM] Stopping idle manual service: " + WideToUtf8(svcName.c_str()));
                                 
-                                // Register & Force Kill (using force=true to bypass services.cpp whitelist)
+                                // Register & Stop using Operational Bypass
                                 if (g_serviceManager.AddService(svcName, SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP)) {
-                                    g_serviceManager.SuspendService(svcName, true); 
+                                    g_serviceManager.SuspendService(svcName, WindowsServiceManager::BypassMode::Operational); 
                                 }
                             }
                         }
                     }
                 }
-                CloseServiceHandle(hSvc);
             }
+            CloseServiceHandle(hSvc);
         }
     }
-    
     CloseServiceHandle(hSc);
 }
 
@@ -196,16 +143,20 @@ bool ServiceWatcher::IsProcessIdle(DWORD pid) {
 
     FILETIME ftCreation, ftExit, ftKernel, ftUser;
     bool isIdle = false;
+    IO_COUNTERS io = {0};
 
-    if (GetProcessTimes(hProc, &ftCreation, &ftExit, &ftKernel, &ftUser)) {
-        // Convert to 64-bit
+    // Heuristic Improvement (Review Point B): Check IO + CPU
+    bool cpuInfo = GetProcessTimes(hProc, &ftCreation, &ftExit, &ftKernel, &ftUser);
+    bool ioInfo = GetProcessIoCounters(hProc, &io);
+
+    if (cpuInfo && ioInfo) {
         uint64_t k = ((uint64_t)ftKernel.dwHighDateTime << 32) | ftKernel.dwLowDateTime;
         uint64_t u = ((uint64_t)ftUser.dwHighDateTime << 32) | ftUser.dwLowDateTime;
         
-        // HEURISTIC: A service is considered "Idle" if it has consumed negligible CPU time 
-        // relative to its life, OR simply has very low total accumulation (started and waiting).
-        // 100ms (1,000,000 x 100ns intervals) is a safe threshold for "Done initializing, now waiting".
-        if ((k + u) < 1000000) {
+        // Thresholds:
+        // CPU: < 100ms total (Still mostly unused)
+        // IO:  < 500KB total transfer (Hasn't been doing heavy disk work)
+        if ((k + u) < 1000000 && (io.ReadTransferCount + io.WriteTransferCount) < (500 * 1024)) {
             isIdle = true;
         }
     }

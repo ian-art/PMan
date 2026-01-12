@@ -122,30 +122,76 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
     return true;
 }
 
-bool WindowsServiceManager::SuspendService(const std::wstring& serviceName, bool force)
+bool WindowsServiceManager::IsCriticalService(const std::wstring& serviceName) const
 {
-    // Fix: Service Whitelist Check
-    static const std::unordered_set<std::wstring> SAFE_SERVICES = {
-        L"wuauserv",      // Windows Update
-        L"bits",          // Background Intelligent Transfer
-        L"dosvc",         // Delivery Optimization
-        L"sysmain",       // Superfetch/SysMain
-        L"wsearch",       // Windows Search (Disk Indexer)
-        L"clicktorunsvc", // Office Updates
-        L"windefend"      // Blocked by Admin logic, but listed for safety
+    // CRITICAL WHITELIST: Services that must NEVER be killed to preserve OS stability
+    static const std::unordered_set<std::wstring> CRITICAL_WHITELIST = {
+        // --- Core Windows Infrastructure ---
+        L"RpcSs", L"RpcEptMapper", L"DcomLaunch", L"LSM", L"SamSs", L"PlugPlay", 
+        L"Power", L"SystemEventsBroker", L"TimeBrokerSvc", L"KeyIso", L"CryptSvc", 
+        L"ProfSvc", L"SENS", L"Schedule", L"BrokerInfrastructure", L"StateRepository",
+        
+        // --- Network & Connectivity ---
+        L"Dhcp", L"Dnscache", L"NlaSvc", L"Nsi", L"Netman", L"WlanSvc", L"WwanSvc", 
+        L"BFE", L"MpsSvc", L"WinHttpAutoProxySvc", L"LanmanWorkstation", L"LanmanServer",
+        
+        // --- Hardware & Audio ---
+        L"Audiosrv", L"AudioEndpointBuilder", L"BthServ", L"BthHFSrv", 
+        L"ShellHWDetection", L"Themes", L"FontCache", L"Spooler", L"WiaRpc",
+        
+        // --- Security & Updates ---
+        L"WinDefend", L"MsMpSvc", L"SecurityHealthService", L"Sppsvc", L"AppInfo",
+        
+        // --- Remote Access ---
+        L"TermService", L"UmRdpService"
     };
 
-    if (!force) {
+    if (CRITICAL_WHITELIST.count(serviceName)) return true;
+
+    // Safety: Ignore per-user services (e.g., CDPUserSvc_1a2b3) unless known safe
+    if (serviceName.find(L"User_") != std::wstring::npos || 
+        serviceName.find(L"_") != std::wstring::npos) { 
+        if (serviceName.find(L"CDPUserSvc") != std::wstring::npos) return false;
+        if (serviceName.find(L"OneSyncSvc") != std::wstring::npos) return false;
+        if (serviceName.find(L"ContactData") != std::wstring::npos) return false;
+        return true; // Default safe
+    }
+    
+    return false;
+}
+
+bool WindowsServiceManager::SuspendService(const std::wstring& serviceName, BypassMode mode)
+{
+    // LEVEL 0: Critical Service Protection (Always Active Unless Force)
+    if (mode != BypassMode::Force) {
+        if (IsCriticalService(serviceName)) {
+            Log("[SEC] Blocked attempt to suspend CRITICAL service: " + WideToUtf8(serviceName.c_str()));
+            return false;
+        }
+    }
+
+    // LEVEL 1: Safe Service Whitelist (Only Active in BypassMode::None)
+    if (mode == BypassMode::None) {
+        static const std::unordered_set<std::wstring> SAFE_SERVICES = {
+            L"wuauserv",      // Windows Update
+            L"bits",          // Background Intelligent Transfer
+            L"dosvc",         // Delivery Optimization
+            L"sysmain",       // Superfetch/SysMain
+            L"wsearch",       // Windows Search (Disk Indexer)
+            L"clicktorunsvc", // Office Updates
+            L"windefend"      // Windows Defender (also in critical list)
+        };
+
         std::wstring checkName = serviceName;
         std::transform(checkName.begin(), checkName.end(), checkName.begin(), ::towlower);
 
-        if (SAFE_SERVICES.find(checkName) == SAFE_SERVICES.end())
-        {
+        if (SAFE_SERVICES.find(checkName) == SAFE_SERVICES.end()) {
             Log("[SEC] Blocked attempt to suspend non-whitelisted service: " + WideToUtf8(serviceName.c_str()));
             return false;
         }
     }
 
+    // Proceed with service suspension logic
     std::lock_guard lock(m_mutex);
     
     auto it = m_services.find(serviceName);
@@ -158,50 +204,41 @@ bool WindowsServiceManager::SuspendService(const std::wstring& serviceName, bool
     if (!QueryServiceStatus(state.handle, &status))
         return false;
     
-    if (status.dwCurrentState == SERVICE_STOPPED)
-    {
+    if (status.dwCurrentState == SERVICE_STOPPED) {
         Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " already stopped");
         return false;
     }
     
-    if (status.dwCurrentState != SERVICE_RUNNING)
-    {
+    if (status.dwCurrentState != SERVICE_RUNNING) {
         Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " in state: " + 
             std::to_string(status.dwCurrentState) + " - skipping");
         return false;
     }
     
-	// Try to pause first (preferred for BITS)
-    if (status.dwControlsAccepted & SERVICE_ACCEPT_PAUSE_CONTINUE)
-    {
-        if (ControlService(state.handle, SERVICE_CONTROL_PAUSE, &status))
-        {
+    // Try to pause first (preferred for services like BITS)
+    if (status.dwControlsAccepted & SERVICE_ACCEPT_PAUSE_CONTINUE) {
+        if (ControlService(state.handle, SERVICE_CONTROL_PAUSE, &status)) {
             state.action = ServiceAction::Paused;
             Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " paused successfully");
-            m_anythingSuspended.store(true); // Fix
+            m_anythingSuspended.store(true);
             return true;
         }
     }
     
     // Fallback to stop
-	if (ControlService(state.handle, SERVICE_CONTROL_STOP, &status))
-    {
+    if (ControlService(state.handle, SERVICE_CONTROL_STOP, &status)) {
         // Wait for service to stop (max 5 seconds)
-        for (int i = 0; i < SERVICE_OP_WAIT_RETRIES && status.dwCurrentState != SERVICE_STOPPED; ++i)
-        {
+        for (int i = 0; i < SERVICE_OP_WAIT_RETRIES && status.dwCurrentState != SERVICE_STOPPED; ++i) {
             Sleep(SERVICE_OP_WAIT_DELAY_MS);
             if (!QueryServiceStatus(state.handle, &status)) break;
         }
         
         state.action = ServiceAction::Stopped;
-        m_anythingSuspended.store(true); // Fix
+        m_anythingSuspended.store(true);
         
-        if (status.dwCurrentState == SERVICE_STOPPED)
-        {
+        if (status.dwCurrentState == SERVICE_STOPPED) {
             Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " stopped successfully");
-        }
-        else
-        {
+        } else {
             Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " stop initiated");
         }
         return true;

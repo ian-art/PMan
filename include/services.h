@@ -55,10 +55,22 @@ public:
     ~WindowsServiceManager();
     
     bool Initialize();
+    // Bypass levels for safety
+    enum class BypassMode {
+        None,           // Strict: Must be in SAFE_SERVICES (Bloatware list)
+        Operational,    // Medium: Bypass SAFE_SERVICES, but enforced CRITICAL_WHITELIST
+        Force           // Dangerous: Bypass SAFE_SERVICES (Use with extreme caution)
+    };
+
     bool AddService(const std::wstring& serviceName, DWORD accessRights);
-    // 'force' bypasses the internal whitelist (used by ServiceWatcher)
-    bool SuspendService(const std::wstring& serviceName, bool force = false);
+    
+    // Suspend with granular bypass control
+    bool SuspendService(const std::wstring& serviceName, BypassMode mode = BypassMode::None);
+    
     bool ResumeService(const std::wstring& serviceName);
+    
+    // Check if service is in the "Never Kill" list (Kernel, Network, Audio, etc.)
+    bool IsCriticalService(const std::wstring& serviceName) const;
     bool SuspendAll();
     void ResumeAll();
 	bool IsAnythingSuspended() const;
