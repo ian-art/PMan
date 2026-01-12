@@ -573,10 +573,14 @@ bool DownloadUpdate(const std::wstring& savePath)
     return false;
 }
 
-void InstallUpdateAndRestart(const std::wstring& newExePath)
+void InstallUpdateAndRestart(const std::wstring& newExePath, bool isPaused)
 {
     wchar_t selfPath[MAX_PATH];
     GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
+
+    // Determine launch arguments
+    std::string args = "/silent";
+    if (isPaused) args += " --paused";
 
     // Create a self-deleting batch script
     // 1. Timeout to let this process exit
@@ -588,7 +592,7 @@ void InstallUpdateAndRestart(const std::wstring& newExePath)
     std::string batScript = "@echo off\r\n"
                             "timeout /t 1 /nobreak >nul\r\n"
                             "move /y \"" + WideToUtf8(newExePath.c_str()) + "\" \"" + WideToUtf8(selfPath) + "\" >nul\r\n"
-                            "start \"\" \"" + WideToUtf8(selfPath) + "\" /silent\r\n"
+                            "start \"\" \"" + WideToUtf8(selfPath) + "\" " + args + "\r\n"
                             "del \"%~f0\"";
 
     HANDLE hFile = CreateFileW(batPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);

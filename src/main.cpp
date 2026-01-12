@@ -758,7 +758,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                         std::wstring dlPath = std::wstring(tempPath) + L"tmp.exe";
                         
                         if (DownloadUpdate(dlPath)) {
-                            InstallUpdateAndRestart(dlPath);
+                            InstallUpdateAndRestart(dlPath, g_userPaused.load());
                         } else {
                             MessageBoxW(hwnd, L"Download failed.", L"Error", MB_OK | MB_ICONERROR);
                         }

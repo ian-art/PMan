@@ -78,7 +78,7 @@ bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD&
 bool VerifyUpdateConnection(); // Replaces Winsock check with WinHTTP
 bool CheckForUpdates(std::wstring& outLatestVer);
 bool DownloadUpdate(const std::wstring& savePath);
-void InstallUpdateAndRestart(const std::wstring& newExePath);
+void InstallUpdateAndRestart(const std::wstring& newExePath, bool isPaused);
 
 // RAII Wrapper for Windows HANDLEs
 struct HandleDeleter {
