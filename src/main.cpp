@@ -690,8 +690,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
             std::wstring taskName = std::filesystem::path(self).stem().wstring();
             
-            // Base arguments: Guard + Silent. Passive mode adds --paused
-            std::wstring args = L" --guard /S";
+            // Base arguments: Silent only. Passive mode adds --paused
+            std::wstring args = L" /S";
             if (wmId == ID_TRAY_STARTUP_PASSIVE) args += L" --paused";
 
             std::wstring params = L"/create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\"" + args + L"\" /sc onlogon /rl highest /f";
@@ -962,8 +962,8 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 
 if (!taskExists)
     {
-        // Add --guard /S flags to the scheduled task command
-        std::wstring cmdStr = L"schtasks /create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\" --guard /S\" /sc onlogon /rl highest /f";
+        // Add /S flag (Silent) to the scheduled task command
+        std::wstring cmdStr = L"schtasks /create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\" /S\" /sc onlogon /rl highest /f";
         
         // Fix CreateProcessW requires a mutable buffer
         std::vector<wchar_t> cmdBuf(cmdStr.begin(), cmdStr.end());
