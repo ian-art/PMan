@@ -122,7 +122,7 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
     return true;
 }
 
-bool WindowsServiceManager::SuspendService(const std::wstring& serviceName)
+bool WindowsServiceManager::SuspendService(const std::wstring& serviceName, bool force)
 {
     // Fix: Service Whitelist Check
     static const std::unordered_set<std::wstring> SAFE_SERVICES = {
@@ -132,16 +132,18 @@ bool WindowsServiceManager::SuspendService(const std::wstring& serviceName)
         L"sysmain",       // Superfetch/SysMain
         L"wsearch",       // Windows Search (Disk Indexer)
         L"clicktorunsvc", // Office Updates
-        L"windefend"      // Just kidding - blocked by Admin logic anyway, but good practice
+        L"windefend"      // Blocked by Admin logic, but listed for safety
     };
 
-    std::wstring checkName = serviceName;
-    std::transform(checkName.begin(), checkName.end(), checkName.begin(), ::towlower);
+    if (!force) {
+        std::wstring checkName = serviceName;
+        std::transform(checkName.begin(), checkName.end(), checkName.begin(), ::towlower);
 
-    if (SAFE_SERVICES.find(checkName) == SAFE_SERVICES.end())
-    {
-        Log("[SEC] Blocked attempt to suspend non-whitelisted service: " + WideToUtf8(serviceName.c_str()));
-        return false;
+        if (SAFE_SERVICES.find(checkName) == SAFE_SERVICES.end())
+        {
+            Log("[SEC] Blocked attempt to suspend non-whitelisted service: " + WideToUtf8(serviceName.c_str()));
+            return false;
+        }
     }
 
     std::lock_guard lock(m_mutex);

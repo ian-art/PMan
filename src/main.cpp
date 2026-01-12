@@ -29,6 +29,7 @@
 #include "events.h"
 #include "tweaks.h"
 #include "services.h"
+#include "services_watcher.h"
 #include "restore.h"
 #include "static_tweaks.h"
 #include "memory_optimizer.h"
@@ -1020,6 +1021,9 @@ if (!taskExists)
 	// Initialize Smart Memory Optimizer
     g_memoryOptimizer.Initialize();
 
+	// Initialize Service Watcher
+    ServiceWatcher::Initialize();
+
     DetectOSCapabilities();
     // Create restore point in background thread (non-blocking)
     std::thread restoreThread([]() {
@@ -1289,6 +1293,10 @@ if (!taskExists)
                 g_explorerBooster.OnTick();
                 // FIX: Drive Performance Guardian for non-ETW games (DX9)
                 g_perfGuardian.OnPerformanceTick();
+				
+				// Run Service Watcher
+                ServiceWatcher::OnTick();
+				
                 g_lastExplorerPollMs = now;
             }
         }

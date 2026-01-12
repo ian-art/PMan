@@ -56,7 +56,8 @@ public:
     
     bool Initialize();
     bool AddService(const std::wstring& serviceName, DWORD accessRights);
-    bool SuspendService(const std::wstring& serviceName);
+    // 'force' bypasses the internal whitelist (used by ServiceWatcher)
+    bool SuspendService(const std::wstring& serviceName, bool force = false);
     bool ResumeService(const std::wstring& serviceName);
     bool SuspendAll();
     void ResumeAll();
