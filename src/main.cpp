@@ -52,6 +52,10 @@
 #pragma comment(lib, "Tdh.lib")
 #pragma comment(lib, "Pdh.lib") // For BITS monitoring
 #pragma comment(lib, "Gdi32.lib") // Required for CreateFontW/DeleteObject
+#pragma comment(lib, "Comctl32.lib") // Required for TaskDialog
+
+// Force Linker to embed Manifest for Visual Styles (Required for TaskDialog)
+#pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 // GLOBAL VARIABLE
 HINSTANCE g_hInst = nullptr;
@@ -527,6 +531,50 @@ int RunMainProgram(int argc, wchar_t** argv);
 
 static NOTIFYICONDATAW g_nid = {};
 
+// Helper for enhanced modern dialogs (Vista+)
+static int ShowRichDialog(HWND hwnd, const std::wstring& title, const std::wstring& header, 
+                          const std::wstring& content, PCWSTR icon, int buttons = TDCBF_OK_BUTTON)
+{
+    // 1. Try Modern TaskDialog (Vista+) via Dynamic Loading
+    // Using a block scope ensures we don't skip initializations if we fall through
+    {
+        // Use LoadLibrary instead of static linking to avoid "Ordinal 344" errors on older/incompatible systems
+        HMODULE hComctl32 = LoadLibraryExW(L"Comctl32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (hComctl32) 
+        {
+            // Define prototype manually to avoid linking dependency on Comctl32.lib
+            typedef HRESULT (WINAPI *P_TaskDialog)(HWND, HINSTANCE, PCWSTR, PCWSTR, PCWSTR, int, PCWSTR, int*);
+            P_TaskDialog pTaskDialog = (P_TaskDialog)GetProcAddress(hComctl32, "TaskDialog");
+
+            if (pTaskDialog) 
+            {
+                int pressed = 0;
+                HRESULT hr = pTaskDialog(hwnd, g_hInst, title.c_str(), header.c_str(), content.c_str(), 
+                                        buttons, icon, &pressed);
+                
+                FreeLibrary(hComctl32);
+                
+                if (SUCCEEDED(hr)) {
+                    return pressed;
+                }
+            }
+            else
+            {
+                FreeLibrary(hComctl32);
+            }
+        }
+    }
+
+    // 2. Fallback to MessageBoxW (Legacy / Safety)
+    UINT uType = (buttons & TDCBF_YES_BUTTON) ? MB_YESNO : MB_OK;
+    if (icon == TD_ERROR_ICON) uType |= MB_ICONERROR;
+    else if (icon == TD_WARNING_ICON) uType |= MB_ICONWARNING;
+    else uType |= MB_ICONINFORMATION;
+    
+    std::wstring fullMsg = header + L"\n\n" + content;
+    return MessageBoxW(hwnd, fullMsg.c_str(), title.c_str(), uType);
+}
+
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     // Re-add icon if Explorer restarts (TaskbarCreated message)
@@ -702,12 +750,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         } 
         else if (wmId == ID_TRAY_ABOUT) {
             std::wstring version = GetCurrentExeVersion();
-            std::wstring msg = L"Priority Manager\n\n"
-							   L"Version " + version + L"\n\n"
-                               L"Copyright \251 2025-2026 Ian Anthony R. Tancinco\n\n"
-							   
-                               L"Automated Windows Priority & Affinity Manager";
-            MessageBoxW(hwnd, msg.c_str(), L"About", MB_OK | MB_ICONINFORMATION);
+            std::wstring header = L"Priority Manager " + version;
+            std::wstring content = L"Copyright \251 2025-2026 Ian Anthony R. Tancinco\n\n"
+                                   L"Automated Windows Priority & Affinity Manager\n"
+                                   L"Designed for high-performance low-latency gaming.";
+            
+            ShowRichDialog(hwnd, L"About Priority Manager", header, content, TD_INFORMATION_ICON);
         }
 		else if (wmId == ID_TRAY_SUPPORT) {
             ShellExecuteW(nullptr, L"open", SUPPORT_URL, nullptr, nullptr, SW_SHOWNORMAL);
@@ -726,8 +774,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             msg += L"  --guard             (Internal) Registry safety guard\n\n";
             msg += L"Automated Windows Priority & Affinity Manager";
             
-            // Use hwnd (hidden tray window) as owner to prevent taskbar icon
-            MessageBoxW(hwnd, msg.c_str(), L"Priority Manager - Help", MB_OK | MB_ICONINFORMATION);
+            ShowRichDialog(hwnd, L"Priority Manager Help", L"Command Line Usage", msg, TD_INFORMATION_ICON);
         }
         else if (wmId == ID_TRAY_UPDATE) {
             if (g_isCheckingUpdate.exchange(true)) return 0;
@@ -737,20 +784,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 struct UpdateFlagGuard { ~UpdateFlagGuard() { g_isCheckingUpdate.store(false); } } guard;
 
                 if (!VerifyUpdateConnection()) {
-                    MessageBoxW(hwnd, L"Unable to connect to the update server.\n\nPlease check your internet connection.", 
-                        L"Connection Error", MB_OK | MB_ICONWARNING);
+                    ShowRichDialog(hwnd, L"Connection Error", L"Update Check Failed", 
+                        L"Unable to connect to the update server.\nPlease check your internet connection.", 
+                        TD_ERROR_ICON);
                     return;
                 }
 
                 std::wstring latest;
                 if (CheckForUpdates(latest)) {
                     std::wstring current = GetCurrentExeVersion();
-                    std::wstring msg = L"Current version: " + current + L"\n"
-                                       L"New version: " + latest + L"\n\n"
-                                       L"Update now?";
+                    std::wstring content = L"Current version: " + current + L"\n"
+                                           L"New version: " + latest + L"\n\n"
+                                           L"Would you like to update now?";
 
-                    int result = MessageBoxW(hwnd, msg.c_str(), 
-                        L"Update Available:", MB_YESNO | MB_ICONQUESTION);
+                    int result = ShowRichDialog(hwnd, L"Update Available", L"A new version is available!", 
+                        content, TD_SHIELD_ICON, TDCBF_YES_BUTTON | TDCBF_NO_BUTTON);
                     
                     if (result == IDYES) {
                         wchar_t tempPath[MAX_PATH];
@@ -760,14 +808,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                         if (DownloadUpdate(dlPath)) {
                             InstallUpdateAndRestart(dlPath, g_userPaused.load());
                         } else {
-                            MessageBoxW(hwnd, L"Download failed.", L"Error", MB_OK | MB_ICONERROR);
+                            ShowRichDialog(hwnd, L"Update Error", L"Download Failed", 
+                                L"Unable to download the update package.", TD_ERROR_ICON);
                         }
                     }
                 } else {
-                    MessageBoxW(hwnd, L"You have the latest version of PMan.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
+                    ShowRichDialog(hwnd, L"Update Check", L"You are up to date", 
+                        L"You have the latest version of PMan installed.", TD_INFORMATION_ICON);
                 }
             }).detach();
-        } 
+        }
         else if (wmId == ID_TRAY_APPLY_TWEAKS) {
             int result = MessageBoxW(hwnd, 
                 L"This will apply a set of one-time system optimizations.\n\n"
