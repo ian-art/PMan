@@ -391,10 +391,11 @@ void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
         if (SetProcessWorkingSetSizeEx(hProcess, minWS, maxWS, flags)) {
             last = { minWS, maxWS };
         } else {
-            // On failure, do not update cache so we retry
+            // [FIX] If Access Denied, cache the failure to prevent endless retries/log spam
             DWORD err = GetLastError();
-            if (err != ERROR_ACCESS_DENIED) {
-                 // Suppress log spam here too if needed, or rely on rate limiting implied by OnTick
+            if (err == ERROR_ACCESS_DENIED) {
+                 last = { minWS, maxWS }; // Pretend we succeeded so we don't retry
+                 if (m_config.debugLogging) Log("[EXPLORER] Access Denied for PID " + std::to_string(pid) + " - Ignoring.");
             }
         }
     }
