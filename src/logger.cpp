@@ -117,10 +117,25 @@ void InitLogger()
         if (std::filesystem::exists(logFile)) {
             // Append version to filename for better history tracking
             std::wstring ver = GetCurrentExeVersion();
-            std::wstring backupName = L"log.pman_" + ver + L".txt";
+
+            // Generate Timestamp
+            auto now = std::chrono::system_clock::now();
+            std::time_t t = std::chrono::system_clock::to_time_t(now);
+            struct tm timeinfo;
+            char timeBuf[64] = {0};
+            std::wstring wTime;
+
+            if (localtime_s(&timeinfo, &t) == 0) {
+                 if (std::strftime(timeBuf, sizeof(timeBuf), "_%Y-%m-%d_%H-%M-%S", &timeinfo)) {
+                     std::string sTime(timeBuf);
+                     wTime.assign(sTime.begin(), sTime.end());
+                 }
+            }
+
+            std::wstring backupName = L"log.pman_" + ver + wTime + L".txt";
             std::filesystem::path bakFile = dir / backupName;
 
-            // Remove existing file of same version if present (e.g. restart after crash)
+            // Remove existing file if present (Unlikely with timestamp, but safe to keep)
             if (std::filesystem::exists(bakFile)) {
                 std::filesystem::remove(bakFile);
             }
