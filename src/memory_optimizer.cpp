@@ -208,6 +208,12 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
                     }
                 }
 
+                // [FIX] Actually perform the trim and update counters
+                if (EmptyWorkingSet(hProc)) {
+                    trimmedCount++;
+                    totalFreedBytes += pmc.WorkingSetSize;
+                }
+                
                 m_processTracker[pid].lastTrimTime = now;
             }
         }
@@ -263,7 +269,7 @@ void MemoryOptimizer::RunThread() {
             MemorySnapshot snap = CollectSnapshot();
             
             // Trigger if RAM load > 85% OR Page Faults > 2000/sec
-            bool pressureHigh = (snap.memoryLoadPercent > 85 || snap.hardFaultsPerSec > HARD_FAULT_THRESHOLD);
+            bool pressureHigh = (snap.memoryLoadPercent > 80 || snap.hardFaultsPerSec > HARD_FAULT_THRESHOLD);
             
             if (pressureHigh) {
                 // Run Mitigation
