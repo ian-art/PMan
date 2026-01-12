@@ -150,6 +150,19 @@ bool MemoryOptimizer::IsTargetProcess(const std::wstring& procName) {
 }
 
 void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
+    // Resolve foreground process name to prevent cannibalizing child processes (e.g. Chrome Renderers)
+    std::wstring fgName;
+    HANDLE hFgProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, foregroundPid);
+    if (hFgProc) {
+        wchar_t fBuf[MAX_PATH];
+        DWORD fLen = MAX_PATH;
+        if (QueryFullProcessImageNameW(hFgProc, 0, fBuf, &fLen)) {
+            fgName = std::filesystem::path(fBuf).filename().wstring();
+            std::transform(fgName.begin(), fgName.end(), fgName.begin(), ::towlower);
+        }
+        CloseHandle(hFgProc);
+    }
+
     DWORD pids[4096], needed{};
     if (!EnumProcesses(pids, sizeof(pids), &needed)) return;
 
@@ -197,6 +210,12 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
                     // Critical Safety Check (Defender Safe)
                     // Explicitly prevent trimming AV or System processes
                     if (IsSystemCriticalProcess(name)) {
+                        CloseHandle(hProc);
+                        continue;
+                    }
+
+                    // [FIX] Safety: Don't trim child processes of the active application
+                    if (!fgName.empty() && name == fgName) {
                         CloseHandle(hProc);
                         continue;
                     }
