@@ -20,6 +20,7 @@
 #include "logger.h"
 #include "constants.h" // Required for WM_LOG_UPDATED
 #include "types.h"
+#include "utils.h"     // Required for GetCurrentExeVersion
 #include <windows.h>
 #include <sddl.h>   // Required for security descriptor string conversion
 #include <aclapi.h> // Required for security functions
@@ -107,6 +108,28 @@ void FlushLogger()
 void InitLogger()
 {
     EnsureLogDirectory();
+
+    // Rotate logs on startup: log.txt -> log.pman_<version>.txt
+    try {
+        std::filesystem::path dir = GetLogPath();
+        std::filesystem::path logFile = dir / L"log.txt";
+
+        if (std::filesystem::exists(logFile)) {
+            // Append version to filename for better history tracking
+            std::wstring ver = GetCurrentExeVersion();
+            std::wstring backupName = L"log.pman_" + ver + L".txt";
+            std::filesystem::path bakFile = dir / backupName;
+
+            // Remove existing file of same version if present (e.g. restart after crash)
+            if (std::filesystem::exists(bakFile)) {
+                std::filesystem::remove(bakFile);
+            }
+            std::filesystem::rename(logFile, bakFile);
+        }
+    } catch (...) {
+        // Ignore file access errors (e.g. if log is currently locked)
+    }
+
     g_loggerInitialized = true;
     Log("--- Logger Initialized (Circular Buffer Mode) ---");
 }
