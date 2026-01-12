@@ -165,9 +165,11 @@ void InputGuardian::BoostThread(DWORD tid, const char* debugTag) {
 }
 
 void InputGuardian::BoostDwmProcess() {
-    // Fix: Cache DWM threads to avoid high-frequency snapshotting (2000+ threads)
+    // [FIX] Use async update to prevent Main Thread freeze during snapshot
     static std::vector<DWORD> cachedThreads;
+    static std::mutex cacheMtx;
     static uint64_t lastCacheUpdate = 0;
+    static std::atomic<bool> isUpdating = false;
 
     // Refresh DWM PID occasionally in case of crash/restart
     uint64_t now = GetTickCount64();
@@ -178,29 +180,42 @@ void InputGuardian::BoostDwmProcess() {
 
     if (m_dwmPid == 0) return;
 
-    // [PERF FIX] Rate limit actual boosting to 5s (prevents syscall storm)
+    // Rate limit actual boosting application
     static uint64_t lastBoostApply = 0;
     if (now - lastBoostApply < 5000) return;
     lastBoostApply = now;
 
-    // Update thread cache only every 30s
-    if (now - lastCacheUpdate > 30000 || cachedThreads.empty()) {
-        cachedThreads.clear();
-        UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0));
-        if (hSnap.get() != INVALID_HANDLE_VALUE) {
-            THREADENTRY32 te = {sizeof(te)};
-            if (Thread32First(hSnap.get(), &te)) {
-                do {
-                    if (te.th32OwnerProcessID == m_dwmPid) {
-                        cachedThreads.push_back(te.th32ThreadID);
-                    }
-                } while (Thread32Next(hSnap.get(), &te));
+    // Async Update Trigger
+    if (!isUpdating && (now - lastCacheUpdate > 30000 || cachedThreads.empty())) {
+        isUpdating = true;
+        DWORD targetPid = m_dwmPid; // Capture for lambda
+        
+        std::thread([targetPid]() {
+            std::vector<DWORD> newThreads;
+            UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0));
+            if (hSnap.get() != INVALID_HANDLE_VALUE) {
+                THREADENTRY32 te = {sizeof(te)};
+                if (Thread32First(hSnap.get(), &te)) {
+                    do {
+                        if (te.th32OwnerProcessID == targetPid) {
+                            newThreads.push_back(te.th32ThreadID);
+                        }
+                    } while (Thread32Next(hSnap.get(), &te));
+                }
             }
-        }
-        lastCacheUpdate = now;
+            
+            // Swap safely
+            {
+                std::lock_guard<std::mutex> lock(cacheMtx);
+                cachedThreads = std::move(newThreads);
+                lastCacheUpdate = GetTickCount64();
+            }
+            isUpdating = false;
+        }).detach();
     }
 
-    // Boost cached threads
+    // Boost cached threads (Thread-Safe Read)
+    std::lock_guard<std::mutex> lock(cacheMtx);
     for (DWORD tid : cachedThreads) {
         BoostThread(tid, "DWM");
     }
