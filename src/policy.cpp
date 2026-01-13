@@ -41,7 +41,8 @@ struct PolicyJob {
     HWND hwnd; 
 };
 
-static std::vector<PolicyJob> g_policyQueue;
+#include <deque>
+static std::deque<PolicyJob> g_policyQueue;
 static std::mutex g_policyQueueMtx;
 static std::condition_variable g_policyCv;
 static std::atomic<bool> g_workerRunning{false};
@@ -816,7 +817,7 @@ void EvaluateAndSetPolicy(DWORD pid, HWND hwnd)
                     });
                     if (!g_running) break;
                     job = g_policyQueue.front();
-                    g_policyQueue.erase(g_policyQueue.begin());
+                    g_policyQueue.pop_front();
                 }
                 // Process job with extracted logic
                 PolicyWorkerThread(job.pid, job.hwnd);
