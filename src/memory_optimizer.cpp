@@ -151,9 +151,17 @@ bool MemoryOptimizer::IsTargetProcess(const std::wstring& procName) {
 }
 
 void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
-    // Resolve foreground process name to prevent cannibalizing child processes (e.g. Chrome Renderers)
-    std::wstring fgName;
-    HANDLE hFgProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, foregroundPid);
+    // Rate limit to once per minute
+    static uint64_t lastMitigation = 0;
+    uint64_t nowTick = GetTickCount64();
+    if (nowTick - lastMitigation < 60000) return;
+    lastMitigation = nowTick;
+
+    // Offload to background thread
+    std::thread([this, foregroundPid]() {
+        // Resolve foreground process name to prevent cannibalizing child processes (e.g. Chrome Renderers)
+        std::wstring fgName;
+        HANDLE hFgProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, foregroundPid);
     if (hFgProc) {
         wchar_t fBuf[MAX_PATH];
         DWORD fLen = MAX_PATH;
@@ -228,10 +236,13 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
                     }
                 }
 
-                // [FIX] Actually perform the trim and update counters
-                if (EmptyWorkingSet(hProc)) {
+                // Gentler trim logic
+                SIZE_T targetSize = (pmc.WorkingSetSize > 200 * 1024 * 1024) ? 
+                    static_cast<SIZE_T>(pmc.WorkingSetSize * 0.8) : pmc.WorkingSetSize;
+
+                if (SetProcessWorkingSetSize(hProc, targetSize, pmc.WorkingSetSize)) {
                     trimmedCount++;
-                    totalFreedBytes += pmc.WorkingSetSize;
+                    totalFreedBytes += (pmc.WorkingSetSize - targetSize);
                 }
                 
                 m_processTracker[pid].lastTrimTime = now;
@@ -254,12 +265,31 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
             m_lastPurgeTime = now;
         }
     }
+    // End of background thread
+    }).detach();
 }
 
 void MemoryOptimizer::RunThread() {
     Log("[MEMOPT] Background Monitor Thread Started");
 
     while (m_running) {
+        // Cleanup dead processes every hour to prevent map bloat
+        static uint64_t lastCleanup = 0;
+        uint64_t nowTick = GetTickCount64();
+        if (nowTick - lastCleanup > 3600000) {
+            for (auto it = m_processTracker.begin(); it != m_processTracker.end(); ) {
+                HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, it->first);
+                bool dead = (!hProc);
+                if (hProc) {
+                    DWORD exitCode = 0;
+                    if (!GetExitCodeProcess(hProc, &exitCode) || exitCode != STILL_ACTIVE) dead = true;
+                    CloseHandle(hProc);
+                }
+                if (dead) it = m_processTracker.erase(it); else ++it;
+            }
+            lastCleanup = nowTick;
+        }
+
         // 1. Check Pause State
         if (g_userPaused.load() || g_isSuspended.load()) {
             Sleep(1000);
