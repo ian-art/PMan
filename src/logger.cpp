@@ -189,8 +189,12 @@ void Log(const std::string& msg)
     // Only flush to disk if the Log Viewer is actually open (Debugging Mode).
     // Otherwise, keep logs in RAM to prevent disk activity.
     static HWND hViewer = nullptr;
+    static std::mutex viewerMtx; // FIX: Protect static state from data races
     
     // Fix: Rate limit Window search to avoid system-wide iteration on every log line
+    // Double-checked locking optimization not strictly needed here given the frequency
+    std::lock_guard<std::mutex> lock(viewerMtx);
+
     if (!IsWindow(hViewer)) {
          static DWORD lastCheckTick = 0;
          DWORD currentTick = GetTickCount();
