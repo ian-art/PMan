@@ -23,6 +23,7 @@
 #include "utils.h"
 #include <psapi.h>
 #include <pdhmsg.h>
+#include <tlhelp32.h> // Required for Snapshot
 #include <iostream>
 #include <algorithm>
 
@@ -265,7 +266,32 @@ void MemoryOptimizer::RunThread() {
             continue;
         }
 
-        // 2. Identify Foreground
+        // 2. Browser Check: Abort logic if ANY browser is running (User Constraint)
+        bool browserRunning = false;
+        {
+            // Scope for snapshot handles
+            HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if (hSnap != INVALID_HANDLE_VALUE) {
+                PROCESSENTRY32W pe = { sizeof(pe) };
+                if (Process32FirstW(hSnap, &pe)) {
+                    do {
+                        std::shared_lock<std::shared_mutex> lock(g_setMtx);
+                        if (g_browsers.find(pe.szExeFile) != g_browsers.end()) {
+                            browserRunning = true;
+                            break;
+                        }
+                    } while (Process32NextW(hSnap, &pe));
+                }
+                CloseHandle(hSnap);
+            }
+        }
+
+        if (browserRunning) {
+            Sleep(2000); // Check again later
+            continue; 
+        }
+
+        // 3. Identify Foreground
         HWND hFg = GetForegroundWindow();
         DWORD fgPid = 0;
         GetWindowThreadProcessId(hFg, &fgPid);
@@ -282,7 +308,7 @@ void MemoryOptimizer::RunThread() {
         }
         std::transform(fgName.begin(), fgName.end(), fgName.begin(), ::towlower);
 
-        // 3. Check if target active (Game or Browser)
+        // 4. Check if target active (Game)
         if (IsTargetProcess(fgName)) {
             // Monitor Logic
             MemorySnapshot snap = CollectSnapshot();
