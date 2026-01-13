@@ -361,9 +361,8 @@ void LoadConfig()
     auto last = g_lastConfigReload.load();
     
 	// Debounce check
-    // Reduced to 200ms to allow "correction" updates if the first file-change event read stale data
-    // (Common with editors that use temp files or UAC elevation like Notepad++)
-    static constexpr int CONFIG_RELOAD_DEBOUNCE_MS = 200; 
+    // Increased to 1000ms to prevent thrashing with atomic-save editors
+    static constexpr int CONFIG_RELOAD_DEBOUNCE_MS = 1000; 
     if (last != 0)
     {
         auto elapsed_ms = (now - last) / 1000000;
