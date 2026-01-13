@@ -253,8 +253,13 @@ void ExplorerBooster::UpdateBoostState() {
     }
     ExplorerBoostState targetState = shouldBoost ? ExplorerBoostState::IdleBoosted : ExplorerBoostState::Default;
 
-	// CRITICAL: Check if we need to transition states
-    if (m_currentState != targetState) {
+    // Add 5-second hysteresis to prevent rapid toggling
+    static uint64_t lastStateChange = 0;
+    uint64_t currentTime = GetTickCount64();
+
+    // CRITICAL: Check if we need to transition states
+    if (m_currentState != targetState && (currentTime - lastStateChange > 5000)) {
+        lastStateChange = currentTime;
         std::lock_guard lock(m_mtx);
         
         // FORCE LOG: Always log state transitions, regardless of debug_logging setting.
