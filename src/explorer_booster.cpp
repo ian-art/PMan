@@ -118,7 +118,10 @@ void ExplorerBooster::OnTick() {
         uint32_t effectiveInterval = (now - m_lastUserActivityMs.load() > 60000) ? 30000 : scanInterval;
 
         if (now - m_lastScanMs > effectiveInterval) {
-            ScanShellProcesses();
+            // FIX: Offload snapshot to background thread to prevent UI micro-stutters
+            std::thread([this] {
+                ScanShellProcesses(); 
+            }).detach();
             m_lastScanMs = now;
         }
     }
