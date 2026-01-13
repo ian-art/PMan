@@ -166,11 +166,23 @@ DWORD GetCurrentPrioritySeparation()
 return (rc == ERROR_SUCCESS) ? val : 0xFFFFFFFF;
 }
 
+// Cache anti-cheat PIDs for 60 seconds to reduce syscall overhead
+static std::unordered_map<DWORD, uint64_t> g_antiCheatCache;
+static std::mutex g_antiCheatCacheMtx;
+
 bool IsAntiCheatProtected(DWORD pid)
 {
+    {
+        std::lock_guard lock(g_antiCheatCacheMtx);
+        uint64_t now = GetTickCount64();
+        auto it = g_antiCheatCache.find(pid);
+        if (it != g_antiCheatCache.end()) {
+            if (now - it->second < 60000) return true; // Still cached
+            g_antiCheatCache.erase(it);
+        }
+    }
+
     // 1. Check Process Name first (Cheap)
-    // This relies on the consolidated list in IsAntiCheatProcess. 
-    // Fallback to module snapshot is disabled by default to prevent system-wide lag.
     ProcessIdentity identity;
     if (GetProcessIdentity(pid, identity)) {
         UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
@@ -178,8 +190,12 @@ bool IsAntiCheatProtected(DWORD pid)
             wchar_t path[MAX_PATH];
             DWORD sz = MAX_PATH;
             if (QueryFullProcessImageNameW(hProc.get(), 0, path, &sz)) {
-                if (IsAntiCheatProcess(ExeFromPath(path))) return true;
+            if (IsAntiCheatProcess(ExeFromPath(path))) {
+                std::lock_guard lock(g_antiCheatCacheMtx);
+                g_antiCheatCache[pid] = GetTickCount64();
+                return true;
             }
+        }
         }
     }
     
