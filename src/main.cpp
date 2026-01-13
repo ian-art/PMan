@@ -44,6 +44,10 @@
 #include <shellapi.h> // Required for CommandLineToArgvW
 #include <commctrl.h> // For Edit Control in Live Log
 #include <fstream>    // Required for std::ofstream
+#include <deque>
+#include <mutex>
+#include <condition_variable>
+#include <functional>
 
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "User32.lib")
@@ -62,6 +66,33 @@ HINSTANCE g_hInst = nullptr;
 static UINT g_wmTaskbarCreated = 0;
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
+
+// --- Background Worker for Async Tasks ---
+static std::thread g_backgroundWorker;
+static std::mutex g_backgroundQueueMtx;
+static std::deque<std::function<void()>> g_backgroundTasks;
+static std::condition_variable g_backgroundCv;
+static std::atomic<bool> g_backgroundRunning{ true };
+
+static void BackgroundWorkerThread() {
+    while (g_backgroundRunning.load()) {
+        std::function<void()> task;
+        {
+            std::unique_lock<std::mutex> lock(g_backgroundQueueMtx);
+            g_backgroundCv.wait(lock, [] {
+                return !g_backgroundTasks.empty() || !g_backgroundRunning.load();
+            });
+
+            if (!g_backgroundRunning.load() && g_backgroundTasks.empty()) break;
+
+            if (!g_backgroundTasks.empty()) {
+                task = std::move(g_backgroundTasks.front());
+                g_backgroundTasks.pop_front();
+            }
+        }
+        if (task) task();
+    }
+}
 
 // --- Helper: Detect External Editors (Notepad++, VS Code, etc.) ---
 static std::wstring GetRegisteredAppPath(const wchar_t* exeName) {
@@ -1163,6 +1194,10 @@ if (!taskExists)
     
     std::thread configThread(IocpConfigWatcher);
     PinBackgroundThread(configThread);
+
+    // Initialize unified background worker
+    g_backgroundWorker = std::thread(BackgroundWorkerThread);
+    PinBackgroundThread(g_backgroundWorker);
     Sleep(100); // [POLISH] Stagger start
     
     std::thread etwThread;
@@ -1309,11 +1344,15 @@ if (!taskExists)
         
 		if (g_reloadNow.exchange(false))
         {
-            // [PERF FIX] Move blocking sleep/load to background thread
-            std::thread([]() {
-                Sleep(250);
-                LoadConfig();
-            }).detach();
+            // [PERF FIX] Offload to persistent worker thread
+            {
+                std::lock_guard<std::mutex> lock(g_backgroundQueueMtx);
+                g_backgroundTasks.push_back([]() {
+                    Sleep(250);
+                    LoadConfig();
+                });
+            }
+            g_backgroundCv.notify_one();
         }
 
         // Safety check: ensure services are not left suspended
@@ -1342,10 +1381,14 @@ if (!taskExists)
             if ((now - g_lastExplorerPollMs) >= pollIntervalMs) {
                 g_explorerBooster.OnTick();
                 
-                // FIX: Offload Performance Tick to background thread to protect Keyboard Hook (Input Latency)
-                std::thread([]{
-                    g_perfGuardian.OnPerformanceTick();
-                }).detach();
+                // FIX: Offload to persistent worker thread to protect Keyboard Hook
+                {
+                    std::lock_guard<std::mutex> lock(g_backgroundQueueMtx);
+                    g_backgroundTasks.push_back([]{ 
+                        g_perfGuardian.OnPerformanceTick(); 
+                    });
+                }
+                g_backgroundCv.notify_one();
 				
 				// Run Service Watcher
                 ServiceWatcher::OnTick();
@@ -1380,6 +1423,11 @@ if (!taskExists)
     StopEtwSession(); // Unblocks EtwThread (ProcessTrace returns)
     PostShutdown(); // Wakes IocpConfigWatcher
     
+    // Stop background worker
+    g_backgroundRunning = false;
+    g_backgroundCv.notify_all();
+    if (g_backgroundWorker.joinable()) g_backgroundWorker.join();
+
     if (configThread.joinable()) configThread.join();
     if (etwThread.joinable()) etwThread.join();
     if (watchdogThread.joinable()) watchdogThread.join();
