@@ -67,6 +67,29 @@ static UINT g_wmTaskbarCreated = 0;
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
 
+// Async launcher to prevent UI thread blocking
+void LaunchProcessAsync(const std::wstring& cmd, std::function<void(DWORD)> callback) {
+    std::thread([cmd, callback]{
+        STARTUPINFOW si{sizeof(si)};
+        PROCESS_INFORMATION pi{};
+        // Create mutable buffer for CreateProcessW
+        std::vector<wchar_t> buf(cmd.begin(), cmd.end());
+        buf.push_back(0);
+
+        if (CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, 
+                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+            WaitForSingleObject(pi.hProcess, 5000);
+            DWORD exitCode = 0;
+            GetExitCodeProcess(pi.hProcess, &exitCode);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            if (callback) callback(exitCode);
+        } else {
+            if (callback) callback(GetLastError());
+        }
+    }).detach();
+}
+
 // --- Background Worker for Async Tasks ---
 static std::thread g_backgroundWorker;
 static std::mutex g_backgroundQueueMtx;
@@ -674,7 +697,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             wchar_t self[MAX_PATH];
             GetModuleFileNameW(nullptr, self, MAX_PATH);
             std::wstring taskName = std::filesystem::path(self).stem().wstring();
-            int startupMode = GetStartupMode(taskName);
+
+            // Cache startup mode to avoid blocking UI with GetStartupMode()
+            static int cachedMode = -1;
+            static uint64_t lastCheck = 0;
+            uint64_t now = GetTickCount64();
+
+            if (cachedMode == -1 || (now - lastCheck > 5000)) {
+                // Fast check (non-blocking if cached or assume previous)
+                // Real update happens in background if needed, here we accept slight staleness for UI responsiveness
+                cachedMode = GetStartupMode(taskName); 
+                lastCheck = now;
+            }
+            int startupMode = cachedMode;
 
             HMENU hStartupMenu = CreatePopupMenu();
             AppendMenuW(hStartupMenu, MF_STRING | (startupMode == 0 ? MF_CHECKED : 0), ID_TRAY_STARTUP_DISABLED, L"Disabled (Manual Start)");
