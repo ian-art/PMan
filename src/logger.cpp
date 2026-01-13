@@ -185,33 +185,23 @@ void Log(const std::string& msg)
         }
     }
 
-    // Telemetry Safety
-    // Only flush to disk if the Log Viewer is actually open (Debugging Mode).
-    // Otherwise, keep logs in RAM to prevent disk activity.
-    static HWND hViewer = nullptr;
-    static std::mutex viewerMtx; // FIX: Protect static state from data races
-    
-    // Fix: Rate limit Window search to avoid system-wide iteration on every log line
-    // Double-checked locking optimization not strictly needed here given the frequency
-    std::lock_guard<std::mutex> lock(viewerMtx);
+    // Rate limit flush to 5 seconds to reduce disk I/O
+    static uint64_t lastFlushCheck = 0;
+    uint64_t nowTicks = GetTickCount64();
+    if (nowTicks - lastFlushCheck < 5000) return;
+    lastFlushCheck = nowTicks;
 
-    if (!IsWindow(hViewer)) {
-         static DWORD lastCheckTick = 0;
-         DWORD currentTick = GetTickCount();
-         if (currentTick - lastCheckTick > 2000) {
-             hViewer = FindWindowW(L"PManLogViewer", nullptr);
-             lastCheckTick = currentTick;
-         }
+    static HWND hViewer = nullptr;
+    static DWORD lastViewerCheck = 0;
+
+    // Check for viewer window existence every 2s
+    if (nowTicks - lastViewerCheck > 2000) {
+        hViewer = FindWindowW(L"PManLogViewer", nullptr);
+        lastViewerCheck = static_cast<DWORD>(nowTicks);
     }
-    
+
     if (hViewer && IsWindowVisible(hViewer)) {
-        // [PERF FIX] Rate limit disk flushing to 1 second
-        static uint64_t lastFlush = 0;
-        uint64_t nowTick = GetTickCount64();
-        if (nowTick - lastFlush > 1000) {
-            FlushLogger();
-            PostMessageW(hViewer, WM_LOG_UPDATED, 0, 0);
-            lastFlush = nowTick;
-        }
+        FlushLogger(); 
+        PostMessageW(hViewer, WM_LOG_UPDATED, 0, 0);
     }
 }
