@@ -814,7 +814,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     }
                 } else {
                     ShowRichDialog(hwnd, L"Update Check", L"You are up to date", 
-                        L"You have the latest version of PMan installed.", TD_INFORMATION_ICON);
+                        L"You have the latest version of PMan.", TD_INFORMATION_ICON);
                 }
             }).detach();
         }
@@ -1341,8 +1341,11 @@ if (!taskExists)
 			// Rate limit the tick calls to prevent CPU spinning
             if ((now - g_lastExplorerPollMs) >= pollIntervalMs) {
                 g_explorerBooster.OnTick();
-                // FIX: Drive Performance Guardian for non-ETW games (DX9)
-                g_perfGuardian.OnPerformanceTick();
+                
+                // FIX: Offload Performance Tick to background thread to protect Keyboard Hook (Input Latency)
+                std::thread([]{
+                    g_perfGuardian.OnPerformanceTick();
+                }).detach();
 				
 				// Run Service Watcher
                 ServiceWatcher::OnTick();
