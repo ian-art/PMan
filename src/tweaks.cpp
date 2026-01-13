@@ -94,12 +94,18 @@ bool SetPrioritySeparation(DWORD val)
     // CRITICAL FIX: Prevent registry corruption during power state transitions
     if (g_isSuspended.load()) return false;
 
+    // Global throttle: max 1 write per second
+    static DWORD g_lastPriorityTick = 0;
+    static std::atomic<DWORD> g_lastPriorityValue{0xFFFFFFFF};
+
+    DWORD now = GetTickCount();
+    // If value hasn't changed AND it's been less than 1s, skip
+    if (now - g_lastPriorityTick < 1000 && g_lastPriorityValue.load() == val) return true;
+
     // Registry Write Guard
     DWORD cachedVal = g_cachedRegistryValue.load();
     if (cachedVal != 0xFFFFFFFF && cachedVal == val)
     {
-        Log("Registry Write Guard: Skipping redundant write for value 0x" + 
-            std::to_string(val) + " (already cached)");
         return true;
     }
     
@@ -141,8 +147,8 @@ HKEY rawKey = nullptr;
     if (rc == ERROR_SUCCESS)
     {
         g_cachedRegistryValue.store(val);
-        // Optimization: Removed Sleep(50) and verification to prevent registry hammering.
-        // The Anti-Interference Watchdog will catch discrepancies asynchronously.
+        g_lastPriorityValue.store(val);
+        g_lastPriorityTick = now;
         return true;
     }
     else
