@@ -29,17 +29,25 @@ void ServiceWatcher::Initialize() {
     Log("[WATCHER] Service Watcher initialized (Mode: Auto-Trim Manual Services)");
 }
 
+// Static atomic guard to prevent thread stacking
+static std::atomic<bool> s_scanInProgress{false};
+
 void ServiceWatcher::OnTick() {
     if (!g_suspendUpdatesDuringGames.load()) return;
-    
+
     static uint64_t lastCheck = 0;
     uint64_t now = GetTickCount64();
     if (now - lastCheck < 30000) return; 
+
+    // Skip if previous scan is still running
+    if (s_scanInProgress.exchange(true)) return;
+
     lastCheck = now;
 
     // FIX: Offload SCM operations to background thread to prevent Main Thread lag
     std::thread([]{
         ScanAndTrimManualServices();
+        s_scanInProgress.store(false); // Release lock
     }).detach();
 }
 
