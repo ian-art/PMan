@@ -46,6 +46,17 @@ static ProcessNetClass ClassifyProcessActivity(DWORD pid, const std::wstring& ex
             return ProcessNetClass::UserCritical;
     }
 
+    // [FIX] Prevent display/shell artifacts during wake-up race conditions
+    // Identify GPU drivers and Shell processes as System Critical to ensure wake responsiveness
+    if (exeName == L"explorer.exe" || exeName == L"lockapp.exe" ||
+        ContainsIgnoreCase(exeName, L"nvidia") || 
+        ContainsIgnoreCase(exeName, L"radeon") || 
+        ContainsIgnoreCase(exeName, L"amdrsserv") ||
+        ContainsIgnoreCase(exeName, L"igfx"))
+    {
+        return ProcessNetClass::SystemCritical;
+    }
+
     // 3. Heuristic Classification
     if (exeName == L"discord.exe" || exeName == L"teams.exe" || exeName == L"zoom.exe" || 
         exeName == L"obs64.exe" || exeName == L"obs.exe") 
