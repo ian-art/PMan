@@ -160,13 +160,10 @@ static void WINAPI DpcIsrCallback(EVENT_RECORD* rec) {
                     
                     memcpy(snapshot, dpcRingBuffer, safeCount * sizeof(uint64_t));
                     
-                    // Calculate 95th percentile index
-                    size_t idx = (safeCount * 95) / 100;
-                    
-                    // Safety clamp
-                    if (idx >= safeCount) {
-                        idx = safeCount - 1;
-                    }
+                    // Safer 0-based percentile calculation
+                size_t idx = (safeCount > 0) ? ((safeCount - 1) * 95) / 100 : 0;
+
+                if (idx >= safeCount) idx = safeCount - 1;
                     
                     // --- C6385 FIX: Redundant check for static analyzer ---
                     if (idx >= safeCount) return;
