@@ -112,19 +112,13 @@ void ServiceWatcher::ScanAndTrimManualServices() {
                     if (config->dwStartType == SERVICE_DEMAND_START) {
                         
                         // 4. Heuristic: Is it truly idle?
+                        // FIX: Removed Sleep(500) and double-check to prevent blocking the Main UI Thread.
                         if (IsProcessIdle(pid)) {
+                            Log("[AUTO-TRIM] Stopping idle manual service: " + WideToUtf8(svcName.c_str()));
                             
-                            // 5. Safety: Anti-Race Condition (Review Point 1)
-                            // Wait 500ms and re-check to ensure it didn't just wake up
-                            Sleep(500); 
-                            
-                            if (IsProcessIdle(pid)) {
-                                Log("[AUTO-TRIM] Stopping idle manual service: " + WideToUtf8(svcName.c_str()));
-                                
-                                // Register & Stop using Operational Bypass
-                                if (g_serviceManager.AddService(svcName, SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP)) {
-                                    g_serviceManager.SuspendService(svcName, WindowsServiceManager::BypassMode::Operational); 
-                                }
+                            // Register & Stop using Operational Bypass
+                            if (g_serviceManager.AddService(svcName, SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP)) {
+                                g_serviceManager.SuspendService(svcName, WindowsServiceManager::BypassMode::Operational); 
                             }
                         }
                     }
