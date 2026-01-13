@@ -61,6 +61,12 @@ void NetworkMonitor::Stop() {
 // Lightweight probe: Pings Cloudflare (1.1.1.1) and Google (8.8.8.8)
 // Returns TRUE if connection is STABLE (<150ms, no loss)
 bool NetworkMonitor::PerformLatencyProbe() {
+    // Cache result for 30s to reduce ICMP spam
+    static uint64_t lastCheck = 0;
+    static bool lastResult = false;
+    uint64_t now = GetTickCount64();
+    if (now - lastCheck < 30000) return lastResult;
+
     HANDLE hIcmp = IcmpCreateFile();
     if (hIcmp == INVALID_HANDLE_VALUE) return false;
 
@@ -92,7 +98,9 @@ bool NetworkMonitor::PerformLatencyProbe() {
     if (successCount == 0) return false; // Both failed/timeout -> Unstable
     
     DWORD avgLatency = totalTime / successCount;
-    return (avgLatency <= 150);
+    lastResult = (avgLatency <= 150);
+    lastCheck = now;
+    return lastResult;
 }
 
 bool NetworkMonitor::ExecuteNetCommand(const wchar_t* cmd) {
