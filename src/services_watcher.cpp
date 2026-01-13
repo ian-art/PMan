@@ -37,7 +37,10 @@ void ServiceWatcher::OnTick() {
     if (now - lastCheck < 30000) return; 
     lastCheck = now;
 
-    ScanAndTrimManualServices();
+    // FIX: Offload SCM operations to background thread to prevent Main Thread lag
+    std::thread([]{
+        ScanAndTrimManualServices();
+    }).detach();
 }
 
 // Check if other running services depend on this one
