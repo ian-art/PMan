@@ -279,6 +279,10 @@ void PerformanceGuardian::OnPerformanceTick() {
     std::lock_guard lock(m_mtx);
     uint64_t now = GetTickCount64();
 
+    // Global rate limit: Max 1 CPU estimation per tick to save resources
+    static uint64_t lastGlobalEst = 0;
+    bool allowEst = (now - lastGlobalEst > 250); 
+
     for (auto& pair : m_sessions) {
         GameSession& session = pair.second;
         
@@ -287,8 +291,10 @@ void PerformanceGuardian::OnPerformanceTick() {
         bool isSilent = session.frameHistory.empty() || 
                        (now * 10000 - session.frameHistory.back().timestamp > 10000000); 
 
-		if (isSilent) {
+		if (isSilent && allowEst) {
             EstimateFrameTimeFromCPU(session.pid);
+            lastGlobalEst = now; // Consume token
+            allowEst = false;    // Only one per tick
         }
 
         // 2. Drive the Learning Loop manually
