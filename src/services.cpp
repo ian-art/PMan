@@ -65,11 +65,20 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
     if (m_services.find(serviceName) != m_services.end())
         return true;
     
-    ServiceState state;
-    state.name = serviceName;
-    state.handle = OpenServiceW(m_scManager, serviceName.c_str(), accessRights);
-    
-    if (!state.handle)
+    // RAII Wrapper for safety
+    class ServiceHandleGuard {
+        SC_HANDLE h_;
+    public:
+        ServiceHandleGuard(SC_HANDLE h) : h_(h) {}
+        ~ServiceHandleGuard() { if (h_) CloseServiceHandle(h_); }
+        SC_HANDLE release() { SC_HANDLE tmp = h_; h_ = nullptr; return tmp; }
+        operator SC_HANDLE() const { return h_; }
+        operator bool() const { return h_ != nullptr; }
+    };
+
+    ServiceHandleGuard safeHandle(OpenServiceW(m_scManager, serviceName.c_str(), accessRights));
+
+    if (!safeHandle)
     {
         DWORD err = GetLastError();
         if (err == ERROR_SERVICE_DOES_NOT_EXIST)
@@ -84,6 +93,12 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
         return false;
     }
     
+    ServiceState state;
+    state.handle = safeHandle;
+    state.isDisabled = false;
+    state.action = ServiceAction::None;
+    state.originalState = SERVICE_STOPPED;
+	
 	// Check if service is disabled
     DWORD bytesNeeded = 0;
     // FIX: Check return value (C6031)
@@ -103,8 +118,7 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
         {
             state.isDisabled = true;
             Log("[SERVICE] Service '" + WideToUtf8(serviceName.c_str()) + "' is disabled - will skip");
-            CloseServiceHandle(state.handle);
-            state.handle = nullptr;
+            // safeHandle destructor closes it automatically
             m_services[serviceName] = state;
             return false;
         }
@@ -112,11 +126,13 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
     
     // Query original state
     SERVICE_STATUS status;
-    if (QueryServiceStatus(state.handle, &status))
+    if (QueryServiceStatus(safeHandle, &status))
     {
         state.originalState = status.dwCurrentState;
     }
-    
+
+    // Transfer ownership to state object
+    state.handle = safeHandle.release();
     m_services[serviceName] = state;
     Log("[SERVICE] Added service: " + WideToUtf8(serviceName.c_str()));
     return true;
@@ -425,7 +441,7 @@ void SuspendBackgroundServices()
     // Add services to manage
     bool hasAnyService = false;
     
-    // [SAFETY PATCH] Removed wuauserv and BITS to prevent OS corruption
+    // Removed wuauserv and BITS to prevent OS corruption
     /*
     if (g_serviceManager.AddService(L"wuauserv", 
         SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
