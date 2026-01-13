@@ -232,15 +232,22 @@ void IdleAffinityManager::SetProcessIdleAffinity(DWORD pid, DWORD_PTR targetMask
 
 void IdleAffinityManager::RestoreAllAffinity()
 {
-    std::lock_guard lock(m_mtx);
-    if (m_originalAffinity.empty()) return;
+    // Offload to detached thread to prevent Main Thread freeze
+    std::thread([this]() {
+        std::lock_guard lock(m_mtx);
+        if (m_originalAffinity.empty()) return;
 
-    for (const auto& [pid, originalMask] : m_originalAffinity)
-    {
-        UniqueHandle hProcess(OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid));
-        if (hProcess) {
-            SetProcessAffinityMask(hProcess.get(), originalMask);
+        int processed = 0;
+        for (const auto& [pid, originalMask] : m_originalAffinity)
+        {
+            UniqueHandle hProcess(OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid));
+            if (hProcess) {
+                SetProcessAffinityMask(hProcess.get(), originalMask);
+            }
+
+            // Yield every 5 processes to allow scheduler recovery
+            if (++processed % 5 == 0) Sleep(20); 
         }
-    }
-    m_originalAffinity.clear();
+        m_originalAffinity.clear();
+    }).detach();
 }
