@@ -186,7 +186,8 @@ void InputGuardian::BoostDwmProcess() {
     lastBoostApply = now;
 
     // Async Update Trigger
-    if (!isUpdating && (now - lastCacheUpdate > 30000 || cachedThreads.empty())) {
+    // [OPTIMIZATION] Cache valid for 60 seconds (DWM threads rarely change)
+    if (!isUpdating && (now - lastCacheUpdate > 60000 || cachedThreads.empty())) {
         isUpdating = true;
         DWORD targetPid = m_dwmPid; // Capture for lambda
         

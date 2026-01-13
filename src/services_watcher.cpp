@@ -37,7 +37,8 @@ void ServiceWatcher::OnTick() {
 
     static uint64_t lastCheck = 0;
     uint64_t now = GetTickCount64();
-    if (now - lastCheck < 30000) return; 
+    // [OPTIMIZATION] Increased interval to 300s (5 minutes) to reduce SCM locking
+    if (now - lastCheck < 300000) return; 
 
     // Skip if previous scan is still running
     if (s_scanInProgress.exchange(true)) return;

@@ -102,41 +102,42 @@ using namespace std::string_literals;
 
 int DetectWindowType(HWND hwnd)
 {
-    if (!hwnd) return 0;
+    if (!hwnd || !IsWindow(hwnd)) return 0;
     
     wchar_t title[512] = {};
     wchar_t className[256] = {};
     
-    GetWindowTextW(hwnd, title, 512);
-    GetClassNameW(hwnd, className, 256);
+    // [FIX] Use SendMessageTimeout for title to prevent hanging on frozen windows
+    DWORD_PTR result = 0;
+    if (!SendMessageTimeoutW(hwnd, WM_GETTEXT, 512, reinterpret_cast<LPARAM>(title), 
+                            SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT, 200, &result)) {
+        return 0; // Window hung or failed, skip
+    }
+
+    // GetClassName is generally safe (kernel property), but we add error check
+    if (!GetClassNameW(hwnd, className, 256)) return 0;
     
     std::wstring titleStr = title;
     std::wstring classStr = className;
     
-    // Convert to lowercase once (optimization)
+    // Optimization: Early exit for empty strings
+    if (titleStr.empty() && classStr.empty()) return 0;
+
     asciiLower(titleStr);
     asciiLower(classStr);
     
     std::shared_lock lg(g_setMtx);
     
-    // Fix Use direct find() since strings are already lowercased (avoids allocs)
     for (const auto& pattern : g_gameWindows)
     {
         if (titleStr.find(pattern) != std::wstring::npos || 
-            classStr.find(pattern) != std::wstring::npos)
-        {
-            return 1;
-        }
+            classStr.find(pattern) != std::wstring::npos) return 1;
     }
     
-    // Check browser windows
     for (const auto& pattern : g_browserWindows)
     {
         if (titleStr.find(pattern) != std::wstring::npos || 
-            classStr.find(pattern) != std::wstring::npos)
-        {
-            return 2;
-        }
+            classStr.find(pattern) != std::wstring::npos) return 2;
     }
     
     return 0;

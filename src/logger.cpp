@@ -200,8 +200,15 @@ void Log(const std::string& msg)
         lastViewerCheck = static_cast<DWORD>(nowTicks);
     }
 
+    // [OPTIMIZATION] Async flush trigger
+    // Flushes to disk in a background thread to prevent Main Thread UI lag
     if (hViewer && IsWindowVisible(hViewer)) {
-        FlushLogger(); 
-        PostMessageW(hViewer, WM_LOG_UPDATED, 0, 0);
+        std::thread([]() {
+            FlushLogger(); 
+            // Fix C4456: Renamed local variable 'hTarget' to avoid shadowing static 'hViewer'
+            if (HWND hTarget = FindWindowW(L"PManLogViewer", nullptr)) {
+                PostMessageW(hTarget, WM_LOG_UPDATED, 0, 0);
+            }
+        }).detach();
     }
 }

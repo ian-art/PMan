@@ -1062,103 +1062,139 @@ void SetPriorityBoostControl(DWORD pid, int mode)
     CloseHandle(hProcess);
 }
 
+// NT API Definitions for high-performance thread enumeration
+// [FIX] Renamed structs to avoid redefinition errors with <winternl.h>
+typedef struct _PMAN_SYSTEM_THREAD_INFORMATION {
+    LARGE_INTEGER KernelTime;
+    LARGE_INTEGER UserTime;
+    LARGE_INTEGER CreateTime;
+    ULONG WaitTime;
+    PVOID StartAddress;
+    CLIENT_ID ClientId;
+    KPRIORITY Priority;
+    LONG BasePriority;
+    ULONG ContextSwitches;
+    ULONG ThreadState;
+    ULONG WaitReason;
+} PMAN_SYSTEM_THREAD_INFORMATION, *PMAN_PSYSTEM_THREAD_INFORMATION;
+
+typedef struct _PMAN_SYSTEM_PROCESS_INFORMATION {
+    ULONG NextEntryOffset;
+    ULONG NumberOfThreads;
+    LARGE_INTEGER WorkingSetPrivateSize;
+    ULONG HardFaultCount;
+    ULONG NumberOfThreadsHighWatermark;
+    ULONGLONG CycleTime;
+    LARGE_INTEGER CreateTime;
+    LARGE_INTEGER UserTime;
+    LARGE_INTEGER KernelTime;
+    UNICODE_STRING ImageName;
+    KPRIORITY BasePriority;
+    HANDLE UniqueProcessId;
+    HANDLE InheritedFromUniqueProcessId;
+    ULONG HandleCount;
+    ULONG SessionId;
+    ULONG_PTR UniqueProcessKey;
+    SIZE_T PeakVirtualSize;
+    SIZE_T VirtualSize;
+    ULONG PageFaultCount;
+    SIZE_T PeakWorkingSetSize;
+    SIZE_T WorkingSetSize;
+    SIZE_T QuotaPeakPagedPoolUsage;
+    SIZE_T QuotaPagedPoolUsage;
+    SIZE_T QuotaPeakNonPagedPoolUsage;
+    SIZE_T QuotaNonPagedPoolUsage;
+    SIZE_T PagefileUsage;
+    SIZE_T PeakPagefileUsage;
+    SIZE_T PrivatePageCount;
+    LARGE_INTEGER ReadOperationCount;
+    LARGE_INTEGER WriteOperationCount;
+    LARGE_INTEGER OtherOperationCount;
+    LARGE_INTEGER ReadTransferCount;
+    LARGE_INTEGER WriteTransferCount;
+    LARGE_INTEGER OtherTransferCount;
+    PMAN_SYSTEM_THREAD_INFORMATION Threads[1];
+} PMAN_SYSTEM_PROCESS_INFORMATION, *PMAN_PSYSTEM_PROCESS_INFORMATION;
+
 void OptimizeThreadScheduling(DWORD pid, int mode)
 {
     if (!g_dpcLatencyAvailable.load()) return;
     
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if (!ntdll) return;
-    
+
+    // Resolve NT APIs
+    typedef NTSTATUS (NTAPI *NtQuerySystemInformationPtr)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
     typedef NTSTATUS (NTAPI *NtSetInformationThreadPtr)(HANDLE, THREADINFOCLASS, PVOID, ULONG);
-    auto pNtSetInformationThread = 
-        reinterpret_cast<NtSetInformationThreadPtr>(
-            GetProcAddress(ntdll, "NtSetInformationThread"));
     
-    if (!pNtSetInformationThread) return;
-    
-    HANDLE hThreadSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (hThreadSnap == INVALID_HANDLE_VALUE) return;
-    
-    THREADENTRY32 te32{};
-    te32.dwSize = sizeof(te32);
-    
+    auto pNtQuerySystemInformation = reinterpret_cast<NtQuerySystemInformationPtr>(GetProcAddress(ntdll, "NtQuerySystemInformation"));
+    auto pNtSetInformationThread = reinterpret_cast<NtSetInformationThreadPtr>(GetProcAddress(ntdll, "NtSetInformationThread"));
+
+    if (!pNtQuerySystemInformation || !pNtSetInformationThread) return;
+
+    // [OPTIMIZATION] Use SystemProcessInformation (5) to get threads directly
+    ULONG bufferSize = 128 * 1024; // Start with 128KB
+    std::vector<BYTE> buffer(bufferSize);
+    ULONG requiredSize = 0;
+    NTSTATUS status = pNtQuerySystemInformation(SystemProcessInformation, buffer.data(), bufferSize, &requiredSize);
+
+    if (status == ((NTSTATUS)0xC0000004L)) { // STATUS_INFO_LENGTH_MISMATCH
+        bufferSize = requiredSize + 4096;
+        buffer.resize(bufferSize);
+        status = pNtQuerySystemInformation(SystemProcessInformation, buffer.data(), bufferSize, &requiredSize);
+    }
+
+    if (!NT_SUCCESS(status)) return;
+
     int threadsOptimized = 0;
-    int threadsSkipped = 0;
-    
-    if (Thread32First(hThreadSnap, &te32))
+    PMAN_PSYSTEM_PROCESS_INFORMATION spi = reinterpret_cast<PMAN_PSYSTEM_PROCESS_INFORMATION>(buffer.data());
+
+    while (true)
     {
-        do
+        if (spi->UniqueProcessId == reinterpret_cast<HANDLE>(static_cast<uintptr_t>(pid)))
         {
-            if (te32.th32OwnerProcessID == pid)
+            // Limit to first 64 threads to prevent stalling on massive processes
+            // FIX C2672: Ensure type matching for std::min (ULONG vs ULONG)
+            ULONG threadCount = (std::min)(spi->NumberOfThreads, 64UL);
+
+            for (ULONG i = 0; i < threadCount; i++)
             {
-                HANDLE hThread = OpenThread(
-                    THREAD_SET_INFORMATION | THREAD_QUERY_INFORMATION, 
-                    FALSE, te32.th32ThreadID);
+                // FIX C2440: Use static_cast for uintptr_t -> DWORD conversion (integer truncation is intended)
+                // FIX C2660: OpenThread requires 3 arguments (Access, InheritHandle, ThreadId)
+                DWORD tid = static_cast<DWORD>(reinterpret_cast<uintptr_t>(spi->Threads[i].ClientId.UniqueThread));
+                HANDLE hThread = OpenThread(THREAD_SET_INFORMATION | THREAD_QUERY_INFORMATION, FALSE, tid);
                 
                 if (hThread)
                 {
-					if (mode == 1) // GAME MODE
+                    if (mode == 1) // GAME MODE
                     {
                         LONG basePriority = THREAD_PRIORITY_HIGHEST;
-						NTSTATUS status = pNtSetInformationThread(
-                            hThread, 
-                            ThreadBasePriority, 
-                            &basePriority, 
-                            sizeof(basePriority));
+                        NTSTATUS setStatus = pNtSetInformationThread(hThread, ThreadBasePriority, &basePriority, sizeof(basePriority));
                         
-                        if (NT_SUCCESS(status))
+                        if (NT_SUCCESS(setStatus))
                         {
                             BOOL disableBoost = TRUE;
-                            if (SetThreadPriorityBoost(hThread, disableBoost))
-                            {
-                                threadsOptimized++;
-                            }
-                            else
-                            {
-                                threadsOptimized++;
-                            }
-                        }
-                        else
-                        {
-                            threadsSkipped++;
+                            if (SetThreadPriorityBoost(hThread, disableBoost)) threadsOptimized++;
                         }
                     }
                     else if (mode == 2) // BROWSER MODE
                     {
-						LONG basePriority = THREAD_PRIORITY_NORMAL;
-						pNtSetInformationThread(
-                            hThread, 
-                            ThreadBasePriority, 
-                            &basePriority, 
-                            sizeof(basePriority));
-                        
-                        BOOL disableBoost = FALSE;
-                        SetThreadPriorityBoost(hThread, disableBoost);
+                        LONG basePriority = THREAD_PRIORITY_NORMAL;
+                        pNtSetInformationThread(hThread, ThreadBasePriority, &basePriority, sizeof(basePriority));
+                        SetThreadPriorityBoost(hThread, FALSE);
                     }
-                    
                     CloseHandle(hThread);
                 }
             }
-        } while (Thread32Next(hThreadSnap, &te32));
-    }
-    
-    CloseHandle(hThreadSnap);
-    
-    if (threadsOptimized > 0)
-    {
-        std::string logMsg = "[THREAD] Optimized " + std::to_string(threadsOptimized) + 
-            " game threads (THREAD_PRIORITY_HIGHEST + boost disabled)";
-        
-        if (threadsSkipped > 0)
-        {
-            logMsg += " [" + std::to_string(threadsSkipped) + " skipped - access denied]";
+            break; // Found the process, stop iterating
         }
-        
-        Log(logMsg);
+
+        if (spi->NextEntryOffset == 0) break;
+        spi = reinterpret_cast<PMAN_PSYSTEM_PROCESS_INFORMATION>(reinterpret_cast<BYTE*>(spi) + spi->NextEntryOffset);
     }
-    else if (mode == 1)
-    {
-        Log("[THREAD] Warning: Could not optimize any threads (may lack permissions)");
+
+    if (threadsOptimized > 0 && mode == 1) {
+        Log("[THREAD] Optimized " + std::to_string(threadsOptimized) + " threads via fast NT enumeration");
     }
 }
 

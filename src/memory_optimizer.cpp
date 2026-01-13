@@ -185,6 +185,11 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
         DWORD pid = pids[i];
         if (pid == 0 || pid == myPid || pid == foregroundPid) continue;
 
+		// [OPTIMIZATION] Skip known protected system PIDs to avoid OpenProcess overhead
+        // 0=Idle, 4=System. 
+        // We assume PIDs < 1000 are mostly services/system that we shouldn't trim aggressively.
+        if (pid < 1000 && pid != 0 && pid != 4) continue;
+
         // Check internal cooldown
         if (m_processTracker.count(pid)) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
