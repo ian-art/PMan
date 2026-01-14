@@ -366,6 +366,9 @@ void ExplorerBooster::ApplyBoosts(DWORD pid, ExplorerBoostState state) {
 
 void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
     if (!m_config.preventShellPaging) return;
+
+    // FIX: Exclude DWM from memory trimming to prevent composition glitches
+    if (pid == GetDwmProcessId()) return;
     
     // Only enforce on systems with 12GB+ RAM
     MEMORYSTATUSEX ms = { sizeof(ms) };
@@ -374,6 +377,10 @@ void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
     
     auto it = m_instances.find(pid);
     if (it == m_instances.end()) return;
+
+    // FIX: Do not apply arbitrary memory caps to DWM
+    if (pid == GetDwmProcessId()) return;
+
     HANDLE hProcess = it->second.handle.get();
 
     PROCESS_MEMORY_COUNTERS pmc;
