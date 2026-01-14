@@ -583,7 +583,8 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
         }
 
         // FIX: Check cooldown BEFORE modifying ExplorerBooster state to prevent desync
-        if (!forceOverride && !IsPolicyChangeAllowed(mode)) return;
+        // [FIX] Bypass cooldown for Browser Mode (2) to ensure instant responsiveness
+        if (!forceOverride && mode != 2 && !IsPolicyChangeAllowed(mode)) return;
         
         // CRITICAL: Revert Explorer BEFORE game mode applies to prevent conflict
         if (mode == 1) {
@@ -596,6 +597,12 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
         // 1. Exact same process and mode - skip entirely
         if (mode == lastMode && pid == lastPid)
         {
+            // [FIX] Force re-application of Browser Boost
+            // If the previous "Switch Away" put the browser to sleep but failed to update 
+            // the global state (due to cooldown), we must wake it up now.
+            if (mode == 2) {
+                ApplySmartBrowserPolicy(pid, true);
+            }
             return;
         }
 
