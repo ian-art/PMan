@@ -79,7 +79,7 @@ static void ApplySmartBrowserPolicy(DWORD pid, bool isForeground) {
 
             if (isForeground) {
                 // FOREGROUND: High Performance
-                SetPriorityClass(hProc, HIGH_PRIORITY_CLASS); // Snappy UI
+                SetPriorityClass(hProc, ABOVE_NORMAL_PRIORITY_CLASS); // Snappy UI, but AV-safe
                 PowerThrottling.StateMask = 0; // DISABLE Efficiency Mode (EcoQoS)
                 SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
             } else {
