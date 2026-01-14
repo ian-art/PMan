@@ -594,33 +594,43 @@ void InstallUpdateAndRestart(const std::wstring& newExePath, bool isPaused)
     wchar_t selfPath[MAX_PATH];
     GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
 
-    // Determine launch arguments
-    std::string args = "/silent";
-    if (isPaused) args += " --paused";
+    // Locate dedicated updater next to the main executable
+    std::wstring updaterPath = std::wstring(selfPath);
+    size_t lastSlash = updaterPath.find_last_of(L"\\/");
+    if (lastSlash != std::wstring::npos) {
+        updaterPath = updaterPath.substr(0, lastSlash + 1) + L"updater.exe";
+    } else {
+        updaterPath = L"updater.exe";
+    }
 
-    // Create a self-deleting batch script
-    // 1. Timeout to let this process exit
-    // 2. Move new file over old file
-    // 3. Start new file
-    // 4. Delete batch file
-    std::wstring batPath = std::wstring(selfPath) + L".update.bat";
-    
-    std::string batScript = "@echo off\r\n"
-                            "timeout /t 1 /nobreak >nul\r\n"
-                            "move /y \"" + WideToUtf8(newExePath.c_str()) + "\" \"" + WideToUtf8(selfPath) + "\" >nul\r\n"
-                            "start \"\" \"" + WideToUtf8(selfPath) + "\" " + args + "\r\n"
-                            "del \"%~f0\"";
+    // If updater is missing, we cannot proceed safely without the batch fallback.
+    // Assuming updater.exe is shipped with the release.
+    if (GetFileAttributesW(updaterPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        Log("CRITICAL: updater.exe not found. Update aborted.");
+        return;
+    }
 
-    HANDLE hFile = CreateFileW(batPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile != INVALID_HANDLE_VALUE) {
-        DWORD written = 0;
-        WriteFile(hFile, batScript.c_str(), (DWORD)batScript.length(), &written, nullptr);
-        CloseHandle(hFile);
+    // Arguments: /silent is implicit for the restart, add --paused if needed
+    std::wstring restartArgs = L"/silent";
+    if (isPaused) restartArgs += L" --paused";
 
-        // Execute the batch script hidden
-        ShellExecuteW(nullptr, L"open", batPath.c_str(), nullptr, nullptr, SW_HIDE);
-        
-        // Exit immediately to release file lock
+    // Construct command line for updater
+    // Format: --pid <PID> --src <NewFile> --dst <CurrentExe> --args <RestartArgs>
+    std::wstring cmdArgs = L"--pid " + std::to_wstring(GetCurrentProcessId()) +
+                           L" --src \"" + newExePath + L"\"" +
+                           L" --dst \"" + std::wstring(selfPath) + L"\"" +
+                           L" --args \"" + restartArgs + L"\"";
+
+    SHELLEXECUTEINFOW sei = { sizeof(sei) };
+    sei.lpFile = updaterPath.c_str();
+    sei.lpParameters = cmdArgs.c_str();
+    sei.nShow = SW_HIDE; // Run updater invisibly
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+
+    if (ShellExecuteExW(&sei)) {
+        // Yield execution immediately to allow updater to acquire lock
         ExitProcess(0);
+    } else {
+        Log("CRITICAL: Failed to launch updater.exe");
     }
 }
