@@ -41,6 +41,7 @@
 #include <filesystem>
 #include <iostream>
 #include <objbase.h> // Fixed: Required for CoInitialize
+#include <powrprof.h>
 #include <pdh.h>
 #include <shellapi.h> // Required for CommandLineToArgvW
 #include <commctrl.h> // For Edit Control in Live Log
@@ -50,6 +51,7 @@
 #include <condition_variable>
 #include <functional>
 
+#pragma comment(lib, "PowrProf.lib") 
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "User32.lib")
 #pragma comment(lib, "Shell32.lib")
@@ -432,10 +434,10 @@ static int GetStartupMode(const std::wstring& taskName)
     return 1; // Default to Active if check fails but task exists
 }
 
-// Crash-Proof Registry Guard
-static void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWORD originalVal)
+// Crash-Proof Registry & Power Guard
+static void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWORD originalVal, const std::wstring& startupPowerScheme)
 {
-	// 1. Wait for the main process to exit (crash, kill, or close)
+    // 1. Wait for the main process to exit (crash, kill, or close)
     HANDLE hProcess = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
     if (hProcess)
     {
@@ -464,21 +466,41 @@ static void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWO
         if (RegQueryValueExW(key, L"Win32PrioritySeparation", nullptr, nullptr, 
             reinterpret_cast<BYTE*>(&currentVal), &size) == ERROR_SUCCESS)
         {
-            // If the value is different from the original default, restore it.
             if (currentVal != originalVal)
             {
                 RegSetValueExW(key, L"Win32PrioritySeparation", 0, REG_DWORD,
                     reinterpret_cast<const BYTE*>(&originalVal), sizeof(originalVal));
-                
-                // Safe to log here as main process is dead
-                Log("[GUARD] Main process crash detected. Registry Restored to 0x" + 
-                    std::to_string(originalVal));
+                Log("[GUARD] Main process crash detected. Registry Restored.");
             }
         }
-	RegCloseKey(key);
-    } // End of Registry Check
+        RegCloseKey(key);
+    }
 
-    // 3. CRITICAL: Check and resume suspended services
+    // 3. Power Plan Safety Check
+    // If the app crashed while we were in "Power Saver" mode, restore the user's original plan.
+    if (!startupPowerScheme.empty())
+    {
+        GUID* pCurrentScheme = nullptr;
+        if (PowerGetActiveScheme(NULL, &pCurrentScheme) == ERROR_SUCCESS)
+        {
+            wchar_t currentGuidStr[64] = {};
+            StringFromGUID2(*pCurrentScheme, currentGuidStr, 64);
+            
+            // If current scheme differs from startup scheme, force restore
+            if (_wcsicmp(currentGuidStr, startupPowerScheme.c_str()) != 0)
+            {
+                 GUID originalGuid;
+                 if (CLSIDFromString(startupPowerScheme.c_str(), &originalGuid) == S_OK)
+                 {
+                     PowerSetActiveScheme(NULL, &originalGuid);
+                     Log("[GUARD] Crash detected. Restored original Power Plan: " + WideToUtf8(startupPowerScheme.c_str()));
+                 }
+            }
+            LocalFree(pCurrentScheme);
+        }
+    }
+
+    // 4. CRITICAL: Check and resume suspended services
     Log("[GUARD] Checking for stranded suspended services...");
     SC_HANDLE scManager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     if (scManager) 
@@ -550,16 +572,28 @@ static void LaunchRegistryGuard(DWORD originalVal)
     wchar_t selfPath[MAX_PATH];
     GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
 
-    // Get current process creation time for identity verification
+    // Get current process creation time
     FILETIME ftCreation, ftExit, ftKernel, ftUser;
     GetProcessTimes(GetCurrentProcess(), &ftCreation, &ftExit, &ftKernel, &ftUser);
 
-    // Pass PID, Creation Time (Low/High), and Original Value to the guard instance
-    std::wstring cmd = L"\"" + std::wstring(selfPath) + L"\" --guard " + 
-                       std::to_wstring(GetCurrentProcessId()) + L" " + 
+    // Capture Startup Power Scheme
+    std::wstring powerGuidStr = L"";
+    GUID* pStartupScheme = nullptr;
+    if (PowerGetActiveScheme(NULL, &pStartupScheme) == ERROR_SUCCESS)
+    {
+        wchar_t buf[64] = {};
+        StringFromGUID2(*pStartupScheme, buf, 64);
+        powerGuidStr = buf; // e.g., "{381B4222-F694-41F0-9685-FF5BB260DF2E}"
+        LocalFree(pStartupScheme);
+    }
+
+    // Pass PID, Times, RegVal, AND PowerGUID to the guard instance
+    std::wstring cmd = L"\"" + std::wstring(selfPath) + L"\" --guard " +
+                       std::to_wstring(GetCurrentProcessId()) + L" " +
                        std::to_wstring(ftCreation.dwLowDateTime) + L" " +
                        std::to_wstring(ftCreation.dwHighDateTime) + L" " +
-                       std::to_wstring(originalVal);
+                       std::to_wstring(originalVal) + L" \"" +
+                       powerGuidStr + L"\""; // Quote the GUID string
 
     STARTUPINFOW si{};
     si.cb = sizeof(si);
@@ -569,16 +603,15 @@ static void LaunchRegistryGuard(DWORD originalVal)
                        CREATE_NO_WINDOW | DETACHED_PROCESS, 
                        nullptr, nullptr, &si, &pi))
     {
-        // Guard process needs minimal resources (just waits in kernel)
         SetPriorityClass(pi.hProcess, IDLE_PRIORITY_CLASS);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
-        Log("[GUARD] Registry safety guard launched");
+        Log("[GUARD] Safety guard launched (Registry + Power)");
     }
     else
     {
         Log("[GUARD] Failed to launch safety guard: " + std::to_string(GetLastError()));
-}
+    }
 }
 
 // Forward declaration for main program logic
@@ -972,13 +1005,16 @@ int wmain(int argc, wchar_t* argv[])
     }
 
     // Check for Guard Mode (Must be before Mutex check)
-    if (argc >= 6 && (std::wstring(argv[1]) == L"--guard"))
+    // argc count increased to 7 to account for Power GUID
+    if (argc >= 7 && (std::wstring(argv[1]) == L"--guard"))
     {
         DWORD pid = std::wcstoul(argv[2], nullptr, 10);
         DWORD low = std::wcstoul(argv[3], nullptr, 10);
         DWORD high = std::wcstoul(argv[4], nullptr, 10);
         DWORD val = std::wcstoul(argv[5], nullptr, 10);
-        RunRegistryGuard(pid, low, high, val);
+        std::wstring powerScheme = argv[6];
+        
+        RunRegistryGuard(pid, low, high, val, powerScheme);
         return 0;
     }
 
