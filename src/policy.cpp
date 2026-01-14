@@ -47,6 +47,12 @@ typedef struct _PROCESS_POWER_THROTTLING_STATE {
 } PROCESS_POWER_THROTTLING_STATE, *PPROCESS_POWER_THROTTLING_STATE;
 #endif
 
+// Definitions for Silent I/O Priority
+typedef NTSTATUS (NTAPI *PNT_SET_INFO_PROCESS)(HANDLE, ULONG, PVOID, ULONG);
+#ifndef ProcessIoPriority
+#define ProcessIoPriority 33
+#endif
+
 // Helper: Find all child processes (renderers, GPU, workers) of a browser
 static std::vector<DWORD> GetChildProcesses(DWORD parentPid) {
     std::vector<DWORD> children;
@@ -88,12 +94,19 @@ static void ApplySmartBrowserPolicy(DWORD pid, bool isForeground) {
                 PowerThrottling.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED; // ENABLE Efficiency Mode
                 SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
             }
+
+            // [OPTIMIZATION] Set I/O Priority silently using existing handle (Fixes log spam + overhead)
+            static PNT_SET_INFO_PROCESS NtSetInfo = (PNT_SET_INFO_PROCESS)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetInformationProcess");
+            if (NtSetInfo) {
+                ULONG ioPriority = isForeground ? 2 : 0; // 2=Normal, 0=VeryLow
+                NtSetInfo(hProc, ProcessIoPriority, &ioPriority, sizeof(ioPriority));
+            }
+
             CloseHandle(hProc);
         }
-        
-        // I/O Priority: 2=Normal (Fg), 0=VeryLow (Bg)
-        SetProcessIoPriority(targetPid, isForeground ? 2 : 0);
     }
+    // Log summary instead of per-process spam
+    if (isForeground) Log("[BROWSER] Boosted " + std::to_string(targets.size()) + " processes");
 }
 // POLICY WORKER QUEUE INFRASTRUCTURE
 // ============================================
