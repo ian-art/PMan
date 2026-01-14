@@ -32,8 +32,69 @@
 #include <condition_variable>
 #include <atomic>
 #include <thread>
+#include <tlhelp32.h>
+#include <processthreadsapi.h>
 
-// ============================================
+// Definitions for Power Throttling (EcoQoS) support
+#ifndef PROCESS_POWER_THROTTLING_CURRENT_VERSION
+#define PROCESS_POWER_THROTTLING_CURRENT_VERSION 1
+#define PROCESS_POWER_THROTTLING_EXECUTION_SPEED 0x1
+#define ProcessPowerThrottling (static_cast<PROCESS_INFORMATION_CLASS>(4))
+typedef struct _PROCESS_POWER_THROTTLING_STATE {
+    ULONG Version;
+    ULONG ControlMask;
+    ULONG StateMask;
+} PROCESS_POWER_THROTTLING_STATE, *PPROCESS_POWER_THROTTLING_STATE;
+#endif
+
+// Helper: Find all child processes (renderers, GPU, workers) of a browser
+static std::vector<DWORD> GetChildProcesses(DWORD parentPid) {
+    std::vector<DWORD> children;
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnap == INVALID_HANDLE_VALUE) return children;
+
+    PROCESSENTRY32W pe = { sizeof(pe) };
+    if (Process32FirstW(hSnap, &pe)) {
+        do {
+            if (pe.th32ParentProcessID == parentPid) {
+                children.push_back(pe.th32ProcessID);
+            }
+        } while (Process32NextW(hSnap, &pe));
+    }
+    CloseHandle(hSnap);
+    return children;
+}
+
+// Helper: Apply Boost or Efficiency Mode to a process tree
+static void ApplySmartBrowserPolicy(DWORD pid, bool isForeground) {
+    std::vector<DWORD> targets = GetChildProcesses(pid);
+    targets.push_back(pid); // Include main process
+
+    for (DWORD targetPid : targets) {
+        HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION, FALSE, targetPid);
+        if (hProc) {
+            PROCESS_POWER_THROTTLING_STATE PowerThrottling = {};
+            PowerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+            PowerThrottling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+
+            if (isForeground) {
+                // FOREGROUND: High Performance
+                SetPriorityClass(hProc, HIGH_PRIORITY_CLASS); // Snappy UI
+                PowerThrottling.StateMask = 0; // DISABLE Efficiency Mode (EcoQoS)
+                SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
+            } else {
+                // BACKGROUND: Deep Sleep
+                SetPriorityClass(hProc, IDLE_PRIORITY_CLASS); // Get out of the way
+                PowerThrottling.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED; // ENABLE Efficiency Mode
+                SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
+            }
+            CloseHandle(hProc);
+        }
+        
+        // I/O Priority: 2=Normal (Fg), 0=VeryLow (Bg)
+        SetProcessIoPriority(targetPid, isForeground ? 2 : 0);
+    }
+}
 // POLICY WORKER QUEUE INFRASTRUCTURE
 // ============================================
 struct PolicyJob { 
@@ -513,6 +574,14 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
         DWORD lastPid = static_cast<DWORD>(state >> 32);
         int lastMode = static_cast<int>(state & 0xFFFFFFFF);
 
+        // [SMART BROWSER] Background Efficiency Logic
+        // When switching AWAY from a browser, put the entire tree (parent + tabs) into deep sleep.
+        if (lastMode == 2 && lastPid != 0 && lastPid != pid)
+        {
+            ApplySmartBrowserPolicy(lastPid, false); // false = Efficiency Mode ON
+            Log("[BROWSER] Background Detected (PID " + std::to_string(lastPid) + ") -> Tree Efficiency Engaged");
+        }
+
         // FIX: Check cooldown BEFORE modifying ExplorerBooster state to prevent desync
         if (!forceOverride && !IsPolicyChangeAllowed(mode)) return;
         
@@ -697,23 +766,30 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
             else 
             {
                 // Browser / Normal Mode
-                // FIX: Do not apply browser optimizations (Low I/O) to Desktop/Explorer (Mode 0)
                 if (mode != 0)
                 {
-                    // Apply strategy-based affinity
-                    
-                    if (strategy == AffinityStrategy::HybridPinning) 
+                    if (mode == 2)
                     {
-                        SetHybridCoreAffinity(pid, mode);
-                    } 
-                    else if (strategy == AffinityStrategy::GameIsolation) 
-                    {
-                        SetProcessAffinity(pid, mode);
+                        // [SMART BROWSER] Foreground Boost Logic
+                        // Apply full boost to Parent + All Children (Tabs/GPU/Workers)
+                        ApplySmartBrowserPolicy(pid, true); // true = Boost Mode
+                        
+                        // Apply Core Affinity to Parent (Children usually inherit or managed by OS)
+                        if (strategy == AffinityStrategy::HybridPinning) SetHybridCoreAffinity(pid, 1); // Treat as Game (P-Cores)
+                        else if (strategy == AffinityStrategy::GameIsolation) SetProcessAffinity(pid, 1);
+
+                        Log("[BROWSER] Foreground Boost Applied to Process Tree (High Priority + No EcoQoS)");
                     }
-                    
-                    SetProcessIoPriority(pid, mode);
-                    SetWorkingSetLimits(pid, mode);
-                    OptimizeDpcIsrLatency(pid, mode);
+                    else
+                    {
+                        // Standard Logic for non-browser apps
+                        if (strategy == AffinityStrategy::HybridPinning) SetHybridCoreAffinity(pid, mode);
+                        else if (strategy == AffinityStrategy::GameIsolation) SetProcessAffinity(pid, mode);
+                        
+                        SetProcessIoPriority(pid, mode);
+                        SetWorkingSetLimits(pid, mode);
+                        OptimizeDpcIsrLatency(pid, mode);
+                    }
                 }
             }
             
