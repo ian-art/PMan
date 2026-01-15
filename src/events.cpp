@@ -204,9 +204,11 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
             g_perfGuardian.OnPresentEvent(rec->EventHeader.ProcessId, rec->EventHeader.TimeStamp.QuadPart);
             static int dx9FrameCount = 0;
             if (++dx9FrameCount % 300 == 0) {
+				/* Commented out debug logging in hot path to prevent I/O micro-stutter
                 Log("[PERF-DEBUG] DX9 Frame captured for PID " + 
                     std::to_string(rec->EventHeader.ProcessId) + " (Event ID: " + 
                     std::to_string(eventId) + ")");
+				*/
             }
         }
         return;
