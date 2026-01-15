@@ -378,28 +378,30 @@ void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
     // FIX: Exclude DWM from memory trimming to prevent composition glitches
     if (pid == GetDwmProcessId()) return;
     
-    // Only enforce on systems with 12GB+ RAM
+    // Only enforce when memory pressure exists ===
     MEMORYSTATUSEX ms = { sizeof(ms) };
     if (!GlobalMemoryStatusEx(&ms)) return;
-    if ((ms.ullTotalPhys >> 30) < 12) return; // <12GB: skip to avoid paging
+    
+    // Only intervene if available RAM < 4GB AND system has 12GB+ total
+    // (Lower-RAM systems have different dynamics; let Windows manage them)
+    if (ms.ullAvailPhys > 4ULL * 1024 * 1024 * 1024) return; // >4GB free? Skip entirely
+    if ((ms.ullTotalPhys >> 30) < 12) return; // <12GB total? Skip to avoid paging
     
     auto it = m_instances.find(pid);
     if (it == m_instances.end()) return;
 
-    // FIX: Do not apply arbitrary memory caps to DWM
+    // FIX: Do not apply arbitrary memory caps to DWM (redundant but safe)
     if (pid == GetDwmProcessId()) return;
 
     HANDLE hProcess = it->second.handle.get();
 
-    PROCESS_MEMORY_COUNTERS pmc;
-    if (!GetProcessMemoryInfo(hProcess, &pmc, sizeof(pmc))) return;
+    // Elastic limits (soft cap, not hard) ===
+    // Set a reasonable floor to prevent aggressive trimming, but allow Windows to exceed max when needed
+    SIZE_T minWS = 128 * 1024 * 1024;      // 128MB minimum resident
+    SIZE_T maxWS = 512 * 1024 * 1024;      // 512MB soft ceiling (not a hard limit)
     
-    // Reduce locked memory: 32MB min, 96MB max
-    SIZE_T currentWS = pmc.WorkingSetSize;
-    SIZE_T minWS = (currentWS > 32 * 1024 * 1024) ? currentWS : 32 * 1024 * 1024;
-    SIZE_T maxWS = minWS + 64 * 1024 * 1024; 
-    
-    DWORD flags = QUOTA_LIMITS_HARDWS_MAX_DISABLE;
+    // Use SOFT limits (flags = 0) so Windows can grow beyond maxWS for UI spikes
+    DWORD flags = 0;
 
     // [PERF FIX] Cache last applied values to prevent syscall spam
     static std::mutex cacheMtx;
@@ -413,6 +415,10 @@ void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
         
         if (SetProcessWorkingSetSizeEx(hProcess, minWS, maxWS, flags)) {
             last = { minWS, maxWS };
+            if (m_config.debugLogging) {
+                Log("[EXPLORER] Memory Guard enforced (soft): PID=" + std::to_string(pid) + 
+                    ", Min=" + std::to_string(minWS >> 20) + "MB, Max=" + std::to_string(maxWS >> 20) + "MB");
+            }
         } else {
             // [FIX] If Access Denied, cache the failure to prevent endless retries/log spam
             DWORD err = GetLastError();
