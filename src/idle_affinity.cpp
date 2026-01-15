@@ -112,9 +112,11 @@ bool IdleAffinityManager::IsSafeToPark()
         if (totalGB < m_minRamGB.load()) return false;
     }
 
-    // Don't park if a game is running (even if no input) to prevent messing up the game
-    // if the user is watching a cutscene or waiting in a lobby.
-    if (g_sessionLocked.load()) return false;
+    // [FIX] Removed "g_sessionLocked" check. 
+    // Now that we explicitly protect the Foreground Window (in ApplyIdleAffinity), 
+    // it is SAFE and BENEFICIAL to park background apps even during a game session 
+    // (e.g. when using a controller).
+    // if (g_sessionLocked.load()) return false; 
 
     return true;
 }
@@ -174,6 +176,25 @@ void IdleAffinityManager::ApplyIdleAffinity()
             parkMask |= (1ULL << (g_physicalCoreCount - 1 - i));
         }
 
+        // [FIX] Detect Foreground App to protect it from parking (e.g. Watching YouTube = Idle Input but Active App)
+        // We get the Name as well to protect multi-process apps like Chrome (Parent + Renderers)
+        DWORD fgPid = 0;
+        std::wstring fgName;
+        HWND hFg = GetForegroundWindow();
+        if (hFg) {
+            GetWindowThreadProcessId(hFg, &fgPid);
+            if (fgPid != 0) {
+                 UniqueHandle hFgProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, fgPid));
+                 if (hFgProc) {
+                     wchar_t path[MAX_PATH];
+                     DWORD sz = MAX_PATH;
+                     if (QueryFullProcessImageNameW(hFgProc.get(), 0, path, &sz)) {
+                         fgName = ExeFromPath(path);
+                     }
+                 }
+            }
+        }
+
         // [FIX] Scoped lock to prevent recursive deadlock when calling SetProcessIdleAffinity
         {
             std::lock_guard lock(m_mtx);
@@ -194,6 +215,12 @@ void IdleAffinityManager::ApplyIdleAffinity()
                 // [PERF] Use raw string reference if possible, but wstring is safer for utils
                 std::wstring exe = pe.szExeFile;
                 asciiLower(exe);
+
+                // [FIX] CRITICAL: Never park the Foreground App or its children (Tabs/Renderers)
+                // This ensures YouTube/Twitch playback is smooth even if user input is idle.
+                if (pe.th32ProcessID == fgPid || (!fgName.empty() && exe == fgName)) {
+                    continue; 
+                }
                 
                 if (IsSystemCriticalProcess(exe)) continue; // Never touch Defender/OS
                 
