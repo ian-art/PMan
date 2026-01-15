@@ -235,8 +235,16 @@ void ExplorerBooster::ScanShellProcesses() {
                     FALSE, pid));
                 
                 if (instance.handle) {
+                    // [FIX] Insert into map first
                     m_instances[pid] = std::move(instance);
-                    LogState("Tracking new shell process", pid);
+
+                    // [FIX] If system is already boosted, apply boost to this new orphan immediately
+                    if (m_currentState == ExplorerBoostState::IdleBoosted) {
+                         ApplyBoosts(pid, ExplorerBoostState::IdleBoosted);
+                         LogState("Tracking new shell process (Immediate Boost Applied)", pid);
+                    } else {
+                         LogState("Tracking new shell process", pid);
+                    }
                 }
             }
         }
