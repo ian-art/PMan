@@ -84,9 +84,9 @@ bool NetworkMonitor::PerformLatencyProbe() {
     for (unsigned long ip : targets) {
         PICMP_ECHO_REPLY reply = (PICMP_ECHO_REPLY)replyBuffer.data();
         
-        // Hard timeout: 150ms
+        // [FIX] Increased timeout to 800ms to tolerate bufferbloat during streaming/gaming
         DWORD status = IcmpSendEcho(hIcmp, ip, sendData, sizeof(sendData), 
-                                  nullptr, replyBuffer.data(), replySize, 150);
+                                  nullptr, replyBuffer.data(), replySize, 800);
 
         if (status > 0 && reply->Status == IP_SUCCESS) {
             successCount++;
@@ -100,7 +100,9 @@ bool NetworkMonitor::PerformLatencyProbe() {
     if (successCount == 0) return false; // Both failed/timeout -> Unstable
     
     DWORD avgLatency = totalTime / successCount;
-    lastResult = (avgLatency <= 150);
+    // [FIX] Relax threshold to 600ms. Streaming 4K often spikes ping to 300-500ms.
+    // As long as packets are returning (successCount > 0), the connection is usable.
+    lastResult = (avgLatency <= 600);
     lastCheck = now;
     return lastResult;
 }
