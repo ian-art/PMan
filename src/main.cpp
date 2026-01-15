@@ -69,6 +69,7 @@ HINSTANCE g_hInst = nullptr;
 static UINT g_wmTaskbarCreated = 0;
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
+static GUID* g_pSleepScheme = nullptr;
 
 // Async launcher to prevent UI thread blocking
 void LaunchProcessAsync(const std::wstring& cmd, std::function<void(DWORD)> callback) {
@@ -1396,10 +1397,32 @@ if (!taskExists)
                 {
                     Log("System suspending - pausing operations to prevent memory corruption");
                     g_isSuspended.store(true);
+
+                    // Switch to Power Saver when about to sleep
+                    if (g_pSleepScheme == nullptr) {
+                        if (PowerGetActiveScheme(NULL, &g_pSleepScheme) == ERROR_SUCCESS) {
+                            if (PowerSetActiveScheme(NULL, &GUID_MAX_POWER_SAVINGS) == ERROR_SUCCESS) {
+                                Log("[POWER] Switched to Efficiency power plan for sleep.");
+                            } else {
+                                LocalFree(g_pSleepScheme);
+                                g_pSleepScheme = nullptr;
+                            }
+                        }
+                    }
                 }
                 else if (msg.wParam == PBT_APMRESUMEAUTOMATIC || msg.wParam == PBT_APMRESUMESUSPEND)
                 {
                     Log("System resumed - waiting 5s for kernel stability");
+                    
+                    // Restore Original Power Plan on wake
+                    if (g_pSleepScheme != nullptr) {
+                        if (PowerSetActiveScheme(NULL, g_pSleepScheme) == ERROR_SUCCESS) {
+                            Log("[POWER] Restored original power plan.");
+                        }
+                        LocalFree(g_pSleepScheme);
+                        g_pSleepScheme = nullptr;
+                    }
+
                     // Fix: Move blocking wait to background thread to prevent UI freeze
                     std::thread([]() {
                         Sleep(5000); 
@@ -1533,6 +1556,13 @@ if (!taskExists)
         g_hMutex = nullptr;
     }
     
+    // Safety cleanup for Power Scheme
+    if (g_pSleepScheme != nullptr) {
+        PowerSetActiveScheme(NULL, g_pSleepScheme);
+        LocalFree(g_pSleepScheme);
+        g_pSleepScheme = nullptr;
+    }
+
     Log("=== Priority Manager Stopped ===");
     
     // Flush logs to disk before exit

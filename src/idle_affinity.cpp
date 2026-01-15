@@ -29,7 +29,7 @@
 #pragma comment(lib, "PowrProf.lib") // Link Power Profile Library
 
 // State variable to track original power plan (File-scope to avoid header changes)
-static GUID* g_pSavedScheme = nullptr;
+// static GUID* g_pSavedScheme = nullptr; // Removed: Logic moved to Main Sleep Handler
 
 // Helper implementation of the classification logic
 static ProcessNetClass ClassifyProcessActivity(DWORD pid, const std::wstring& exeName) 
@@ -127,19 +127,6 @@ void IdleAffinityManager::OnIdleStateChanged(bool isIdle)
     if (isIdle) {
         if (IsSafeToPark()) {
             Log("[IDLE-PARK] System idle detected. Parking background processes...");
-			// Switch to Best Power Efficiency (Power Saver)
-        if (g_pSavedScheme == nullptr) {
-            if (PowerGetActiveScheme(NULL, &g_pSavedScheme) == ERROR_SUCCESS) {
-                // GUID_MAX_POWER_SAVINGS = "Best Power Efficiency" / Power Saver
-                if (PowerSetActiveScheme(NULL, &GUID_MAX_POWER_SAVINGS) == ERROR_SUCCESS) {
-                    Log("[IDLE-PARK] Switched to Efficiency power plan.");
-                } else {
-                    // If switch failed, free the memory immediately to prevent leaks/confusion
-                    LocalFree(g_pSavedScheme);
-                    g_pSavedScheme = nullptr;
-                }
-            }
-        }
             ApplyIdleAffinity();
         }
     } else {
@@ -261,14 +248,6 @@ void IdleAffinityManager::SetProcessIdleAffinity(DWORD pid, DWORD_PTR targetMask
 
 void IdleAffinityManager::RestoreAllAffinity()
 {
-	// Restore original Power Plan synchronously
-    if (g_pSavedScheme != nullptr) {
-        if (PowerSetActiveScheme(NULL, g_pSavedScheme) == ERROR_SUCCESS) {
-            Log("[IDLE-PARK] Restored original power plan.");
-        }
-        LocalFree(g_pSavedScheme); // Important: Free memory allocated by PowerGetActiveScheme
-        g_pSavedScheme = nullptr;
-    }
     // Offload to detached thread to prevent Main Thread freeze
     std::thread([this]() {
         std::lock_guard lock(m_mtx);
