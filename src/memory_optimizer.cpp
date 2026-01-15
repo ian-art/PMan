@@ -26,6 +26,7 @@
 #include <tlhelp32.h> // Required for Snapshot
 #include <iostream>
 #include <algorithm>
+#include <vector> // Required for std::vector
 
 #pragma comment(lib, "pdh.lib")
 #pragma comment(lib, "psapi.lib")
@@ -172,8 +173,10 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
         CloseHandle(hFgProc);
     }
 
-    DWORD pids[4096], needed{};
-    if (!EnumProcesses(pids, sizeof(pids), &needed)) return;
+    DWORD needed{};
+    // [FIX] C6262: Use heap allocation instead of large stack array
+    std::vector<DWORD> pids(4096);
+    if (!EnumProcesses(pids.data(), static_cast<DWORD>(pids.size() * sizeof(DWORD)), &needed)) return;
 
     DWORD myPid = GetCurrentProcessId();
     size_t count = needed / sizeof(DWORD);
