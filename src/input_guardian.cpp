@@ -104,7 +104,8 @@ void InputGuardian::OnInput(DWORD msgTime) {
     // 1. Monitor Latency
     // msgTime is the timestamp when the input event was generated (driver/OS level).
     // GetTickCount() is now (application processing level).
-    DWORD now = GetTickCount();
+    // [FIX] Use GetTickCount64 cast to DWORD to prevent C28159 warning while preserving 32-bit wrap-around logic for MSG comparison
+    DWORD now = static_cast<DWORD>(GetTickCount64());
     
     // Handle wrap-around or future timestamps gracefully
     if (now >= msgTime) {
