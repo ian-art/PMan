@@ -478,34 +478,72 @@ void PerformanceGuardian::OptimizeAudioService(bool enable) {
 
     HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!hProc) {
-        // Audio service is protected, usually requires SYSTEM/Admin.
-        // If we fail, it's likely due to permissions.
         return; 
     }
 
     if (enable) {
-        // 1. Priority: High (Not Realtime, to avoid locking system)
         SetPriorityClass(hProc, HIGH_PRIORITY_CLASS);
         
-        // 2. Affinity: Pin to the specific last core only
-        // This isolates audio from the Game (usually early cores) and OS Interrupts (Core 0)
-        DWORD_PTR processAffinity, systemAffinity;
-        if (GetProcessAffinityMask(hProc, &processAffinity, &systemAffinity)) {
-            // Find the highest bit set in system affinity (Last Logical Core)
-            DWORD_PTR mask = 1;
-            DWORD_PTR lastCore = 1;
-            while (mask != 0 && mask <= systemAffinity) {
-                if (systemAffinity & mask) lastCore = mask;
-                mask <<= 1;
+        // Detect hybrid CPU topology inline
+        static std::once_flag s_topoInit;
+        static DWORD_PTR s_coreMask = 0;
+        static bool s_shouldPin = true;
+
+        std::call_once(s_topoInit, []() {
+            DWORD bufferSize = 0;
+            if (!GetLogicalProcessorInformationEx(RelationAll, nullptr, &bufferSize) && 
+                GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+                s_shouldPin = false;
+                return;
             }
-            SetProcessAffinityMask(hProc, lastCore);
+
+            std::vector<BYTE> buffer(bufferSize);
+            auto* info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data());
+            if (!GetLogicalProcessorInformationEx(RelationAll, info, &bufferSize)) {
+                s_shouldPin = false;
+                return;
+            }
+
+            bool hasECore = false;
+            BYTE* ptr = buffer.data();
+            while (ptr < buffer.data() + bufferSize) {
+                auto* current = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(ptr);
+                
+                if (current->Relationship == RelationProcessorCore) {
+                    if (current->Processor.EfficiencyClass > 0) {
+                        hasECore = true;
+                        break;
+                    }
+                }
+                ptr += current->Size;
+            }
+
+            if (hasECore) {
+                s_shouldPin = false;
+                Log("[TOPOLOGY] Hybrid CPU detected. Audio affinity pinning disabled.");
+            } else {
+                s_shouldPin = true;
+                DWORD_PTR processAffinity, systemAffinity;
+                if (GetProcessAffinityMask(GetCurrentProcess(), &processAffinity, &systemAffinity)) {
+                    DWORD_PTR mask = 1;
+                    while (mask && (mask & systemAffinity) == 0) mask <<= 1;
+                    while (mask) {
+                        if (systemAffinity & mask) s_coreMask = mask;
+                        mask <<= 1;
+                    }
+                }
+            }
+        });
+
+        if (s_shouldPin && s_coreMask != 0) {
+            SetProcessAffinityMask(hProc, s_coreMask);
+            Log("[AUDIO] Optimized audiodg.exe (High Priority + Isolated P-Core)");
+        } else {
+            Log("[AUDIO] Optimized audiodg.exe (High Priority only - Thread Director active)");
         }
-        Log("[AUDIO] Optimized audiodg.exe (High Priority + Isolated Core)");
     } else {
-        // Revert to Normal
         SetPriorityClass(hProc, NORMAL_PRIORITY_CLASS);
         
-        // Restore all allowed cores
         DWORD_PTR processAffinity, systemAffinity;
         if (GetProcessAffinityMask(hProc, &processAffinity, &systemAffinity)) {
             SetProcessAffinityMask(hProc, systemAffinity);
