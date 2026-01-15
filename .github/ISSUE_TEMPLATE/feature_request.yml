@@ -36,7 +36,7 @@ body:
     id: solution
     attributes:
       label: Suggested Solution
-      description: Describe the solution you'd like. A new registry tweak? A UI change? New affinity logic?
+      description: Describe the solution you'd like. A new registry tweak? An UI change? New affinity logic?
     validations:
       required: true
   - type: textarea
