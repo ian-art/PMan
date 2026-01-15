@@ -143,8 +143,9 @@ void ThrottleManager::UpdateJobLimits(bool enableThrottle) {
     if (enableThrottle) {
         // SAFETY CHANGE: Removed Hard Cap. Set Soft Cap to 25%.
         // We rely on IDLE_PRIORITY_CLASS (applied elsewhere) for main throttling.
-        cpuRate.ControlFlags = JOB_OBJECT_CPU_RATE_CONTROL_ENABLE;
-        cpuRate.CpuRate = 2500; // 25% Soft Cap
+        // [FIX] Disable CPU Rate Control to prevent freezing foreground apps (e.g. YouTube) during network spikes
+        cpuRate.ControlFlags = 0; 
+        cpuRate.CpuRate = 0; 
     } else {
         // UNCAP: Disable rate control logic entirely
         cpuRate.ControlFlags = 0; 
@@ -160,10 +161,22 @@ void ThrottleManager::UpdateJobLimits(bool enableThrottle) {
 }
 
 void ThrottleManager::UpdateProcessPriorities(bool enableThrottle) {
+    // [FIX] Cache Foreground PID to prevent throttling the active user app (Game/Browser)
+    HWND hFg = GetForegroundWindow();
+    DWORD fgPid = 0;
+    if (hFg) GetWindowThreadProcessId(hFg, &fgPid);
+
     // Iterate safe copy or handle stale PIDs during iteration
     auto it = m_managedPids.begin();
     while (it != m_managedPids.end()) {
         DWORD pid = *it;
+
+        // [FIX] CRITICAL: Never throttle the foreground application, even if network is unstable.
+        // This ensures the user's active game or stream is not interrupted by background logic.
+        if (pid == fgPid && fgPid != 0) {
+            ++it;
+            continue;
+        }
 
         // VERIFY: Check if process is still alive before managing
         DWORD exitCode = 0;
