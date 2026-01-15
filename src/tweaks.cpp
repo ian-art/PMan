@@ -98,7 +98,8 @@ bool SetPrioritySeparation(DWORD val)
     static DWORD g_lastPriorityTick = 0;
     static std::atomic<DWORD> g_lastPriorityValue{0xFFFFFFFF};
 
-    DWORD now = GetTickCount();
+    // [FIX] C28159: Use GetTickCount64 cast to DWORD
+    DWORD now = static_cast<DWORD>(GetTickCount64());
     // If value hasn't changed AND it's been less than 1s, skip
     if (now - g_lastPriorityTick < 1000 && g_lastPriorityValue.load() == val) return true;
 
