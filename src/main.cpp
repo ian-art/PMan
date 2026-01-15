@@ -1485,13 +1485,13 @@ if (!taskExists)
 
             // Rate limit the tick calls to prevent CPU spinning
             if ((now - g_lastExplorerPollMs) >= pollIntervalMs) {
-                g_explorerBooster.OnTick();
-                
                 // FIX: Offload to persistent worker thread to protect Keyboard Hook
                 {
                     std::lock_guard<std::mutex> lock(g_backgroundQueueMtx);
-                    g_backgroundTasks.push_back([]{ 
-                        g_perfGuardian.OnPerformanceTick(); 
+                    g_backgroundTasks.push_back([]{
+						// Moved ExplorerBooster to background thread to prevent blocking the Keyboard Hook
+						g_explorerBooster.OnTick();
+						g_perfGuardian.OnPerformanceTick();
                     });
                 }
                 g_backgroundCv.notify_one();
