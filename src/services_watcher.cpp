@@ -58,9 +58,9 @@ static bool HasActiveDependents(SC_HANDLE hSvc) {
     DWORD count = 0;
     
     // First call to determine buffer size
-    EnumDependentServicesW(hSvc, SERVICE_ACTIVE, nullptr, 0, &bytesNeeded, &count);
-    
-    if (GetLastError() == ERROR_MORE_DATA && bytesNeeded > 0) {
+    // Fix C6031: Check return (expect failure)
+    if (!EnumDependentServicesW(hSvc, SERVICE_ACTIVE, nullptr, 0, &bytesNeeded, &count) && 
+        GetLastError() == ERROR_MORE_DATA && bytesNeeded > 0) {
         // If we have data, it means there ARE active dependents
         return true; 
     }
@@ -75,10 +75,10 @@ void ServiceWatcher::ScanAndTrimManualServices() {
     DWORD servicesReturned = 0;
     DWORD resumeHandle = 0;
     
-    EnumServicesStatusExW(hSc, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL, 
-        nullptr, 0, &bytesNeeded, &servicesReturned, &resumeHandle, nullptr);
-
-    if (GetLastError() != ERROR_MORE_DATA) {
+    // Fix C6031: Check return (expect failure)
+    if (!EnumServicesStatusExW(hSc, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL, 
+        nullptr, 0, &bytesNeeded, &servicesReturned, &resumeHandle, nullptr) && 
+        GetLastError() != ERROR_MORE_DATA) {
         CloseServiceHandle(hSc);
         return;
     }
@@ -112,9 +112,9 @@ void ServiceWatcher::ScanAndTrimManualServices() {
             }
 
             DWORD configSize = 0;
-            QueryServiceConfigW(hSvc, nullptr, 0, &configSize);
-            
-            if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+            // Fix C6031: Check return (expect failure)
+            if (!QueryServiceConfigW(hSvc, nullptr, 0, &configSize) && 
+                GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
                 std::vector<BYTE> cfgBuf(configSize);
                 LPQUERY_SERVICE_CONFIGW config = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(cfgBuf.data());
                 
