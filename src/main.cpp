@@ -1433,10 +1433,20 @@ if (!taskExists)
         // Wait for messages with timeout - efficient polling that doesn't spin CPU
         // Use MsgWaitForMultipleObjects to stay responsive to inputs/shutdown while waiting
         DWORD waitResult = MsgWaitForMultipleObjects(1, &g_hShutdownEvent, FALSE, 100, QS_ALLINPUT);
+
+        // [SAFETY] Fix C4189 & Prevent CPU spin if API fails
+        if (waitResult == WAIT_FAILED) {
+            Sleep(100); 
+            continue;
+        }
+
+        // [OPTIMIZATION] If shutdown event signaled, skip tick logic to exit faster
+        if (waitResult == WAIT_OBJECT_0) {
+            continue;
+        }
         
-        // Process explorer boost tick only if we timed out (no messages to process)
-        // This prevents calling OnTick() during active user input, reducing overhead
-		if (waitResult == WAIT_TIMEOUT)
+        // [FIX] MOVED OUTSIDE: Check tick timers regardless of input state
+        // This ensures scanning happens even if the user is moving the mouse
         {
             // Calculate adaptive polling interval based on idle state
             // FIX: Use GetTickCount64 (C28159)
@@ -1449,7 +1459,7 @@ if (!taskExists)
                                    idleDurationMs > (thresholdMs - 5000));
             uint32_t pollIntervalMs = approachingIdle ? 250 : 2000;
 
-			// Rate limit the tick calls to prevent CPU spinning
+            // Rate limit the tick calls to prevent CPU spinning
             if ((now - g_lastExplorerPollMs) >= pollIntervalMs) {
                 g_explorerBooster.OnTick();
                 
@@ -1461,10 +1471,10 @@ if (!taskExists)
                     });
                 }
                 g_backgroundCv.notify_one();
-				
-				// Run Service Watcher
+                
+                // Run Service Watcher
                 ServiceWatcher::OnTick();
-				
+                
                 g_lastExplorerPollMs = now;
             }
         }
