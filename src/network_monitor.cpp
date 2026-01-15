@@ -144,16 +144,9 @@ void NetworkMonitor::AttemptAutoRepair() {
             ExecuteNetCommand(L"cmd.exe /c ipconfig /release && ipconfig /renew");
             break;
 
-        case 3: // Hard Fix: Reset Adapter (Requires Admin)
-            if (g_caps.hasAdminRights) {
-                Log("[NET_REPAIR] Resetting Network Adapter (Winsock Reset)...");
-                ExecuteNetCommand(L"cmd.exe /c netsh winsock reset && netsh int ip reset");
-            } else {
-                Log("[NET_REPAIR] Skipping Stage 3 (Requires Admin Rights)");
-            }
             // End of cycle, start cooldown
+			m_repairStage = 0; 
             m_lastRepairTime = now;
-            m_repairStage = 0; 
             break;
             
         default:
