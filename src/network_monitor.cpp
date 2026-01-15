@@ -23,6 +23,7 @@
 #include "utils.h"
 #include "globals.h" // For g_activeNetPids
 #include <winsock2.h>
+#include <ws2tcpip.h> // [FIX] Required for iphlpapi.h SAL annotations (defines MIB_TCP6TABLE_OWNER_PID)
 #include <iphlpapi.h>
 #include <shellapi.h>
 #include <icmpapi.h>
@@ -71,7 +72,8 @@ bool NetworkMonitor::PerformLatencyProbe() {
     if (hIcmp == INVALID_HANDLE_VALUE) return false;
 
     char sendData[] = "PManProbe";
-    DWORD replySize = sizeof(ICMP_ECHO_REPLY) + sizeof(sendData);
+    // [FIX] C28020: Add 8 bytes padding for IO_STATUS_BLOCK/Error info as required by IcmpSendEcho
+    DWORD replySize = sizeof(ICMP_ECHO_REPLY) + sizeof(sendData) + 8;
     std::vector<char> replyBuffer(replySize);
     
     // Targets: 1.1.1.1 (Cloudflare) and 8.8.8.8 (Google)
@@ -164,7 +166,8 @@ void NetworkMonitor::AttemptAutoRepair() {
 // Scan for bandwidth-hogging processes
 // Uses GetExtendedTcpTable (AV-Safe, Read-Only) to find PIDs with active connections.
 void NetworkMonitor::UpdateNetworkActivityMap() {
-    DWORD size = 0;
+    // [FIX] C28020: Initialize size to structure header size to satisfy analyzer range check
+    DWORD size = sizeof(MIB_TCPTABLE_OWNER_PID);
     // Query size first
     if (GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) != ERROR_INSUFFICIENT_BUFFER) {
         return;
@@ -238,7 +241,11 @@ NetworkState NetworkMonitor::CheckConnectivity() {
 
 void NetworkMonitor::WorkerThread() {
     // Initialize COM for this thread
-    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    // [FIX] C6031: Check return value
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(hr)) {
+        Log("[NET] Warning: CoInitializeEx failed: " + std::to_string(hr));
+    }
 
     while (m_running) {
         NetworkState newState = CheckConnectivity();
