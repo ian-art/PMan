@@ -1,0 +1,6 @@
+# Configuration for Issue Templates
+blank_issues_enabled: false
+contact_links:
+  - name: PMan Support
+    url: https://github.com/ian-art/Priority_Manager/discussions
+    about: Please ask general questions or discuss configurations here.

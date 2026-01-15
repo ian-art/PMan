@@ -1,0 +1,74 @@
+name: 🐛 Bug Report
+description: Report a crash, priority failure, or unexpected behavior in Priority Manager.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Thanks for helping improve Priority Manager (PMan)!**
+        Please provide as much detail as possible to help us debug system-specific issues.
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Prerequisite Checklist
+      options:
+        - label: I am using the latest version of PMan.
+          required: true
+        - label: I have checked `log.txt` or the "Live Log" viewer for specific error messages.
+          required: true
+        - label: I have searched existing issues to ensure this is not a duplicate.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: PMan Version
+      description: e.g., v1.0.5 (Check the "About" tray menu or file properties).
+      placeholder: v1.x.x
+    validations:
+      required: true
+  - type: input
+    id: windows_version
+    attributes:
+      label: Windows Version & Build
+      description: Press `Win+R`, type `winver`. e.g., Windows 11 23H2 (Build 22631.xxxx).
+      placeholder: Windows 10/11 Build ...
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware Specifications
+      description: Crucial for debugging Core Affinity (Hybrid/3D V-Cache) and Memory Optimizer issues.
+      placeholder: CPU (e.g., i9-13900K, Ryzen 7800X3D), RAM (e.g., 32GB)
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: Describe what happened. Did the game not detect? Did the overlay crash?
+      placeholder: "When I launch 'Valorant', PMan detects it but fails to apply the 'High Priority' optimization..."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      placeholder: |
+        1. Start PMan
+        2. Edit `config.ini` to set...
+        3. Launch Game '...'
+        4. Observe process priority in Task Manager...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs / Config
+      description: |
+        Please paste relevant snippets from **`log.txt`** or your **`config.ini`** settings here.
+        *You can also drag and drop the files into this box.*
+      render: shell
+    validations:
+      required: false
