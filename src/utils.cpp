@@ -68,6 +68,12 @@ bool IsSystemCriticalProcess(const std::wstring& exeName) {
         L"sensecncproxy.exe", L"mpcmdrun.exe", L"smartscreen.exe",
         L"sgrmbroker.exe", L"sihost.exe",
         
+		// ADD THESE FOR FULL WINDOWS 10/11 COMPATIBILITY:
+        L"searchapp.exe",          // Win10 Search
+        L"searchhost.exe",         // Win11 Search
+        L"startmenuexperiencehost.exe", // Win11 Start Menu
+        L"textinputhost.exe",      // Emoji panel / Touch keyboard
+		
         // System Core
         L"csrss.exe", L"lsass.exe", L"wininit.exe", L"services.exe",
         L"smss.exe", L"winlogon.exe", L"dwm.exe", L"spoolsv.exe",
