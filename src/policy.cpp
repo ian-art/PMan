@@ -47,11 +47,26 @@ typedef struct _PROCESS_POWER_THROTTLING_STATE {
 } PROCESS_POWER_THROTTLING_STATE, *PPROCESS_POWER_THROTTLING_STATE;
 #endif
 
-// Definitions for Silent I/O Priority
+// Definitions for Silent I/O Priority & Command Line Inspection
 typedef NTSTATUS (NTAPI *PNT_SET_INFO_PROCESS)(HANDLE, ULONG, PVOID, ULONG);
+typedef NTSTATUS (NTAPI *PNT_QUERY_INFO_PROCESS)(HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG, PULONG);
+
 #ifndef ProcessIoPriority
 #define ProcessIoPriority 33
 #endif
+#ifndef ProcessCommandLineInformation
+#define ProcessCommandLineInformation 60
+#endif
+
+typedef struct _UNICODE_STRING_LOCAL {
+    USHORT Length;
+    USHORT MaximumLength;
+    PWSTR  Buffer;
+} UNICODE_STRING_LOCAL;
+
+typedef struct _PROCESS_COMMAND_LINE_INFO {
+    UNICODE_STRING_LOCAL CommandLine;
+} PROCESS_COMMAND_LINE_INFO;
 
 // Helper: Find all child processes (renderers, GPU, workers) of a browser
 static std::vector<DWORD> GetChildProcesses(DWORD parentPid) {
@@ -77,28 +92,63 @@ static void ApplySmartBrowserPolicy(DWORD pid, bool isForeground) {
     targets.push_back(pid); // Include main process
 
     for (DWORD targetPid : targets) {
-        HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION, FALSE, targetPid);
+        // [FIX] Request QUERY access to check for GPU/Utility processes
+        HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
         if (hProc) {
+            bool isCritical = false;
+            
+            // Check process type to avoid throttling GPU/Audio when in background
+            if (!isForeground) {
+                static PNT_QUERY_INFO_PROCESS NtQueryInfo = (PNT_QUERY_INFO_PROCESS)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationProcess");
+                if (NtQueryInfo) {
+                    ULONG len = 0;
+                    NtQueryInfo(hProc, (PROCESS_INFORMATION_CLASS)ProcessCommandLineInformation, nullptr, 0, &len);
+                    if (len > 0) {
+                        std::vector<BYTE> buf(len);
+                        if (NtQueryInfo(hProc, (PROCESS_INFORMATION_CLASS)ProcessCommandLineInformation, buf.data(), len, &len) >= 0) {
+                            auto info = reinterpret_cast<PROCESS_COMMAND_LINE_INFO*>(buf.data());
+                            if (info->CommandLine.Buffer && info->CommandLine.Length > 0) {
+                                std::wstring cmd(info->CommandLine.Buffer, info->CommandLine.Length / sizeof(wchar_t));
+                                // Critical browser processes that must NOT sleep
+                                if (cmd.find(L"type=gpu-process") != std::wstring::npos || 
+                                    cmd.find(L"type=utility") != std::wstring::npos) {
+                                    isCritical = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             PROCESS_POWER_THROTTLING_STATE PowerThrottling = {};
             PowerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
             PowerThrottling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
 
             if (isForeground) {
                 // FOREGROUND: High Performance
-                SetPriorityClass(hProc, ABOVE_NORMAL_PRIORITY_CLASS); // Snappy UI, but AV-safe
-                PowerThrottling.StateMask = 0; // DISABLE Efficiency Mode (EcoQoS)
+                SetPriorityClass(hProc, ABOVE_NORMAL_PRIORITY_CLASS); 
+                PowerThrottling.StateMask = 0; // DISABLE Efficiency Mode
                 SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
             } else {
-                // BACKGROUND: Deep Sleep
-                SetPriorityClass(hProc, IDLE_PRIORITY_CLASS); // Get out of the way
-                PowerThrottling.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED; // ENABLE Efficiency Mode
-                SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
+                // BACKGROUND
+                if (isCritical) {
+                    // [FIX] Critical background processes (GPU/Audio): Keep responsive
+                    SetPriorityClass(hProc, BELOW_NORMAL_PRIORITY_CLASS); 
+                    PowerThrottling.StateMask = 0; // DISABLE Efficiency Mode (Crucial for Video/Audio)
+                    SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
+                } else {
+                    // [FIX] Renderers/Tabs: Deep Sleep
+                    SetPriorityClass(hProc, IDLE_PRIORITY_CLASS);
+                    PowerThrottling.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED; // ENABLE Efficiency Mode
+                    SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
+                }
             }
 
-            // [OPTIMIZATION] Set I/O Priority silently using existing handle (Fixes log spam + overhead)
+            // [OPTIMIZATION] Set I/O Priority silently using existing handle
             static PNT_SET_INFO_PROCESS NtSetInfo = (PNT_SET_INFO_PROCESS)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetInformationProcess");
             if (NtSetInfo) {
-                ULONG ioPriority = isForeground ? 2 : 0; // 2=Normal, 0=VeryLow
+                // Keep Normal I/O for critical processes to prevent audio/video dropouts
+                ULONG ioPriority = (isForeground || isCritical) ? 2 : 0; // 2=Normal, 0=VeryLow
                 NtSetInfo(hProc, ProcessIoPriority, &ioPriority, sizeof(ioPriority));
             }
 
