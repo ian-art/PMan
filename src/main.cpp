@@ -484,9 +484,9 @@ static void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWO
         if (PowerGetActiveScheme(NULL, &pCurrentScheme) == ERROR_SUCCESS)
         {
             wchar_t currentGuidStr[64] = {};
-            StringFromGUID2(*pCurrentScheme, currentGuidStr, 64);
-            
-            // If current scheme differs from startup scheme, force restore
+        if (StringFromGUID2(*pCurrentScheme, currentGuidStr, 64) == 0) currentGuidStr[0] = L'\0';
+        
+        // If current scheme differs from startup scheme, force restore
             if (_wcsicmp(currentGuidStr, startupPowerScheme.c_str()) != 0)
             {
                  GUID originalGuid;
@@ -582,9 +582,10 @@ static void LaunchRegistryGuard(DWORD originalVal)
     if (PowerGetActiveScheme(NULL, &pStartupScheme) == ERROR_SUCCESS)
     {
         wchar_t buf[64] = {};
-        StringFromGUID2(*pStartupScheme, buf, 64);
+    if (StringFromGUID2(*pStartupScheme, buf, 64) != 0) {
         powerGuidStr = buf; // e.g., "{381B4222-F694-41F0-9685-FF5BB260DF2E}"
-        LocalFree(pStartupScheme);
+    }
+    LocalFree(pStartupScheme);
     }
 
     // Pass PID, Times, RegVal, AND PowerGUID to the guard instance
@@ -1204,10 +1205,10 @@ if (!taskExists)
                 if (hSvc)
                 {
                     // 1. Check if DISABLED first
-                    DWORD bytesNeeded = 0;
-                    QueryServiceConfigW(hSvc, nullptr, 0, &bytesNeeded);
-                    if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
-                        std::vector<BYTE> buffer(bytesNeeded);
+            DWORD bytesNeeded = 0;
+            // Fix C6031: Check return value (expect failure with buffer size)
+            if (!QueryServiceConfigW(hSvc, nullptr, 0, &bytesNeeded) && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+                std::vector<BYTE> buffer(bytesNeeded);
                         LPQUERY_SERVICE_CONFIGW config = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(buffer.data());
                         if (QueryServiceConfigW(hSvc, config, bytesNeeded, &bytesNeeded)) {
                             if (config->dwStartType == SERVICE_DISABLED) {
