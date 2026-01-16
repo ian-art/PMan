@@ -28,6 +28,7 @@
 #include "memory_optimizer.h" // Smart RAM Cleaner
 #include "input_guardian.h"   // Input Responsiveness
 #include "idle_affinity.h"    // Idle Core Parking
+#include "session_cache.h"    // [CACHE]
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
@@ -183,5 +184,8 @@ extern std::atomic<double> g_lastDpcLatency;
 // Stores PIDs that have active TCP connections (Updated by NetworkMonitor)
 extern std::shared_mutex g_netActivityMtx;
 extern std::unordered_set<DWORD> g_activeNetPids GUARDED_BY(g_netActivityMtx);
+
+// Session Smart Cache (Atomic Raw Pointer)
+extern std::atomic<SessionSmartCache*> g_sessionCache;
 
 #endif // PMAN_GLOBALS_H

@@ -1106,6 +1106,10 @@ void PerformGracefulShutdown()
 {
     Log("Performing graceful shutdown...");
     
+    // [CACHE] Atomic destruction on shutdown
+    SessionSmartCache* oldCache = g_sessionCache.exchange(nullptr, std::memory_order_acquire);
+    if (oldCache) delete oldCache;
+    
     StopEtwSession();
     
     if (g_sessionLocked.load())

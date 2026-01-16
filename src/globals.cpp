@@ -152,3 +152,6 @@ std::atomic<double> g_lastDpcLatency{0.0};
 // Network Activity Cache
 std::shared_mutex g_netActivityMtx;
 std::unordered_set<DWORD> g_activeNetPids;
+
+// Session Smart Cache (Atomic Raw Pointer)
+std::atomic<SessionSmartCache*> g_sessionCache{nullptr};

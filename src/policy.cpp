@@ -293,6 +293,10 @@ void CheckAndReleaseSessionLock()
             
             // Notify Performance Guardian
             g_perfGuardian.OnGameStop(lockedPid);
+
+            // [CACHE] Atomic destruction (Acquire)
+            SessionSmartCache* oldCache = g_sessionCache.exchange(nullptr, std::memory_order_acquire);
+            if (oldCache) delete oldCache;
             
             // ---------------------------------------------------------
             // CRITICAL FIX: Trigger Post-Game Boost immediately
@@ -586,10 +590,20 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
         }
 
         // ---------------------------------------------------------
-        // STEP 4: WINDOW DETECTION (Only if mode not yet determined)
+        // STEP 5: NAME LIST DETECTION (Explicit Config Priority)
+        // ---------------------------------------------------------
+        if (mode == 0)
+        {
+            std::shared_lock lg(g_setMtx);
+            if (g_games.count(exe))   mode = 1;
+            else if (g_videoPlayers.count(exe)) mode = 1; // Treat Video Players as Games (High Perf)
+            else if (g_browsers.count(exe)) mode = 2;
+        }
+
+        // ---------------------------------------------------------
+        // STEP 4: WINDOW DETECTION (Heuristic Fallback)
         // ---------------------------------------------------------
         // Skip window detection for processes we know should be ignored
-        // This prevents cmd.exe/explorer.exe windows from being misclassified
         if (mode == 0 && hwnd)
         {
             // Double-check: if exe is in ignore list, skip window detection entirely
@@ -604,17 +618,6 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                     }
                 }
             }
-        }
-        
-        // ---------------------------------------------------------
-        // STEP 5: NAME LIST DETECTION (Only if mode not yet determined)
-        // ---------------------------------------------------------
-        if (mode == 0)
-        {
-            std::shared_lock lg(g_setMtx);
-            if (g_games.count(exe))   mode = 1;
-            else if (g_videoPlayers.count(exe)) mode = 1; // Treat Video Players as Games (High Perf)
-            else if (g_browsers.count(exe)) mode = 2;
         }
 
     apply_policy:  // FIX: Label for the goto jump
@@ -688,6 +691,21 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
 
                 g_lockedGamePid.store(pid);
                 
+                // [CACHE] Atomic Update (Release)
+                // Build new instance locally first
+                SessionSmartCache* newCache = new SessionSmartCache(pid);
+                
+                // Fail-Safe - Do not publish if invalid
+                if (!newCache->IsValid()) {
+                     delete newCache;
+                     newCache = nullptr;
+                     Log("[CACHE] Transition init failed. Cache disabled.");
+                }
+
+                // Publish atomically
+                SessionSmartCache* prevCache = g_sessionCache.exchange(newCache, std::memory_order_release);
+                if (prevCache) delete prevCache;
+
                 // Update process identity for the lock
                 ProcessIdentity newIdentity;
                 if (GetProcessIdentity(pid, newIdentity))
@@ -878,6 +896,18 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
 
                 // Initialize Performance Guardian Session
                 g_perfGuardian.OnGameStart(pid, exe);
+
+                // [CACHE] Atomic Publication (Release)
+                SessionSmartCache* initCache = new SessionSmartCache(pid);
+                
+                // Fail-Safe Initialization. If invalid, disable cache entirely.
+                if (!initCache->IsValid()) {
+                    delete initCache;
+                    initCache = nullptr;
+                    Log("[CACHE] Initialization failed checks. Cache disabled for this session.");
+                }
+
+                std::atomic_store_explicit(&g_sessionCache, initCache, std::memory_order_release);
         
                 // Verify if core pinning is allowed by profile
                 if (!g_perfGuardian.IsOptimizationAllowed(exe, "pin")) {
@@ -885,11 +915,19 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                     SetProcessAffinity(pid, 2); 
                 }	
         
-                // Store process identity for PID reuse protection
-                ProcessIdentity currentIdentity;
-                if (GetProcessIdentity(pid, currentIdentity)) {
+                // [FIX] Use cache's immutable identity to prevent race conditions
+                if (initCache && initCache->IsValid()) {
+                    const CachedProcessData* pData = initCache->GetProcessData();
+                    
+                    // Construct Identity from Cache (Race-Free)
+                    ProcessIdentity cacheId;
+                    cacheId.pid = pData->pid;
+                    // Reconstruct FILETIME from uint64_t (Low/High parts)
+                    cacheId.creationTime.dwLowDateTime = static_cast<DWORD>(pData->creationTime & 0xFFFFFFFF);
+                    cacheId.creationTime.dwHighDateTime = static_cast<DWORD>(pData->creationTime >> 32);
+                    
                     std::lock_guard lock(g_processIdentityMtx);
-                    g_lastProcessIdentity = currentIdentity;
+                    g_lastProcessIdentity = cacheId;
                 }
         
                 Log("Session lock ACTIVATED - game mode locked (PID: " + std::to_string(pid) + ")");
@@ -915,6 +953,10 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                     // Notify Performance Guardian and generate report
                     DWORD stoppingPid = g_lockedGamePid.load();
                     if (stoppingPid != 0) g_perfGuardian.OnGameStop(stoppingPid);
+
+                    // [CACHE] Atomic destruction (Acquire)
+                    SessionSmartCache* dyingCache = g_sessionCache.exchange(nullptr, std::memory_order_acquire);
+                    if (dyingCache) delete dyingCache;
 
                     g_sessionLocked.store(false);
                     g_lockedGamePid.store(0);

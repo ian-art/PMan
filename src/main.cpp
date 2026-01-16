@@ -967,6 +967,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return 0;
     } // End of WM_COMMAND Block
 
+    case WM_DEVICECHANGE:
+        // Invalidate cache on hardware/topology changes
+        if (wParam == 0x0018 /* DBT_CONFIGCHANGED */) {
+            Log("[HARDWARE] System configuration changed. Scheduling cache invalidation.");
+            g_reloadNow.store(true);
+        }
+        return TRUE;
+
     case WM_DESTROY:
         Shell_NotifyIconW(NIM_DELETE, &g_nid);
         PostQuitMessage(0);
@@ -1444,6 +1452,10 @@ if (!taskExists)
             {
                 std::lock_guard<std::mutex> lock(g_backgroundQueueMtx);
                 g_backgroundTasks.push_back([]() {
+                    Sleep(250);
+                    // [CACHE] Atomic destruction on Config Reload
+                    SessionSmartCache* oldCache = g_sessionCache.exchange(nullptr, std::memory_order_acquire);
+                    if (oldCache) delete oldCache;
                     Sleep(250);
                     LoadConfig();
                 });
