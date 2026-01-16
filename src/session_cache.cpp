@@ -215,3 +215,34 @@ bool SessionSmartCache::ValidateIdentity(DWORD livePid) const {
     CloseHandle(hProc);
     return match;
 }
+
+bool SessionSmartCache::ValidateIdentity(DWORD livePid, HANDLE hProc) const {
+    // Fail immediately if cache is invalid
+    if (!m_isValid) return false;
+
+    if (livePid != m_processData->pid) {
+        RecordMiss();
+        return false;
+    }
+    
+    // Optimization: Use provided handle directly (Avoids double OpenProcess)
+    bool match = false;
+    FILETIME ftCreate, ftExit, ftKernel, ftUser;
+    
+    if (GetProcessTimes(hProc, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+        uint64_t liveCreateTime = FileTimeToULL(ftCreate);
+        
+        // Primary Anti-Reuse Check
+        if (liveCreateTime == m_processData->creationTime) {
+            match = true;
+            RecordHit();
+        } else {
+            Log("[CACHE] Identity Mismatch: PID reused.");
+            RecordMiss();
+        }
+    } else {
+        RecordMiss();
+    }
+    
+    return match;
+}

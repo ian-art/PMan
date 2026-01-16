@@ -89,6 +89,7 @@ public:
 
     // Identity Validation
     bool ValidateIdentity(DWORD livePid) const;
+    bool ValidateIdentity(DWORD livePid, HANDLE hProc) const; // Optimization overload
 
     // Observability
     void RecordHit() const { m_hits.fetch_add(1, std::memory_order_relaxed); }

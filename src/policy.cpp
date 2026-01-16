@@ -493,9 +493,26 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
             return;
         }
 
-        // Fix: Re-verify PID identity to prevent acting on recycled PID
-        ProcessIdentity verifyIdentity;
-        if (!GetProcessIdentity(pid, verifyIdentity)) return;
+        // READ INTEGRATION: Check Cache First
+        bool identityConfirmed = false;
+        // Acquire the atomic pointer safely
+        SessionSmartCache* cache = g_sessionCache.load(std::memory_order_acquire);
+        
+        // 1. Check if cache exists and is valid
+        if (cache && cache->IsValid()) {
+            // 2. Validate Identity (Fast Check: Creation Time only, skips Path Parsing)
+            // [OPTIMIZATION] Use existing handle (hGuard) to save a kernel call
+            if (cache->ValidateIdentity(pid, hGuard.get())) {
+                identityConfirmed = true; 
+                // Hit is automatically recorded by ValidateIdentity() inside the class
+            }
+        }
+
+        // 3. Fallback to OS if cache missed or doesn't apply
+        if (!identityConfirmed) {
+            ProcessIdentity verifyIdentity;
+            if (!GetProcessIdentity(pid, verifyIdentity)) return;
+        }
         
         // Fix: Use pathBuf.data() because 'path' was replaced by a vector
         std::wstring exe = ExeFromPath(pathBuf.data());
@@ -818,18 +835,96 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                 Log(prefix + WideToUtf8(exe.c_str()));
             }
             
+            // [MOVED] Session lock management (Run BEFORE optimizations to load profiles/cache)
+            if (mode == 1 && modeChanged)
+            {
+                g_sessionLocked.store(true);
+                g_lockedGamePid.store(pid);
+                g_lockStartTime.store(std::chrono::steady_clock::now().time_since_epoch().count());
+
+                // Initialize Performance Guardian Session (Loads Profile)
+                g_perfGuardian.OnGameStart(pid, exe);
+
+                // [CACHE] Atomic Publication (Release)
+                SessionSmartCache* initCache = new SessionSmartCache(pid);
+                
+                if (!initCache->IsValid()) {
+                    delete initCache;
+                    initCache = nullptr;
+                    Log("[CACHE] Initialization failed checks. Cache disabled for this session.");
+                }
+
+                std::atomic_store_explicit(&g_sessionCache, initCache, std::memory_order_release);
+        
+                // Verify if core pinning is allowed by profile
+                // Note: Actual enforcement happens in Affinity Strategy block below
+                if (!g_perfGuardian.IsOptimizationAllowed(exe, "pin")) {
+                    Log("[PERF] Core pinning disabled by learned profile for " + WideToUtf8(exe.c_str()));
+                    SetProcessAffinity(pid, 2); // Ensure default state
+                }   
+        
+                // [FIX] Use cache's immutable identity to prevent race conditions
+                if (initCache && initCache->IsValid()) {
+                    const CachedProcessData* pData = initCache->GetProcessData();
+                    
+                    ProcessIdentity cacheId;
+                    cacheId.pid = pData->pid;
+                    cacheId.creationTime.dwLowDateTime = static_cast<DWORD>(pData->creationTime & 0xFFFFFFFF);
+                    cacheId.creationTime.dwHighDateTime = static_cast<DWORD>(pData->creationTime >> 32);
+                    
+                    std::lock_guard lock(g_processIdentityMtx);
+                    g_lastProcessIdentity = cacheId;
+                }
+        
+                Log("Session lock ACTIVATED - game mode locked (PID: " + std::to_string(pid) + ")");
+
+                if (g_suspendUpdatesDuringGames.load()) SuspendBackgroundServices();
+                else Log("[SERVICE] Service suspension disabled by config");
+            }
+            else
+            {
+                // CRITICAL FIX: Only stop/boost explorer if we are returning to DESKTOP (0).
+                if (mode == 0) g_explorerBooster.OnGameStop();
+
+                if (g_sessionLocked.load())
+                {
+                    DWORD stoppingPid = g_lockedGamePid.load();
+                    if (stoppingPid != 0) g_perfGuardian.OnGameStop(stoppingPid);
+
+                    SessionSmartCache* dyingCache = g_sessionCache.exchange(nullptr, std::memory_order_acquire);
+                    if (dyingCache) delete dyingCache;
+
+                    g_sessionLocked.store(false);
+                    g_lockedGamePid.store(0);
+                    g_lockStartTime.store(0);
+                    Log("Session lock RELEASED - switched to browser/desktop mode");
+
+                    if (g_suspendUpdatesDuringGames.load()) {
+                        Log("[SERVICE] About to resume background services...");
+                        ResumeBackgroundServices();
+                    }
+                }
+            }
+
             // --- CPU Affinity Strategy ---
             AffinityStrategy strategy = GetRecommendedStrategy();
 
-            if (strategy == AffinityStrategy::HybridPinning) 
+            // [FIX] Check if profile forbids pinning (Prevents Thrashing)
+            bool allowAffinity = true;
+            if (mode == 1 && !g_perfGuardian.IsOptimizationAllowed(exe, "pin")) {
+                allowAffinity = false;
+            }
+
+            if (allowAffinity)
             {
-                // Intel 12th+ Gen: Use P-Cores for Game, E-Cores for Background
-                SetHybridCoreAffinity(pid, mode);
-            } 
-            else if (strategy == AffinityStrategy::GameIsolation) 
-            {
-                // Homogeneous (Old Intel/AMD): Use Core Partitioning
-                SetProcessAffinity(pid, mode);
+                if (strategy == AffinityStrategy::HybridPinning) 
+                {
+                    SetHybridCoreAffinity(pid, mode);
+                } 
+                else if (strategy == AffinityStrategy::GameIsolation) 
+                {
+                    SetProcessAffinity(pid, mode);
+                }
             }
             // else: Strategy::None -> Do nothing
 
@@ -885,95 +980,6 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
             if (modeChanged)
             {
                 g_lastPolicyChange.store(std::chrono::steady_clock::now().time_since_epoch().count());
-            }
-        
-            // Session lock management (only for mode changes)
-            if (mode == 1 && modeChanged)
-            {
-                g_sessionLocked.store(true);
-                g_lockedGamePid.store(pid);
-                g_lockStartTime.store(std::chrono::steady_clock::now().time_since_epoch().count());
-
-                // Initialize Performance Guardian Session
-                g_perfGuardian.OnGameStart(pid, exe);
-
-                // [CACHE] Atomic Publication (Release)
-                SessionSmartCache* initCache = new SessionSmartCache(pid);
-                
-                // Fail-Safe Initialization. If invalid, disable cache entirely.
-                if (!initCache->IsValid()) {
-                    delete initCache;
-                    initCache = nullptr;
-                    Log("[CACHE] Initialization failed checks. Cache disabled for this session.");
-                }
-
-                std::atomic_store_explicit(&g_sessionCache, initCache, std::memory_order_release);
-        
-                // Verify if core pinning is allowed by profile
-                if (!g_perfGuardian.IsOptimizationAllowed(exe, "pin")) {
-                    Log("[PERF] Core pinning disabled by learned profile for " + WideToUtf8(exe.c_str()));
-                    SetProcessAffinity(pid, 2); 
-                }	
-        
-                // [FIX] Use cache's immutable identity to prevent race conditions
-                if (initCache && initCache->IsValid()) {
-                    const CachedProcessData* pData = initCache->GetProcessData();
-                    
-                    // Construct Identity from Cache (Race-Free)
-                    ProcessIdentity cacheId;
-                    cacheId.pid = pData->pid;
-                    // Reconstruct FILETIME from uint64_t (Low/High parts)
-                    cacheId.creationTime.dwLowDateTime = static_cast<DWORD>(pData->creationTime & 0xFFFFFFFF);
-                    cacheId.creationTime.dwHighDateTime = static_cast<DWORD>(pData->creationTime >> 32);
-                    
-                    std::lock_guard lock(g_processIdentityMtx);
-                    g_lastProcessIdentity = cacheId;
-                }
-        
-                Log("Session lock ACTIVATED - game mode locked (PID: " + std::to_string(pid) + ")");
-
-                if (g_suspendUpdatesDuringGames.load())
-                {
-                    SuspendBackgroundServices();
-                }
-                else
-                {
-                    Log("[SERVICE] Service suspension disabled by config");
-                }
-            }
-            else
-            {
-                // CRITICAL FIX: Only stop/boost explorer if we are returning to DESKTOP (0).
-                if (mode == 0) {
-                     g_explorerBooster.OnGameStop();
-                }
-
-                if (g_sessionLocked.load())
-                {
-                    // Notify Performance Guardian and generate report
-                    DWORD stoppingPid = g_lockedGamePid.load();
-                    if (stoppingPid != 0) g_perfGuardian.OnGameStop(stoppingPid);
-
-                    // [CACHE] Atomic destruction (Acquire)
-                    SessionSmartCache* dyingCache = g_sessionCache.exchange(nullptr, std::memory_order_acquire);
-                    if (dyingCache) delete dyingCache;
-
-                    g_sessionLocked.store(false);
-                    g_lockedGamePid.store(0);
-                    g_lockStartTime.store(0);
-                    Log("Session lock RELEASED - switched to browser/desktop mode");
-
-                    if (g_suspendUpdatesDuringGames.load())
-                    {
-                        Log("[SERVICE] About to resume background services...");
-                        ResumeBackgroundServices();
-                        Log("[SERVICE] Background services resume call completed");
-                    }
-                    else
-                    {
-                        Log("[SERVICE] Resume skipped (suspension disabled by config)");
-                    }
-                }
             }
         }
         
