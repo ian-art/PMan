@@ -136,26 +136,26 @@ void NetworkMonitor::AttemptAutoRepair() {
     Log("[NET_REPAIR] Connection dead > 5s. Attempting Auto-Repair Stage " + std::to_string(m_repairStage));
 
     switch (m_repairStage) {
-        case 1: // Soft Fix: DNS Flush
-            Log("[NET_REPAIR] Flushing DNS Cache...");
-            ExecuteNetCommand(L"cmd.exe /c ipconfig /flushdns");
-            break;
+		case 1:
+			Log("[NET_REPAIR] Flushing DNS Cache...");
+			ExecuteNetCommand(L"cmd.exe /c ipconfig /flushdns");
+			break;
 
-        case 2: // Medium Fix: Release/Renew IP
-            Log("[NET_REPAIR] Renewing IP Address...");
-            ExecuteNetCommand(L"cmd.exe /c ipconfig /release && ipconfig /renew");
-            break;
+    case 2:
+			Log("[NET_REPAIR] Renewing IP Address...");
+			ExecuteNetCommand(L"cmd.exe /c ipconfig /release && ipconfig /renew");
+			break;
 
-            // End of cycle, start cooldown
-			m_repairStage = 0; 
-            m_lastRepairTime = now;
-            break;
-            
-        default:
-            m_repairStage = 0;
-            m_lastRepairTime = now;
-            break;
-    }
+    case 3: // End of cycle
+			m_repairStage = 0;
+			m_lastRepairTime = now;
+			break;
+
+    default:
+			m_repairStage = 0;
+			m_lastRepairTime = now;
+			break;
+	}
 }
 
 // Scan for bandwidth-hogging processes
