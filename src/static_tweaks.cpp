@@ -336,7 +336,8 @@ void ApplyStaticTweaks()
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"SeparateProcess", 1);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer", L"DesktopProcess", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"LaunchTo", 1);
-    ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Microsoft\\DirectX\\UserGpuPreferences", L"C:\\Windows\\explorer.exe", L"GpuPreference=2;");
+    // [FIX] REMOVED: Forcing Explorer to dGPU causes visual glitches (black start menu squares) on Hybrid Graphics systems.
+	// ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Microsoft\\DirectX\\UserGpuPreferences", L"C:\\Windows\\explorer.exe", L"GpuPreference=2;");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Control Panel\\UnsupportedHardwareNotificationCache", L"SV2", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Control Panel\\UnsupportedHardwareNotificationCache", L"SV1", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Control Panel\\Desktop", L"IgnorePerProcessSystemDPIToast", 1);
