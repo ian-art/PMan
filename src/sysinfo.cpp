@@ -467,35 +467,68 @@ void DetectHybridCoreSupport()
     }
 }
 
-// [SECURITY] Secret VM Detection Helper
+// [SECURITY] Secret VM Detection Helper (Enhanced)
 static bool IsKnownEmulator()
 {
+    // --- TIER 1: CPUID Check (Fastest) ---
     int cpuInfo[4] = {0};
     __cpuid(cpuInfo, 1);
-    // Bit 31 of ECX is Hypervisor Present Bit
-    if (!(cpuInfo[2] & (1 << 31))) return false; // Definitely Native (No Hypervisor)
-
-    // Check Vendor Leaf
-    __cpuid(cpuInfo, 0x40000000);
-    char vendor[13] = {0};
-    memcpy(vendor, &cpuInfo[1], 4);   // EBX
-    memcpy(vendor + 4, &cpuInfo[2], 4); // ECX
-    memcpy(vendor + 8, &cpuInfo[3], 4); // EDX
-
-    // Detect Consumer VMs (VMware, VirtualBox, KVM, QEMU, Xen)
-    // We intentionally ignore "Microsoft Hv" to avoid flagging 
-    // real PCs with Core Isolation/VBS enabled.
-    if (strstr(vendor, "VMware") || 
-        strstr(vendor, "VBox") || 
-        strstr(vendor, "KVM") || 
-        strstr(vendor, "QEMU") || 
-        strstr(vendor, "Bochs") || 
-        strstr(vendor, "Xen") ||
-        strstr(vendor, "Parallels")) 
-    {
-        return true;
-    }
     
+    // Check Hypervisor Present Bit (Bit 31 of ECX)
+    if ((cpuInfo[2] & (1 << 31))) { 
+        __cpuid(cpuInfo, 0x40000000);
+        char vendor[13] = {0};
+        memcpy(vendor, &cpuInfo[1], 4);
+        memcpy(vendor + 4, &cpuInfo[2], 4);
+        memcpy(vendor + 8, &cpuInfo[3], 4);
+
+        // Standard Signatures
+        if (strstr(vendor, "VMware") || strstr(vendor, "VBox") || 
+            strstr(vendor, "KVM") || strstr(vendor, "QEMU") || 
+            strstr(vendor, "Bochs") || strstr(vendor, "Xen") ||
+            strstr(vendor, "Parallels")) return true;
+    }
+
+    // --- TIER 2: SMBIOS/Registry Check (Harder to spoof) ---
+    // Real PCs (even with VBS/Core Isolation) pass through hardware strings (e.g. "Dell", "ASUS").
+    // VMs usually expose "Virtual Machine", "VirtualBox", "KVM", etc. here.
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\SystemInformation", 
+                      0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    {
+        wchar_t buffer[256] = {};
+        DWORD size = sizeof(buffer);
+        bool found = false;
+
+        // 1. Check Manufacturer
+        if (RegQueryValueExW(hKey, L"SystemManufacturer", nullptr, nullptr, (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
+            std::wstring mfg = buffer;
+            std::transform(mfg.begin(), mfg.end(), mfg.begin(), ::towlower);
+            
+            if (mfg.find(L"vmware") != std::wstring::npos || 
+                mfg.find(L"bochs") != std::wstring::npos ||
+                mfg.find(L"qemu") != std::wstring::npos ||
+                mfg.find(L"xen") != std::wstring::npos) found = true;
+        }
+
+        // 2. Check Product Name (Model) - Catches Hyper-V and spoofed vendors
+        if (!found) {
+            size = sizeof(buffer);
+            if (RegQueryValueExW(hKey, L"SystemProductName", nullptr, nullptr, (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
+                std::wstring model = buffer;
+                std::transform(model.begin(), model.end(), model.begin(), ::towlower);
+
+                if (model.find(L"virtualbox") != std::wstring::npos || 
+                    model.find(L"virtual machine") != std::wstring::npos || // Generic "Microsoft Virtual Machine"
+                    model.find(L"kvm") != std::wstring::npos ||
+                    model.find(L"parallels") != std::wstring::npos) found = true;
+            }
+        }
+
+        RegCloseKey(hKey);
+        if (found) return true;
+    }
+
     return false;
 }
 
