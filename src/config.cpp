@@ -335,15 +335,21 @@ bool CreateDefaultConfig(const std::filesystem::path& configPath)
     {
         std::filesystem::create_directories(configPath.parent_path());
         
-        std::ofstream f(configPath);
-        if (!f)
-        {
-            Log("Failed to create default config at: " + WideToUtf8(configPath.c_str()));
-            return false;
-        }
+        // Fix: Generate config dynamically to match current version and avoid immediate upgrade loop
+        ExplorerConfig defaultExplorer = {};
+        defaultExplorer.idleThresholdMs = 15000;
         
-        f << DEFAULT_CONFIG;
-        f.close();
+        WriteConfigurationFile(
+            configPath,
+            {}, {}, {}, {}, {}, {}, // Empty sets for games, browsers, etc.
+            true,    // ignoreNonInteractive
+            true,    // restoreOnExit
+            false,   // lockPolicy
+            false,   // suspendUpdates
+            false,   // idleRevert
+            300000,  // idleTimeoutMs
+            defaultExplorer
+        );
         
         Log("Created default config at: " + WideToUtf8(configPath.c_str()));
         return true;
