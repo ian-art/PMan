@@ -76,6 +76,9 @@ static void EnsureLogDirectory()
 
 void FlushLogger()
 {
+    // Fix: Prevent creating log files before InitLogger runs (avoids false-positive rotation on first launch)
+    if (!g_loggerInitialized) return;
+
     std::lock_guard lg(g_logMtx);
     if (g_logBuffer.empty()) return;
 
