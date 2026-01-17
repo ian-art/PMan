@@ -96,6 +96,7 @@ extern std::atomic<int>  g_interferenceCount;
 extern std::atomic<bool> g_suspendUpdatesDuringGames;
 extern std::atomic<bool> g_isSuspended;
 extern std::atomic<bool> g_userPaused;
+extern std::atomic<bool> g_pauseIdle;
 extern std::atomic<NetworkState> g_networkState;
 
 // Idle Revert Feature

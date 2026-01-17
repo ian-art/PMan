@@ -65,6 +65,7 @@ std::atomic<int>  g_interferenceCount{0};
 std::atomic<bool> g_suspendUpdatesDuringGames{false};
 std::atomic<bool> g_isSuspended{false};
 std::atomic<bool> g_userPaused{false};
+std::atomic<bool> g_pauseIdle{false};
 std::atomic<NetworkState> g_networkState{NetworkState::Offline};
 
 // Idle Revert Feature

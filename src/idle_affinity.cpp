@@ -103,6 +103,9 @@ void IdleAffinityManager::UpdateConfig(bool enabled, int reservedCores, uint32_t
 
 bool IdleAffinityManager::IsSafeToPark()
 {
+    // [USER] Pause on Idle requested - prevent CPU limiting
+    if (g_pauseIdle.load()) return false;
+
     if (!m_enabled.load()) return false;
     
     // RAM Check

@@ -722,6 +722,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             // 3. Controls Submenu
             HMENU hControlMenu = CreatePopupMenu();
             AppendMenuW(hControlMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Activity" : L"Pause Activity");
+            
+            // Pause Idle Optimization (prevent CPU limiting during background tasks)
+            bool idlePaused = g_pauseIdle.load();
+            AppendMenuW(hControlMenu, MF_STRING | (idlePaused ? MF_CHECKED : 0), ID_TRAY_PAUSE_IDLE, L"Passive Mode");
+
             AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_APPLY_TWEAKS, L"Boost System Now");
             AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_REFRESH_GPU, L"Refresh GPU");
@@ -963,6 +968,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             Shell_NotifyIconW(NIM_MODIFY, &g_nid);
             Log(p ? "[USER] Protection PAUSED." : "[USER] Protection RESUMED.");
             if (!p) g_reloadNow.store(true);
+        }
+        else if (wmId == ID_TRAY_PAUSE_IDLE) {
+            bool p = !g_pauseIdle.load();
+            g_pauseIdle.store(p);
+            Log(p ? "[USER] Idle Optimization PAUSED (CPU Limiting Disabled)." : "[USER] Idle Optimization RESUMED.");
+            
+            // Immediate effect: If we just paused, force the Idle Manager to think we are active
+            // This restores all parked cores instantly.
+            if (p) {
+                g_idleAffinityMgr.OnIdleStateChanged(false); 
+            }
         }
         return 0;
     } // End of WM_COMMAND Block

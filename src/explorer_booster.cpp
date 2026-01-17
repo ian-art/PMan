@@ -312,6 +312,9 @@ void ExplorerBooster::UpdateBoostState() {
 }
 
 bool ExplorerBooster::ShouldBoostNow() const {
+    // 0. User Override: Pause Idle Optimization
+    if (g_pauseIdle.load()) return false;
+
     // 1. Absolute Priority: No boosts if Game or Browser is active
     if (m_gameOrBrowserActive.load() || g_sessionLocked.load()) {
         return false;
