@@ -552,6 +552,11 @@ void ApplyStaticTweaks()
     Log("[TWEAK] Applying File Associations...");
     ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.hta\\OpenWithProgids", L"htafile", L"");
 
+    // ============================================================================
+    // REMOVE PIN TO QUICKACCES IN RECYCLEBIN
+    // ============================================================================
+    ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Classes\\Folder\\shell\\pintohome", L"AppliesTo", L"System.ParsingName:<>\"{645FF040-5081-101B-9F08-00AA002F954E}\"");
+
 	// ============================================================================
 	// WINDOWS SERVICES CONFIGURATION
 	// ============================================================================
