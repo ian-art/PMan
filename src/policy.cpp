@@ -314,6 +314,11 @@ void CheckAndReleaseSessionLock()
         }
         
         // Lock released by scope exit before potentially blocking operation
+        
+        // Restoration (Crash/Force-Kill Safety)
+        g_serviceManager.RestoreSessionStates();
+        g_serviceManager.InvalidateSessionSnapshot();
+        
         ResumeBackgroundServices();
     }
 }
@@ -878,7 +883,29 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
         
                 Log("Session lock ACTIVATED - game mode locked (PID: " + std::to_string(pid) + ")");
 
-                if (g_suspendUpdatesDuringGames.load()) SuspendBackgroundServices();
+                if (g_suspendUpdatesDuringGames.load()) {
+                    SuspendBackgroundServices();
+                    
+                    // Session-Scoped Service Optimization
+                    // 1. Get Topology Targets
+                    DWORD_PTR offloadAffinity = GetOptimizationTargetCores();
+                    
+                    if (offloadAffinity != 0) {
+                        // 2. Capture & Filter
+                        if (g_serviceManager.CaptureSessionSnapshot()) {
+                            if (g_serviceManager.ResolveAllowlist()) {
+                                // 3. Snapshot State
+                                if (g_serviceManager.SnapshotServiceStates()) {
+                                    // 4. Apply Optimization
+                                    g_serviceManager.ApplySessionOptimizations(offloadAffinity);
+                                }
+                            }
+                        }
+                    } else {
+                        Log("[SERVICE] Skipping affinity optimization (No suitable offload cores found)");
+                    }
+                    // -------------------------------------------------------------
+                }
                 else Log("[SERVICE] Service suspension disabled by config");
             }
             else
@@ -901,6 +928,11 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
 
                     if (g_suspendUpdatesDuringGames.load()) {
                         Log("[SERVICE] About to resume background services...");
+                        
+                        // Restoration & Cleanup
+                        g_serviceManager.RestoreSessionStates();
+                        g_serviceManager.InvalidateSessionSnapshot();
+                        
                         ResumeBackgroundServices();
                     }
                 }

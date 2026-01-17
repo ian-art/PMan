@@ -33,6 +33,9 @@ enum class AffinityStrategy {
 // Core detection functions
 void DetectOSCapabilities();
 void DetectHybridCoreSupport();
+// Core Selection
+DWORD_PTR GetOptimizationTargetCores(); 
+
 bool DetectIoPrioritySupport();
 bool DetectGameIoPrioritySupport();
 

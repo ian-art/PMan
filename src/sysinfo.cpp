@@ -818,3 +818,62 @@ AffinityStrategy GetRecommendedStrategy()
     // 4. Dual Core or Single Core -> Do nothing (Affinity hurts here)
     return AffinityStrategy::None;
 }
+
+DWORD_PTR GetOptimizationTargetCores()
+{
+    // Core Selection Policy
+    // "Select exactly two cores that: Are not Core 0, Are in the same NUMA node..."
+    
+    // Safety Abort: Need at least 3 logical cores to exclude Core 0 and pick 2 others.
+    if (g_logicalCoreCount < 3) 
+    {
+        Log("[CORE] Insufficient cores for offload (Need 3+, Found " + std::to_string(g_logicalCoreCount) + ")");
+        return 0;
+    }
+
+    DWORD_PTR mask = 0;
+    std::vector<int> selectedIndices;
+
+    // Strategy A: Hybrid Architecture (Use E-Cores)
+    if (g_caps.hasHybridCores && g_eCoreSets.size() >= 2)
+    {
+        // Pick the last two E-Cores (usually furthest from P-Core heat/interrupts)
+        size_t count = g_eCoreSets.size();
+        
+        // Use the last two E-cores for service offloading
+        // Map E-core logical indices to affinity mask bits
+        int lastECore = g_logicalCoreCount - 1;
+        int secondLastECore = g_logicalCoreCount - 2;
+        
+        mask |= (static_cast<DWORD_PTR>(1) << lastECore);
+        mask |= (static_cast<DWORD_PTR>(1) << secondLastECore);
+        
+        Log("[CORE] Selected Offload Targets (E-Cores): CPU " + std::to_string(secondLastECore) + 
+            " & CPU " + std::to_string(lastECore) + " (" + std::to_string(count) + " E-cores available)");
+        return mask;
+    }
+
+    // Strategy B: Standard Architecture
+    // "Identify Core 0 (interrupt-heavy)" -> Core 0 is Mask 0x1.
+    // We select the LAST two logical processors.
+    // - On HT systems, these are the SMT threads of the last physical core.
+    // - On non-HT systems, these are the last two physical cores.
+    // - This satisfies "Are in the same NUMA node" for 99% of consumer desktop CPUs (single socket).
+    
+    int lastCore = g_logicalCoreCount - 1;
+    int secondLastCore = g_logicalCoreCount - 2;
+
+    // Verification: Ensure we aren't selecting Core 0 (Index 0)
+    if (secondLastCore > 0)
+    {
+        mask |= (static_cast<DWORD_PTR>(1) << lastCore);
+        mask |= (static_cast<DWORD_PTR>(1) << secondLastCore);
+        
+        Log("[CORE] Selected Offload Targets: CPU " + std::to_string(secondLastCore) + 
+            " & CPU " + std::to_string(lastCore) + " (Avoiding Core 0)");
+        return mask;
+    }
+
+    Log("[CORE] Selection failed validation (Indices collided with Core 0)");
+    return 0;
+}

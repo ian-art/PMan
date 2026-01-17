@@ -42,12 +42,29 @@ public:
         ServiceState() : handle(nullptr), action(ServiceAction::None), 
                         originalState(SERVICE_STOPPED), isDisabled(false) {}
     };
+
+    // Eligibility Snapshot Structure
+    struct ServiceSessionEntry {
+        std::wstring name;
+        DWORD pid;
+        // Data:
+        DWORD originalPriority;
+        DWORD_PTR originalAffinity;
+        uint64_t timestamp;
+        uint64_t creationTime; // Anti-PID-Reuse
+        DWORD sessionId; // Windows Session ID (Identity Safety)
+        bool isModified;
+    };
     
 private:
     SC_HANDLE m_scManager;
 	std::unordered_map<std::wstring, ServiceState> m_services;
+    std::vector<ServiceSessionEntry> m_sessionServices; // Frozen List
     std::mutex m_mutex;
     std::atomic<bool> m_anythingSuspended;
+
+    // Internal helper that assumes m_mutex is already locked
+    void RestoreSessionStatesLocked();
     
 public:
     WindowsServiceManager() : m_scManager(nullptr), m_anythingSuspended(false) {}
@@ -68,6 +85,39 @@ public:
     bool SuspendService(const std::wstring& serviceName, BypassMode mode = BypassMode::None);
     
     bool ResumeService(const std::wstring& serviceName);
+
+    // Hard Exclusions (Strict Session Safety)
+    bool IsHardExcluded(const std::wstring& serviceName, DWORD currentState) const;
+    
+    // Hard Exclusions
+    bool IsHardExcluded(const std::wstring& serviceName) const;
+
+    // Session Snapshot
+    // "At session entry only, enumerate all services... The eligibility list is frozen"
+    bool CaptureSessionSnapshot();
+
+    // Allowlist Resolution
+    // "Apply explicit allowlist... Prefer Telemetry, Indexers, OEM agents"
+    bool ResolveAllowlist();
+
+    // State Snapshot (Mandatory)
+    // "Store: Original priority, affinity, PID, Timestamp, Session ID... If fail -> Abort"
+    bool SnapshotServiceStates();
+
+    // Apply Optimization (Strict Order)
+    // "Apply Affinity FIRST, Priority SECOND... Failure -> immediate rollback"
+    bool ApplySessionOptimizations(DWORD_PTR targetAffinityMask);
+
+    // Restoration (Critical)
+    // "Restore original affinity mask, Restore original priority class"
+    void RestoreSessionStates();
+
+    // Active Session Monitoring
+    // "Continuously monitor... If a service Restarts/Crashes... Immediately blacklist"
+    void EnforceSessionPolicies();
+
+    // Post-Session Cleanup
+    void InvalidateSessionSnapshot();
     
     // Check if service is in the "Never Kill" list (Kernel, Network, Audio, etc.)
     bool IsCriticalService(const std::wstring& serviceName) const;

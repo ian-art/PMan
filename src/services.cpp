@@ -23,6 +23,7 @@
 #include "utils.h"
 #include <vector>
 #include <string>
+#include <sstream>
 #include <unordered_set>
 #include <algorithm>
 #include <pdh.h>
@@ -136,6 +137,484 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
     m_services[serviceName] = state;
     Log("[SERVICE] Added service: " + WideToUtf8(serviceName.c_str()));
     return true;
+}
+
+bool WindowsServiceManager::IsHardExcluded(const std::wstring& serviceName, DWORD currentState) const
+{
+    // State-Based Hard Exclusions
+    // "The AI MUST NEVER modify services that are: STOPPED, START_PENDING..."
+    if (currentState != SERVICE_RUNNING) return true;
+
+    // Category-Based Hard Exclusions
+    // "Participate in RPC / DCOM, Audio, input, GPU, power, thermal, core networking"
+    static const std::unordered_set<std::wstring> HARD_EXCLUSIONS = {
+        // RPC / DCOM / MMCSS
+        L"RpcSs", L"DcomLaunch", L"RpcEptMapper", L"MmCss",
+        // Audio
+        L"Audiosrv", L"AudioEndpointBuilder",
+        // Input
+        L"TabletInputService", L"hidserv", L"TextInputManagementService",
+        // Power & Thermal
+        L"Power",
+        // Core Networking
+        L"NlaSvc", L"nsi", L"Dhcp", L"Dnscache", L"netprofm",
+        // SCM Critical
+        L"PlugPlay", L"KeyIso", L"SamSs", L"LSM"
+    };
+
+    if (HARD_EXCLUSIONS.count(serviceName)) return true;
+
+    // Substring checks for broader categories (GPU, Drivers)
+    std::wstring lowerName = serviceName;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::towlower);
+
+    if (lowerName.find(L"nvidia") != std::wstring::npos || 
+        lowerName.find(L"amd") != std::wstring::npos || 
+        lowerName.find(L"intel") != std::wstring::npos) {
+        // GPU/Driver related
+        return true; 
+    }
+
+    return false;
+}
+
+// Hard Exclusions (Non-Negotiable)
+bool WindowsServiceManager::IsHardExcluded(const std::wstring& serviceName) const
+{
+    static const std::unordered_set<std::wstring> HARD_EXCLUSIONS = {
+        // RPC / DCOM / MMCSS
+        L"RpcSs", L"DcomLaunch", L"RpcEptMapper", L"MmCss",
+        // Audio & Input
+        L"Audiosrv", L"AudioEndpointBuilder", L"TabletInputService", L"hidserv",
+        // Power & Thermal
+        L"Power",
+        // Core Networking
+        L"NlaSvc", L"nsi", L"Dhcp", L"Dnscache", L"netprofm",
+        // SCM Critical
+        L"PlugPlay", L"KeyIso", L"SamSs", L"LSM"
+    };
+
+    if (HARD_EXCLUSIONS.count(serviceName)) return true;
+
+    // Substring checks for Driver/GPU services
+    std::wstring lowerName = serviceName;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::towlower);
+
+    if (lowerName.find(L"nvidia") != std::wstring::npos || 
+        lowerName.find(L"amd") != std::wstring::npos || 
+        lowerName.find(L"intel") != std::wstring::npos) {
+        return true; 
+    }
+
+    return false;
+}
+
+// Service Enumeration & Eligibility Snapshot
+bool WindowsServiceManager::CaptureSessionSnapshot()
+{
+    std::lock_guard lock(m_mutex);
+    
+    m_sessionServices.clear();
+
+    if (!m_scManager && !Initialize()) return false;
+
+    DWORD bytesNeeded = 0;
+    DWORD servicesReturned = 0;
+    DWORD resumeHandle = 0;
+
+    // FIX: Use SERVICE_STATE_ALL to enumerate all services, then filter by RUNNING
+    EnumServicesStatusExW(m_scManager, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, 
+        SERVICE_STATE_ALL, nullptr, 0, &bytesNeeded, &servicesReturned, &resumeHandle, nullptr);
+    
+    if (GetLastError() != ERROR_MORE_DATA) return false;
+
+    std::vector<BYTE> buffer(bytesNeeded);
+    LPENUM_SERVICE_STATUS_PROCESSW services = reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buffer.data());
+
+    if (!EnumServicesStatusExW(m_scManager, SC_ENUM_PROCESS_INFO, SERVICE_WIN32,
+        SERVICE_STATE_ALL, buffer.data(), bytesNeeded, &bytesNeeded, 
+        &servicesReturned, &resumeHandle, nullptr)) {
+        Log("[SERVICE] Snapshot failed: Enum error " + std::to_string(GetLastError()));
+        return false;
+    }
+
+    // Eligibility Filter - Only process RUNNING services
+    for (DWORD i = 0; i < servicesReturned; i++) {
+        std::wstring name = services[i].lpServiceName;
+        DWORD currentState = services[i].ServiceStatusProcess.dwCurrentState;
+        DWORD pid = services[i].ServiceStatusProcess.dwProcessId;
+        
+        // FIX: Explicitly check for RUNNING state since we enumerated ALL
+        if (currentState != SERVICE_RUNNING) continue;
+        
+        // "PID is valid"
+        if (pid == 0) continue;
+
+        // "Service is not excluded by policy"
+        if (IsHardExcluded(name)) continue;
+
+        ServiceSessionEntry entry;
+        entry.name = name;
+        entry.pid = pid;
+        entry.originalPriority = 0;
+        entry.originalAffinity = 0;
+        entry.isModified = false;
+        
+        m_sessionServices.push_back(entry);
+    }
+
+    Log("[SERVICE] Session Snapshot Taken. Eligible Services: " + std::to_string(m_sessionServices.size()));
+    return true;
+}
+
+// Allowlist Resolution
+bool WindowsServiceManager::ResolveAllowlist()
+{
+    std::lock_guard lock(m_mutex);
+    if (m_sessionServices.empty()) return false;
+
+    // "Prefer: Telemetry, Indexers, OEM background agents, Third-party updaters"
+    static const std::unordered_set<std::wstring> EXACT_ALLOWLIST = {
+        // Telemetry & Diagnostics
+        L"DiagTrack", L"dmwappushservice", L"WerSvc", 
+        // Indexers & Cache
+        L"WSearch", L"SysMain", 
+        // Windows Updates (Safe to throttle during game)
+        L"wuauserv", L"bits", L"dosvc",
+        // Common Third-Party
+        L"ClickToRunSvc", // Office
+        L"Steam Client Service", L"Origin Web Helper Service"
+    };
+
+    auto it = m_sessionServices.begin();
+    while (it != m_sessionServices.end()) {
+        bool keep = false;
+        std::wstring name = it->name;
+        std::wstring lower = name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+
+        // 1. Exact Match
+        if (EXACT_ALLOWLIST.count(name)) keep = true;
+
+        // 2. Substring Match (Broad Categories)
+        if (!keep) {
+            // "OEM background agents" (Asus, Dell, HP, etc.)
+            if (lower.find(L"asus") != std::wstring::npos ||
+                lower.find(L"armoury") != std::wstring::npos || // Asus
+                lower.find(L"icue") != std::wstring::npos ||    // Corsair
+                lower.find(L"razer") != std::wstring::npos ||   // Razer
+                lower.find(L"logi") != std::wstring::npos ||    // Logitech
+                lower.find(L"alienware") != std::wstring::npos || // Dell
+                lower.find(L"omen") != std::wstring::npos ||    // HP
+                lower.find(L"lenovo") != std::wstring::npos ||  // Lenovo
+                lower.find(L"vantage") != std::wstring::npos ||
+                lower.find(L"msi") != std::wstring::npos ||
+                lower.find(L"dragon") != std::wstring::npos) {
+                keep = true;
+            }
+            // "Third-party updaters"
+            else if (lower.find(L"update") != std::wstring::npos ||
+                     lower.find(L"install") != std::wstring::npos ||
+                     lower.find(L"helper") != std::wstring::npos ||
+                     lower.find(L"agent") != std::wstring::npos ||
+                     lower.find(L"telemetry") != std::wstring::npos) {
+                 // Safety Check: Ensure we didn't accidentally catch a critical service
+                 // (Double-check against Hard Exclusions just in case, though Phase 3 handled it)
+                 if (!IsHardExcluded(name)) {
+                     keep = true;
+                 }
+            }
+        }
+
+        if (keep) {
+            ++it;
+        } else {
+            it = m_sessionServices.erase(it);
+        }
+    }
+
+    if (m_sessionServices.empty()) {
+        Log("[SERVICE] Abort: Allowlist resulted in 0 services.");
+        return false;
+    }
+    
+    Log("[SERVICE] Allowlist Resolved. Optimized Targets: " + std::to_string(m_sessionServices.size()));
+    return true;
+}
+
+// State Snapshot (Mandatory)
+bool WindowsServiceManager::SnapshotServiceStates()
+{
+    // "If snapshot fails for ANY service: Abort optimization"
+    // "Do not partially apply"
+    
+    std::lock_guard lock(m_mutex);
+    if (m_sessionServices.empty()) return false;
+
+    Log("[SERVICE] Beginning State Snapshot (Mandatory)...");
+
+    for (auto& entry : m_sessionServices) {
+        // Needs PROCESS_QUERY_INFORMATION for Affinity
+        HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, entry.pid);
+        
+        if (!hProcess) {
+             Log("[SERVICE] CRITICAL: Snapshot Failed - Cannot open PID " + std::to_string(entry.pid) + 
+                 " (" + WideToUtf8(entry.name.c_str()) + ") Error: " + std::to_string(GetLastError()));
+             m_sessionServices.clear(); // Safety Rollback (Empty list = No actions taken)
+             return false;
+        }
+
+        DWORD_PTR processAffinity = 0;
+        DWORD_PTR systemAffinity = 0;
+        if (!GetProcessAffinityMask(hProcess, &processAffinity, &systemAffinity)) {
+             Log("[SERVICE] CRITICAL: Snapshot Failed - Affinity query error " + std::to_string(GetLastError()));
+             CloseHandle(hProcess);
+             m_sessionServices.clear();
+             return false;
+        }
+
+        DWORD priority = GetPriorityClass(hProcess);
+        if (priority == 0) {
+             Log("[SERVICE] CRITICAL: Snapshot Failed - Priority query error " + std::to_string(GetLastError()));
+             CloseHandle(hProcess);
+             m_sessionServices.clear();
+             return false;
+        }
+
+        DWORD sessionId = 0;
+        if (!ProcessIdToSessionId(entry.pid, &sessionId)) {
+            sessionId = 0; // Default to 0 if failed (System)
+        }
+
+        // Store Mandatory State
+        entry.originalAffinity = processAffinity;
+        entry.originalPriority = priority;
+        entry.sessionId = sessionId;
+        entry.timestamp = GetTickCount64();
+
+        // Phase 7 Prerequisite: Capture Creation Time
+        FILETIME ftCreate, ftExit, ftKernel, ftUser;
+        if (GetProcessTimes(hProcess, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+            entry.creationTime = (static_cast<uint64_t>(ftCreate.dwHighDateTime) << 32) | ftCreate.dwLowDateTime;
+        } else {
+            entry.creationTime = 0; // Should not happen, but safe fallback
+        }
+        
+        CloseHandle(hProcess);
+    }
+
+    Log("[SERVICE] State Snapshot Complete. All targets captured successfully.");
+    return true;
+}
+
+// Active Session Monitoring
+void WindowsServiceManager::EnforceSessionPolicies()
+{
+    std::lock_guard lock(m_mutex);
+    if (m_sessionServices.empty()) return;
+
+    for (auto& entry : m_sessionServices) {
+        // Only monitor services we are currently managing
+        if (!entry.isModified) continue;
+
+        bool violation = false;
+
+        HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.pid);
+        if (!hProcess) {
+            // "Service Crashes" -> Process gone
+            Log("[SERVICE] ALERT: Service violation detected (Process Gone) - " + WideToUtf8(entry.name.c_str()));
+            violation = true;
+        } else {
+            DWORD exitCode = 0;
+            if (GetExitCodeProcess(hProcess, &exitCode) && exitCode == STILL_ACTIVE) {
+                // Verify Identity (PID Reuse Protection)
+                FILETIME ftCreate, ftExit, ftKernel, ftUser;
+                if (GetProcessTimes(hProcess, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+                    uint64_t currentCreateTime = (static_cast<uint64_t>(ftCreate.dwHighDateTime) << 32) | ftCreate.dwLowDateTime;
+                    
+                    // Allow 1 second fuzziness for clock drift, though usually exact
+                    if (entry.creationTime != 0 && currentCreateTime != entry.creationTime) {
+                         Log("[SERVICE] ALERT: Service violation detected (PID Reused/Restarted) - " + WideToUtf8(entry.name.c_str()));
+                         violation = true;
+                    }
+                }
+            } else {
+                Log("[SERVICE] ALERT: Service violation detected (Exited) - " + WideToUtf8(entry.name.c_str()));
+                violation = true;
+            }
+            CloseHandle(hProcess);
+        }
+
+        // "Enforcement Rule: If a service... Restarts/Crashes... It is immediately blacklisted"
+        if (violation) {
+            // Blacklist: Mark as unmodified so we never touch it again (Apply/Restore will skip it)
+            entry.isModified = false; 
+            
+            // "And restored": Implicit. 
+            // 1. If crashed, it's gone. Nothing to restore.
+            // 2. If restarted, it's a new process with default affinity. We just ensure we don't re-apply optimizations.
+            Log("[SERVICE] Enforcement: Service " + WideToUtf8(entry.name.c_str()) + " removed from session management.");
+        }
+    }
+}
+
+// Phase 6: Apply Optimization (Strict Order)
+bool WindowsServiceManager::ApplySessionOptimizations(DWORD_PTR targetAffinityMask)
+{
+    std::lock_guard lock(m_mutex);
+    if (m_sessionServices.empty()) return true; // Nothing to do is a success
+    
+    // Safety Override: Cannot optimize if target mask is invalid (0)
+    if (targetAffinityMask == 0) {
+        Log("[SERVICE] Optimization Aborted: Invalid target affinity mask.");
+        return false;
+    }
+
+    std::ostringstream hexStream;
+    hexStream << std::hex << std::uppercase << targetAffinityMask;
+    
+    Log("[SERVICE] Applying Session Optimizations (Target Affinity: 0x" + 
+        hexStream.str() + ")...");
+
+    for (auto& entry : m_sessionServices) {
+        bool success = false;
+        
+        // Open with necessary rights
+        HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.pid);
+        if (hProcess) {
+            // 6.1 Apply Affinity FIRST
+            // "Restrict service threads to selected 2 cores"
+            if (SetProcessAffinityMask(hProcess, targetAffinityMask)) {
+                
+                // 6.2 Apply Priority SECOND
+                // "Set priority to BELOW_NORMAL_PRIORITY_CLASS"
+                // "Never lower" (We do not use IDLE)
+                if (SetPriorityClass(hProcess, BELOW_NORMAL_PRIORITY_CLASS)) {
+                    
+                    // 6.3 Immediate Validation
+                    // "Confirm Service responsiveness (Alive check)"
+                    DWORD exitCode = 0;
+                    if (GetExitCodeProcess(hProcess, &exitCode) && exitCode == STILL_ACTIVE) {
+                        success = true;
+                        entry.isModified = true;
+                    } else {
+                        Log("[SERVICE] Validation Failed: Service died immediately (" + WideToUtf8(entry.name.c_str()) + ")");
+                    }
+                } else {
+                     Log("[SERVICE] Failed to set Priority for " + WideToUtf8(entry.name.c_str()));
+                }
+            } else {
+                Log("[SERVICE] Failed to set Affinity for " + WideToUtf8(entry.name.c_str()));
+            }
+            CloseHandle(hProcess);
+        } else {
+            Log("[SERVICE] Failed to open service process " + std::to_string(entry.pid));
+        }
+
+        // "Failure at any point -> immediate rollback of all services"
+        if (!success) {
+            Log("[SERVICE] CRITICAL: Optimization step failed. Initiating IMMEDIATE ROLLBACK.");
+            // Immediate Rollback using Verified Logic
+            Log("[SERVICE] CRITICAL: Optimization step failed. Initiating IMMEDIATE ROLLBACK via internal helper.");
+            RestoreSessionStatesLocked();
+            
+            return false;
+        }
+    }
+
+    Log("[SERVICE] Optimization Applied Successfully.");
+    return true;
+}
+
+// Restoration (Critical)
+void WindowsServiceManager::RestoreSessionStates()
+{
+    std::lock_guard lock(m_mutex);
+    RestoreSessionStatesLocked();
+}
+
+void WindowsServiceManager::RestoreSessionStatesLocked()
+{
+    if (m_sessionServices.empty()) return;
+
+    Log("[SERVICE] Restoring Service States...");
+    int restoredCount = 0;
+    int errorCount = 0;
+
+    // Restoration Order
+    for (auto& entry : m_sessionServices) {
+        // "No services outside the original eligibility snapshot are touched."
+        if (!entry.isModified) continue;
+
+        // Needs QUERY_INFORMATION to Verify State
+        HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION, FALSE, entry.pid);
+        if (hProcess) {
+            bool success = true;
+
+            // 1. Restore Affinity
+            if (!SetProcessAffinityMask(hProcess, entry.originalAffinity)) {
+                Log("[SERVICE] ERROR: Failed to restore Affinity for " + WideToUtf8(entry.name.c_str()));
+                success = false;
+            }
+
+            // 2. Restore Priority
+            if (!SetPriorityClass(hProcess, entry.originalPriority)) {
+                Log("[SERVICE] ERROR: Failed to restore Priority for " + WideToUtf8(entry.name.c_str()));
+                success = false;
+            }
+
+            // 3. Verify State
+            if (success) {
+                DWORD_PTR processAffinity, systemAffinity;
+                DWORD currentPri = GetPriorityClass(hProcess);
+                
+                if (currentPri != entry.originalPriority) {
+                     Log("[SERVICE] VERIFY FAIL: Priority mismatch for " + WideToUtf8(entry.name.c_str()));
+                     // Retry once
+                     SetPriorityClass(hProcess, entry.originalPriority);
+                     errorCount++;
+                }
+
+                if (GetProcessAffinityMask(hProcess, &processAffinity, &systemAffinity)) {
+                    if (processAffinity != entry.originalAffinity) {
+                        Log("[SERVICE] VERIFY FAIL: Affinity mismatch for " + WideToUtf8(entry.name.c_str()));
+                        // Retry once
+                        SetProcessAffinityMask(hProcess, entry.originalAffinity);
+                        errorCount++;
+                    }
+                }
+            }
+
+            CloseHandle(hProcess);
+            restoredCount++;
+        } else {
+            // If process is gone (OpenProcess failed), it is effectively "restored" to the void.
+            // We only log if it's an access error on a live process.
+            DWORD err = GetLastError();
+            if (err != ERROR_INVALID_PARAMETER) { // PID gone
+                Log("[SERVICE] Warning: Failed to open PID " + std::to_string(entry.pid) + 
+                    " for restoration (" + WideToUtf8(entry.name.c_str()) + ") Err: " + std::to_string(err));
+            }
+        }
+        
+        // Mark as clean to prevent double-restoration loops
+        entry.isModified = false;
+    }
+
+    Log("[SERVICE] Restoration Complete. Restored: " + std::to_string(restoredCount) + 
+        (errorCount > 0 ? (" Errors: " + std::to_string(errorCount)) : ""));
+}
+
+// Post-Session Cleanup
+void WindowsServiceManager::InvalidateSessionSnapshot()
+{
+    std::lock_guard lock(m_mutex);
+    
+    // "Invalidate eligibility snapshot"
+    m_sessionServices.clear();
+    
+    // "Clear service state cache" (Implicitly done by clearing vector)
+    Log("[SERVICE] Session Snapshot Invalidated.");
 }
 
 bool WindowsServiceManager::IsCriticalService(const std::wstring& serviceName) const

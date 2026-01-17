@@ -676,6 +676,14 @@ void IocpConfigWatcher()
                         switch (job->type)
                         {
                             case JobType::Config:
+                                // Enforce session termination on config reload
+                                if (g_sessionLocked.load()) {
+                                    g_serviceManager.RestoreSessionStates();
+                                    g_serviceManager.InvalidateSessionSnapshot();
+                                    g_sessionLocked.store(false);
+                                    g_lockedGamePid.store(0);
+                                    Log("[CONFIG] Session ended immediately due to configuration reload.");
+                                }
                                 g_reloadNow.store(true, std::memory_order_release);
                                 break;
 							case JobType::Policy:
@@ -853,6 +861,11 @@ void AntiInterferenceWatchdog()
                     g_idleAffinityMgr.OnIdleStateChanged(currentIdleState);
                     lastIdleState = currentIdleState;
                 }
+            }
+
+            // Active Session Monitoring Hook
+            if (g_sessionLocked.load()) {
+                g_serviceManager.EnforceSessionPolicies();
             }
 
             // [LOGIC] Idle Revert (Browser Mode Revert)
