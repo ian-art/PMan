@@ -467,6 +467,38 @@ void DetectHybridCoreSupport()
     }
 }
 
+// [SECURITY] Secret VM Detection Helper
+static bool IsKnownEmulator()
+{
+    int cpuInfo[4] = {0};
+    __cpuid(cpuInfo, 1);
+    // Bit 31 of ECX is Hypervisor Present Bit
+    if (!(cpuInfo[2] & (1 << 31))) return false; // Definitely Native (No Hypervisor)
+
+    // Check Vendor Leaf
+    __cpuid(cpuInfo, 0x40000000);
+    char vendor[13] = {0};
+    memcpy(vendor, &cpuInfo[1], 4);   // EBX
+    memcpy(vendor + 4, &cpuInfo[2], 4); // ECX
+    memcpy(vendor + 8, &cpuInfo[3], 4); // EDX
+
+    // Detect Consumer VMs (VMware, VirtualBox, KVM, QEMU, Xen)
+    // We intentionally ignore "Microsoft Hv" to avoid flagging 
+    // real PCs with Core Isolation/VBS enabled.
+    if (strstr(vendor, "VMware") || 
+        strstr(vendor, "VBox") || 
+        strstr(vendor, "KVM") || 
+        strstr(vendor, "QEMU") || 
+        strstr(vendor, "Bochs") || 
+        strstr(vendor, "Xen") ||
+        strstr(vendor, "Parallels")) 
+    {
+        return true;
+    }
+    
+    return false;
+}
+
 void DetectOSCapabilities()
 {
     Log("--- Detecting OS Capabilities ---");
@@ -609,6 +641,21 @@ void DetectOSCapabilities()
                     " (Build " + std::to_string(rovi.dwBuildNumber) +
                     "." + std::to_string(ubr) + ")"
                 );
+                
+                // [SECURITY] Generate Secret Environment ID
+                // Logic: Even = Native, Odd = VM
+                // We use TickCount to make it look like a random dynamic ID
+                bool isVm = IsKnownEmulator();
+                uint32_t secretId = GetTickCount(); 
+                
+                // Force Parity
+                if (isVm) {
+                    secretId |= 1; // Force Odd
+                } else {
+                    secretId &= ~1; // Force Even
+                }
+                
+                Log("System Init ID: " + std::to_string(secretId));
             }
         }
     }
