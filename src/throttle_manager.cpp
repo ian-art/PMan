@@ -30,7 +30,14 @@ static const uint64_t COOLDOWN_MS = 60000;
 ThrottleManager::ThrottleManager() : m_hJob(nullptr), m_isThrottling(false) {}
 
 ThrottleManager::~ThrottleManager() {
-    if (m_hJob) CloseHandle(m_hJob);
+    // [FIX] Ensure system state is restored on shutdown (Source 9)
+    RestoreAll();
+    
+    if (m_hJob) {
+        // Ensure limits are explicitly cleared before closing handle
+        UpdateJobLimits(false); 
+        CloseHandle(m_hJob);
+    }
 }
 
 void ThrottleManager::Initialize() {
@@ -120,6 +127,16 @@ void ThrottleManager::ManageProcess(DWORD pid) {
     if (m_managedPids.find(pid) == m_managedPids.end()) {
         m_managedPids.insert(pid);
         
+        // [FIX] Capture Original Priority (Source 1 Invariant: "Failure must always revert")
+        HANDLE hQuery = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (hQuery) {
+            DWORD pri = GetPriorityClass(hQuery);
+            if (pri != 0) {
+                m_originalPriorities[pid] = pri;
+            }
+            CloseHandle(hQuery);
+        }
+
         // 1. Permanently assign to Job Object (Cannot be removed, only limits changed)
         HANDLE hProc = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, pid);
         if (hProc) {
@@ -207,13 +224,40 @@ void ThrottleManager::ApplyPriorityToProcess(DWORD pid, bool enableThrottle) {
         // Set I/O Priority to Very Low (0)
         SetProcessIoPriority(pid, 0); 
     } else {
-        // DISENGAGE: Restore to "Safe" Background Normal
-        // We use BELOW_NORMAL instead of NORMAL to keep them polite even when stable.
-        SetPriorityClass(hProc, BELOW_NORMAL_PRIORITY_CLASS);
+        // DISENGAGE: Restore to Original Priority (Compliance: Source 1)
+        DWORD restorePri = BELOW_NORMAL_PRIORITY_CLASS; // Default fallback
         
-        // Restore I/O Priority to Normal (2)
+        // Check if we captured a valid original priority
+        std::lock_guard lock(m_mtx);
+        auto it = m_originalPriorities.find(pid);
+        if (it != m_originalPriorities.end()) {
+            restorePri = it->second;
+        }
+
+        SetPriorityClass(hProc, restorePri);
+        
+        // Restore I/O Priority to Normal (2) - Standard default
         SetProcessIoPriority(pid, 2);
     }
 
     CloseHandle(hProc);
+}
+
+void ThrottleManager::RestoreAll() {
+    std::lock_guard lock(m_mtx);
+    for (DWORD pid : m_managedPids) {
+        HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
+        if (hProc) {
+            DWORD restorePri = BELOW_NORMAL_PRIORITY_CLASS;
+            if (m_originalPriorities.count(pid)) {
+                restorePri = m_originalPriorities[pid];
+            }
+            SetPriorityClass(hProc, restorePri);
+            SetProcessIoPriority(pid, 2);
+            CloseHandle(hProc);
+        }
+    }
+    m_managedPids.clear();
+    m_originalPriorities.clear();
+    Log("[THROTTLE] Restored all managed processes to original state.");
 }

@@ -54,7 +54,10 @@ private:
     HANDLE m_hJob;
     std::mutex m_mtx;
     std::unordered_set<DWORD> m_managedPids;
+    std::unordered_map<DWORD, DWORD> m_originalPriorities; // [FIX] Track original state (Source 1 Invariant)
     bool m_isThrottling;
+
+    void RestoreAll(); // Cleanup helper
 };
 
 extern ThrottleManager g_throttleManager;
