@@ -41,7 +41,7 @@ bool WindowsServiceManager::Initialize()
 {
     if (m_scManager) return true;
     
-    m_scManager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    m_scManager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT | SC_MANAGER_ENUMERATE_SERVICE);
     if (!m_scManager)
     {
         Log("[SERVICE] Failed to open SC Manager: " + std::to_string(GetLastError()));
@@ -223,10 +223,15 @@ bool WindowsServiceManager::CaptureSessionSnapshot()
     DWORD resumeHandle = 0;
 
     // FIX: Use SERVICE_STATE_ALL to enumerate all services, then filter by RUNNING
-    EnumServicesStatusExW(m_scManager, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, 
-        SERVICE_STATE_ALL, nullptr, 0, &bytesNeeded, &servicesReturned, &resumeHandle, nullptr);
-    
-    if (GetLastError() != ERROR_MORE_DATA) return false;
+    if (!EnumServicesStatusExW(m_scManager, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, 
+        SERVICE_STATE_ALL, nullptr, 0, &bytesNeeded, &servicesReturned, &resumeHandle, nullptr))
+    {
+        DWORD err = GetLastError();
+        if (err != ERROR_MORE_DATA) {
+            Log("[SERVICE] Snapshot enumeration failed (Size Query): " + std::to_string(err));
+            return false;
+        }
+    }
 
     std::vector<BYTE> buffer(bytesNeeded);
     LPENUM_SERVICE_STATUS_PROCESSW services = reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buffer.data());
