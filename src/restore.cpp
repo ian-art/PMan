@@ -63,6 +63,36 @@ static void MarkRestorePointAsCreated()
 
 static bool CreateRestorePoint()
 {
+    // Fix: Ensure System Restore Service (srservice) is enabled and running
+    // This resolves Error 1058 (ERROR_SERVICE_DISABLED)
+    {
+        SC_HANDLE hSCM = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+        if (hSCM)
+        {
+            SC_HANDLE hSvc = OpenServiceW(hSCM, L"srservice", 
+                SERVICE_QUERY_STATUS | SERVICE_CHANGE_CONFIG | SERVICE_START);
+            if (hSvc)
+            {
+                // 1. Enable service if disabled (Set to DEMAND_START)
+                ChangeServiceConfigW(hSvc, SERVICE_NO_CHANGE, SERVICE_DEMAND_START, 
+                    SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+                
+                // 2. Start service if stopped
+                SERVICE_STATUS_PROCESS ssp = {};
+                DWORD bytesNeeded = 0;
+                if (QueryServiceStatusEx(hSvc, SC_STATUS_PROCESS_INFO, (LPBYTE)&ssp, sizeof(ssp), &bytesNeeded))
+                {
+                    if (ssp.dwCurrentState == SERVICE_STOPPED)
+                    {
+                        StartServiceW(hSvc, 0, nullptr);
+                    }
+                }
+                CloseServiceHandle(hSvc);
+            }
+            CloseServiceHandle(hSCM);
+        }
+    }
+
     // NOTE:
     // On Windows 10/11, System Restore is managed per-volume.
     // There is NO supported registry switch that force-enables it.
