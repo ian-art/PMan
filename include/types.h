@@ -148,11 +148,13 @@ typedef struct _IO_PRIORITY_INFO {
 #define QUOTA_LIMITS_HARDWS_MAX_DISABLE 0x00000008
 #endif
 
-// Correct structure for SystemMemoryListInformation
+// Define Memory Commands if not present
+#ifndef SYSTEM_MEMORY_LIST_COMMAND
 typedef enum _SYSTEM_MEMORY_LIST_COMMAND {
     MemoryPurgeStandbyList = 4,
     MemoryPurgeLowPriorityStandbyList = 5
 } SYSTEM_MEMORY_LIST_COMMAND;
+#endif
 
 // --------------------------------------------------------------------------
 // APPLICATION TYPES
