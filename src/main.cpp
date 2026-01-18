@@ -82,11 +82,15 @@ void LaunchProcessAsync(const std::wstring& cmd, std::function<void(DWORD)> call
 
         if (CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, 
                         CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-            WaitForSingleObject(pi.hProcess, 5000);
+
+            // RAII Adoption
+            UniqueHandle hProc(pi.hProcess);
+            UniqueHandle hThread(pi.hThread);
+
+            WaitForSingleObject(hProc.get(), 5000);
             DWORD exitCode = 0;
-            GetExitCodeProcess(pi.hProcess, &exitCode);
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
+            GetExitCodeProcess(hProc.get(), &exitCode);
+            // Handles closed automatically
             if (callback) callback(exitCode);
         } else {
             if (callback) callback(GetLastError());
@@ -398,14 +402,14 @@ static bool IsTaskInstalled(const std::wstring& taskName)
         return false;
     }
 
-	// Fix Use async wait with timeout to prevent startup hangs
-    WaitForSingleObject(pi.hProcess, 3000); 
+    UniqueHandle hProc(pi.hProcess);
+    UniqueHandle hThread(pi.hThread);
+
+    // Fix Use async wait with timeout to prevent startup hangs
+    WaitForSingleObject(hProc.get(), 3000); 
     DWORD exitCode = 0;
-    GetExitCodeProcess(pi.hProcess, &exitCode);
-        
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    
+    GetExitCodeProcess(hProc.get(), &exitCode);
+
 return (exitCode == 0);
 }
 
@@ -423,198 +427,20 @@ static int GetStartupMode(const std::wstring& taskName)
     if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 
                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
     {
-        WaitForSingleObject(pi.hProcess, 3000);
+        UniqueHandle hProc(pi.hProcess);
+        UniqueHandle hThread(pi.hThread);
+
+        WaitForSingleObject(hProc.get(), 3000);
         DWORD exitCode = 1;
-        GetExitCodeProcess(pi.hProcess, &exitCode);
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-        
+        GetExitCodeProcess(hProc.get(), &exitCode);
+
         // findstr returns 0 if found, 1 if not found
         return (exitCode == 0) ? 2 : 1; // 2=Passive, 1=Active
     }
     return 1; // Default to Active if check fails but task exists
 }
 
-// Crash-Proof Registry & Power Guard
-static void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWORD originalVal, const std::wstring& startupPowerScheme)
-{
-    // 1. Wait for the main process to exit (crash, kill, or close)
-    HANDLE hProcess = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
-    if (hProcess)
-    {
-        // Verify process identity using creation time to prevent PID reuse
-        FILETIME ftCreation, ftExit, ftKernel, ftUser;
-        if (GetProcessTimes(hProcess, &ftCreation, &ftExit, &ftKernel, &ftUser))
-        {
-            // Check if the PID still belongs to the original instance
-            if (ftCreation.dwLowDateTime == lowTime && ftCreation.dwHighDateTime == highTime)
-            {
-                WaitForSingleObject(hProcess, INFINITE);
-            }
-        }
-        CloseHandle(hProcess);
-    }
-    // If OpenProcess failed, process is already gone, proceed to check.
-
-    // 2. Check if registry was left in a modified state
-    HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-        L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
-        0, KEY_QUERY_VALUE | KEY_SET_VALUE, &key) == ERROR_SUCCESS)
-    {
-        DWORD currentVal = 0;
-        DWORD size = sizeof(currentVal);
-        if (RegQueryValueExW(key, L"Win32PrioritySeparation", nullptr, nullptr, 
-            reinterpret_cast<BYTE*>(&currentVal), &size) == ERROR_SUCCESS)
-        {
-            if (currentVal != originalVal)
-            {
-                RegSetValueExW(key, L"Win32PrioritySeparation", 0, REG_DWORD,
-                    reinterpret_cast<const BYTE*>(&originalVal), sizeof(originalVal));
-                Log("[GUARD] Main process crash detected. Registry Restored.");
-            }
-        }
-        RegCloseKey(key);
-    }
-
-    // 3. Power Plan Safety Check
-    // If the app crashed while we were in "Power Saver" mode, restore the user's original plan.
-    if (!startupPowerScheme.empty())
-    {
-        GUID* pCurrentScheme = nullptr;
-        if (PowerGetActiveScheme(NULL, &pCurrentScheme) == ERROR_SUCCESS)
-        {
-            wchar_t currentGuidStr[64] = {};
-        if (StringFromGUID2(*pCurrentScheme, currentGuidStr, 64) == 0) currentGuidStr[0] = L'\0';
-        
-        // If current scheme differs from startup scheme, force restore
-            if (_wcsicmp(currentGuidStr, startupPowerScheme.c_str()) != 0)
-            {
-                 GUID originalGuid;
-                 if (CLSIDFromString(startupPowerScheme.c_str(), &originalGuid) == S_OK)
-                 {
-                     PowerSetActiveScheme(NULL, &originalGuid);
-                     Log("[GUARD] Crash detected. Restored original Power Plan: " + WideToUtf8(startupPowerScheme.c_str()));
-                 }
-            }
-            LocalFree(pCurrentScheme);
-        }
-    }
-
-    // 4. CRITICAL: Check and resume suspended services
-    Log("[GUARD] Checking for stranded suspended services...");
-    SC_HANDLE scManager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-    if (scManager) 
-    {
-        // Check BITS service
-        SC_HANDLE bits = OpenServiceW(scManager, L"BITS", SERVICE_QUERY_STATUS | SERVICE_START);
-        if (bits) 
-        {
-            SERVICE_STATUS status;
-            if (QueryServiceStatus(bits, &status) && status.dwCurrentState == SERVICE_STOPPED)
-            {
-                // Check if it was stopped by us (last start time within last hour)
-                // Heuristic: if stopped but not disabled, resume it
-				DWORD configSize = 0;
-                // Fix C6031: Explicitly check for expected failure
-                if (!QueryServiceConfig(bits, nullptr, 0, &configSize) && 
-                    GetLastError() == ERROR_INSUFFICIENT_BUFFER && 
-                    configSize > 0)
-                {
-                    std::vector<BYTE> configBuffer(configSize);
-                    LPQUERY_SERVICE_CONFIG config = reinterpret_cast<LPQUERY_SERVICE_CONFIG>(configBuffer.data());
-                    if (QueryServiceConfig(bits, config, configSize, &configSize))
-                    {
-                        if (config->dwStartType != SERVICE_DISABLED)
-                        {
-                            StartServiceW(bits, 0, nullptr);
-                            Log("[GUARD] BITS service was stopped - resumed");
-                        }
-                    }
-                }
-            }
-            CloseServiceHandle(bits);
-        }
-        
-        // Check Windows Update service
-        SC_HANDLE wuauserv = OpenServiceW(scManager, L"wuauserv", SERVICE_QUERY_STATUS | SERVICE_START);
-        if (wuauserv) 
-        {
-            SERVICE_STATUS status;
-            if (QueryServiceStatus(wuauserv, &status) && status.dwCurrentState == SERVICE_STOPPED)
-            {
-				DWORD configSize = 0;
-                // Fix C6031: Explicitly check for expected failure
-                if (!QueryServiceConfig(wuauserv, nullptr, 0, &configSize) && 
-                    GetLastError() == ERROR_INSUFFICIENT_BUFFER && 
-                    configSize > 0)
-                {
-                    std::vector<BYTE> configBuffer(configSize);
-                    LPQUERY_SERVICE_CONFIG config = reinterpret_cast<LPQUERY_SERVICE_CONFIG>(configBuffer.data());
-                    if (QueryServiceConfig(wuauserv, config, configSize, &configSize))
-                    {
-                        if (config->dwStartType != SERVICE_DISABLED)
-                        {
-                            StartServiceW(wuauserv, 0, nullptr);
-                            Log("[GUARD] wuauserv was stopped - resumed");
-                        }
-                    }
-                }
-            }
-            CloseServiceHandle(wuauserv);
-        }
-        
-        CloseServiceHandle(scManager);
-    }
-}
-
-static void LaunchRegistryGuard(DWORD originalVal)
-{
-    wchar_t selfPath[MAX_PATH];
-    GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
-
-    // Get current process creation time
-    FILETIME ftCreation, ftExit, ftKernel, ftUser;
-    GetProcessTimes(GetCurrentProcess(), &ftCreation, &ftExit, &ftKernel, &ftUser);
-
-    // Capture Startup Power Scheme
-    std::wstring powerGuidStr = L"";
-    GUID* pStartupScheme = nullptr;
-    if (PowerGetActiveScheme(NULL, &pStartupScheme) == ERROR_SUCCESS)
-    {
-        wchar_t buf[64] = {};
-    if (StringFromGUID2(*pStartupScheme, buf, 64) != 0) {
-        powerGuidStr = buf; // e.g., "{381B4222-F694-41F0-9685-FF5BB260DF2E}"
-    }
-    LocalFree(pStartupScheme);
-    }
-
-    // Pass PID, Times, RegVal, AND PowerGUID to the guard instance
-    std::wstring cmd = L"\"" + std::wstring(selfPath) + L"\" --guard " +
-                       std::to_wstring(GetCurrentProcessId()) + L" " +
-                       std::to_wstring(ftCreation.dwLowDateTime) + L" " +
-                       std::to_wstring(ftCreation.dwHighDateTime) + L" " +
-                       std::to_wstring(originalVal) + L" \"" +
-                       powerGuidStr + L"\""; // Quote the GUID string
-
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi{};
-
-    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 
-                       CREATE_NO_WINDOW | DETACHED_PROCESS, 
-                       nullptr, nullptr, &si, &pi))
-    {
-        SetPriorityClass(pi.hProcess, IDLE_PRIORITY_CLASS);
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-        Log("[GUARD] Safety guard launched (Registry + Power)");
-    }
-    else
-    {
-        Log("[GUARD] Failed to launch safety guard: " + std::to_string(GetLastError()));
-    }
-}
+// [MOVED] Registry Guard implementation moved to restore.cpp
 
 // Forward declaration for main program logic
 int RunMainProgram(int argc, wchar_t** argv);
@@ -884,46 +710,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             ShowRichDialog(hwnd, L"Priority Manager Help", L"Command Line Usage", msg, TD_INFORMATION_ICON);
         }
         else if (wmId == ID_TRAY_UPDATE) {
-            if (g_isCheckingUpdate.exchange(true)) return 0;
-            
-            std::thread([hwnd]{
-                // RAII guard to reset flag when thread exits (after message box closes)
-                struct UpdateFlagGuard { ~UpdateFlagGuard() { g_isCheckingUpdate.store(false); } } guard;
-
-                if (!VerifyUpdateConnection()) {
-                    ShowRichDialog(hwnd, L"Connection Error", L"Update Check Failed", 
-                        L"Unable to connect to the update server.\nPlease check your internet connection.", 
-                        TD_ERROR_ICON);
-                    return;
-                }
-
-                std::wstring latest;
-                if (CheckForUpdates(latest)) {
-                    std::wstring current = GetCurrentExeVersion();
-                    std::wstring content = L"Current version: " + current + L"\n"
-                                           L"New version: " + latest + L"\n\n"
-                                           L"Would you like to update now?";
-
-                    int result = ShowRichDialog(hwnd, L"Update Available", L"A new version is available!", 
-                        content, TD_SHIELD_ICON, TDCBF_YES_BUTTON | TDCBF_NO_BUTTON);
-                    
-                    if (result == IDYES) {
-                        wchar_t tempPath[MAX_PATH];
-                        GetTempPathW(MAX_PATH, tempPath);
-                        std::wstring dlPath = std::wstring(tempPath) + L"tmp.exe";
-                        
-                        if (DownloadUpdate(dlPath)) {
-                            InstallUpdateAndRestart(dlPath, g_userPaused.load());
-                        } else {
-                            ShowRichDialog(hwnd, L"Update Error", L"Download Failed", 
-                                L"Unable to download the update package.", TD_ERROR_ICON);
-                        }
-                    }
-                } else {
-                    ShowRichDialog(hwnd, L"Update Check", L"You are up to date", 
-                        L"You have the latest version of PMan.", TD_INFORMATION_ICON);
-                }
-            }).detach();
+            OpenUpdatePage();
         }
         else if (wmId == ID_TRAY_APPLY_TWEAKS) {
             int result = MessageBoxW(hwnd, 

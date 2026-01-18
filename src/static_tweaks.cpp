@@ -18,16 +18,77 @@
  */
 
 #include "static_tweaks.h"
-#include "logger.h"
 #include "utils.h"
+#include "logger.h"
+#include "restore.h"
 #include <windows.h>
-#include <string>
 #include <vector>
+#include <string>
+#include <filesystem>
+#include <shlobj.h>
+#include <sstream>
+#include <iomanip>
 
 // Define custom flag for Delayed Start since it's not a standard single API value
 #ifndef SERVICE_DELAYED_AUTO_START
 #define SERVICE_DELAYED_AUTO_START 0xFF000002
 #endif
+
+static std::wstring GetBackupDirectory()
+{
+    wchar_t path[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_COMMON_APPDATA, nullptr, 0, path))) {
+        std::filesystem::path p(path);
+        p /= L"PriorityMgr";
+        p /= L"Backups";
+        std::filesystem::create_directories(p);
+        return p.wstring();
+    }
+    return L"";
+}
+
+static void BackupRegistryKey(const std::wstring& keyName, const std::wstring& filename)
+{
+    std::wstring dir = GetBackupDirectory();
+    if (dir.empty()) return;
+
+    std::wstring fullPath = dir + L"\\" + filename;
+    
+    // Use reg.exe export for reliable backups
+    // Format: reg export "HKLM\..." "C:\Path\file.reg" /y
+    std::wstring cmd = L"reg.exe export \"" + keyName + L"\" \"" + fullPath + L"\" /y";
+    
+    STARTUPINFOW si = { sizeof(si) };
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi = {};
+    
+    // Create mutable buffer
+    std::vector<wchar_t> buf(cmd.begin(), cmd.end());
+    buf.push_back(0);
+
+    if (CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, 
+                       CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        WaitForSingleObject(pi.hProcess, 5000);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        Log("[BACKUP] Exported " + WideToUtf8(keyName.c_str()));
+    } else {
+        Log("[BACKUP] Failed to export " + WideToUtf8(keyName.c_str()));
+    }
+}
+
+static void PerformSafetyBackup()
+{
+    // Backup critical areas we are about to touch
+    Log("[BACKUP] Starting registry backup before applying tweaks...");
+    
+    BackupRegistryKey(L"HKLM\\SYSTEM\\CurrentControlSet\\Control\\PriorityControl", L"PriorityControl.reg");
+    BackupRegistryKey(L"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"MemoryMgmt.reg");
+    BackupRegistryKey(L"HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"MultimediaSysProfile.reg");
+    BackupRegistryKey(L"HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters", L"TcpipParams.reg");
+    BackupRegistryKey(L"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Power", L"PowerControl.reg");
+}
 
 // --------------------------------------------------------------------------------
 // AV-SAFE HELPER FUNCTIONS (Native API)
@@ -241,8 +302,25 @@ static void EnumerateAndConfigureUserServices(const wchar_t* pattern, DWORD star
 
 void ApplyStaticTweaks()
 {
-    Log("*********************************");
-    Log("[TWEAK] Starting Manual System Optimization...");
+    // 1. Auto-Create Restore Point
+    Log("[SAFETY] Attempting to create System Restore point...");
+    if (!CreateRestorePoint()) {
+        int result = MessageBoxW(nullptr, 
+            L"PMan failed to create an automatic System Restore point.\n\n"
+            L"It is HIGHLY RECOMMENDED that you create one manually before proceeding.\n\n"
+            L"Do you want to continue anyway?", 
+            L"Safety Warning", MB_YESNO | MB_ICONWARNING | MB_TOPMOST);
+        
+        if (result == IDNO) {
+            Log("[SAFETY] User aborted tweaks due to failed restore point.");
+            return;
+        }
+    }
+
+    // 2. Registry Backup
+    PerformSafetyBackup();
+
+    Log("[TWEAKS] Applying static system optimizations...");
 
     // ============================================================================
     // NETWORK OPTIMIZATIONS

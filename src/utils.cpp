@@ -27,9 +27,7 @@
 #include <tlhelp32.h>
 #include <mutex>
 #include <shellapi.h>
-#include <winhttp.h>
 #include <unordered_set> // Required for IsSystemCriticalProcess
-#pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "Version.lib") // Required for GetFileVersionInfo
 
 std::string WideToUtf8(const wchar_t* wstr)
@@ -381,100 +379,36 @@ bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD&
 	return RegQueryValueExW(key, value, nullptr, nullptr, reinterpret_cast<BYTE*>(&outVal), &size) == ERROR_SUCCESS;
 }
 
-// ------------------- UPDATER IMPLEMENTATION -------------------
-static bool HttpRequest(const wchar_t* path, std::string& outData, bool binary)
+// Registry Anti-Hammering Implementation
+bool RegWriteDwordCached(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD data)
 {
-    bool result = false;
+    HKEY rawKey = nullptr;
+    // Open with both QUERY and SET access
+    LONG rc = RegOpenKeyExW(root, subkey, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &rawKey);
 
-    HINTERNET hSession = WinHttpOpen(
-        L"PriorityManager/2.0",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME,
-        WINHTTP_NO_PROXY_BYPASS,
-        0);
-
-    if (!hSession)
-        return false;
-
-    HINTERNET hConnect = WinHttpConnect(
-        hSession,
-        UPDATE_HOST,
-        INTERNET_DEFAULT_HTTPS_PORT,
-        0);
-
-    if (!hConnect) {
-        WinHttpCloseHandle(hSession);
-        return false;
+    // If key doesn't exist, try to create it
+    if (rc != ERROR_SUCCESS) {
+        rc = RegCreateKeyExW(root, subkey, 0, nullptr, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &rawKey, nullptr);
     }
 
-    HINTERNET hRequest = WinHttpOpenRequest(
-        hConnect,
-        L"GET",
-        path,
-        nullptr,
-        WINHTTP_NO_REFERER,
-        WINHTTP_DEFAULT_ACCEPT_TYPES,
-        WINHTTP_FLAG_SECURE);
+    if (rc != ERROR_SUCCESS) return false;
 
-    if (!hRequest) {
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        return false;
-    }
+    UniqueRegKey key(rawKey);
+    DWORD currentVal = 0;
+    DWORD size = sizeof(currentVal);
 
-    DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
-    WinHttpSetOption(
-        hRequest,
-        WINHTTP_OPTION_REDIRECT_POLICY,
-        &redirectPolicy,
-        sizeof(redirectPolicy));
-
-    if (WinHttpSendRequest(
-            hRequest,
-            WINHTTP_NO_ADDITIONAL_HEADERS,
-            0,
-            WINHTTP_NO_REQUEST_DATA,
-            0,
-            0,
-            0) &&
-        WinHttpReceiveResponse(hRequest, nullptr))
+    // Check current value
+    if (RegQueryValueExW(key.get(), value, nullptr, nullptr, reinterpret_cast<BYTE*>(&currentVal), &size) == ERROR_SUCCESS)
     {
-        std::vector<char> buffer;
-        DWORD size = 0;
-
-        while (WinHttpQueryDataAvailable(hRequest, &size) && size > 0) {
-            std::vector<char> chunk(size);
-            DWORD read = 0;
-
-            if (!WinHttpReadData(hRequest, chunk.data(), size, &read))
-                break;
-
-            buffer.insert(buffer.end(), chunk.begin(), chunk.begin() + read);
-        }
-
-        if (!buffer.empty()) {
-            if (!binary) {
-                // Strip UTF-8 BOM if present
-                if (buffer.size() >= 3 &&
-                    static_cast<unsigned char>(buffer[0]) == 0xEF &&
-                    static_cast<unsigned char>(buffer[1]) == 0xBB &&
-                    static_cast<unsigned char>(buffer[2]) == 0xBF)
-                {
-                    buffer.erase(buffer.begin(), buffer.begin() + 3);
-                }
-            }
-
-            outData.assign(buffer.begin(), buffer.end());
-            result = true;
-        }
+        // If strictly equal, skip the write (Anti-Hammering)
+        if (currentVal == data) return true;
     }
 
-    WinHttpCloseHandle(hRequest);
-    WinHttpCloseHandle(hConnect);
-    WinHttpCloseHandle(hSession);
-
-return result;
+    // Value differs or doesn't exist; perform write
+    return RegSetValueExW(key.get(), value, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&data), sizeof(data)) == ERROR_SUCCESS;
 }
+
+// ------------------- UPDATER IMPLEMENTATION -------------------
 
 std::wstring GetCurrentExeVersion()
 {
@@ -488,7 +422,7 @@ std::wstring GetCurrentExeVersion()
     if (size == 0)
         return L"0.0.0.0";
 
-	std::vector<BYTE> buffer(size);
+    std::vector<BYTE> buffer(size);
     // Fix C6388: Pass 0 as handle, as required/ignored by spec
     if (!GetFileVersionInfoW(path, 0, size, buffer.data()))
         return L"0.0.0.0";
@@ -499,154 +433,17 @@ std::wstring GetCurrentExeVersion()
     if (!VerQueryValueW(buffer.data(), L"\\", reinterpret_cast<void**>(&ffi), &len))
         return L"0.0.0.0";
 
-	if (len == 0 || ffi->dwSignature != VS_FFI_SIGNATURE)
+    if (len == 0 || ffi->dwSignature != VS_FFI_SIGNATURE)
         return L"0.0.0.0";
 
     // Use C++ string construction to avoid buffer heuristics
-	return std::to_wstring(HIWORD(ffi->dwFileVersionMS)) + L"." +
+    return std::to_wstring(HIWORD(ffi->dwFileVersionMS)) + L"." +
            std::to_wstring(LOWORD(ffi->dwFileVersionMS)) + L"." +
            std::to_wstring(HIWORD(ffi->dwFileVersionLS)) + L"." +
            std::to_wstring(LOWORD(ffi->dwFileVersionLS));
 }
 
-bool VerifyUpdateConnection()
+void OpenUpdatePage()
 {
-    HINTERNET hSession = WinHttpOpen(
-        L"PriorityManager/2.0",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME,
-        WINHTTP_NO_PROXY_BYPASS,
-        0);
-
-    if (!hSession) return false;
-
-    bool connected = false;
-    HINTERNET hConnect = WinHttpConnect(
-        hSession,
-        UPDATE_HOST,
-        INTERNET_DEFAULT_HTTPS_PORT,
-        0);
-
-    if (hConnect)
-    {
-        // Fix: WinHttpConnect is lazy. Use HEAD request to verify actual connectivity.
-        HINTERNET hRequest = WinHttpOpenRequest(
-            hConnect,
-            L"HEAD", 
-            UPDATE_VER_PATH, 
-            nullptr,
-            WINHTTP_NO_REFERER,
-            WINHTTP_DEFAULT_ACCEPT_TYPES,
-            WINHTTP_FLAG_SECURE);
-
-        if (hRequest)
-        {
-            // Ensure redirects are followed for robustness
-            DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
-            WinHttpSetOption(hRequest, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
-
-            if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-                WinHttpReceiveResponse(hRequest, nullptr))
-            {
-                DWORD statusCode = 0;
-                DWORD size = sizeof(statusCode);
-                
-                // If we get ANY status code, we have reached the server
-                if (WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, 
-                                      WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &size, WINHTTP_NO_HEADER_INDEX))
-                {
-                    connected = true;
-                }
-            }
-            WinHttpCloseHandle(hRequest);
-        }
-        WinHttpCloseHandle(hConnect);
-    }
-
-    WinHttpCloseHandle(hSession);
-    return connected;
-}
-
-bool CheckForUpdates(std::wstring& outLatestVer)
-{
-    std::string data;
-    if (HttpRequest(UPDATE_VER_PATH, data, false)) {
-        // Safe Trim: Avoid npos/out_of_range errors on empty strings
-        size_t first = data.find_first_not_of(" \n\r\t");
-        if (first == std::string::npos) return false; // String is all whitespace or empty
-
-        size_t last = data.find_last_not_of(" \n\r\t");
-        std::string cleanData = data.substr(first, (last - first + 1));
-        
-        if (!cleanData.empty()) {
-            std::wstring latest = std::wstring(cleanData.begin(), cleanData.end());
-            outLatestVer = latest;
-            
-            // Compare against dynamic resource version
-            std::wstring current = GetCurrentExeVersion();
-            return latest != current;
-        }
-    }
-    return false;
-}
-
-bool DownloadUpdate(const std::wstring& savePath)
-{
-    std::string data;
-    if (HttpRequest(UPDATE_BIN_PATH, data, true)) {
-        HANDLE hFile = CreateFileW(savePath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (hFile != INVALID_HANDLE_VALUE) {
-            DWORD written = 0;
-            WriteFile(hFile, data.data(), (DWORD)data.size(), &written, nullptr);
-            CloseHandle(hFile);
-            return written == data.size();
-        }
-    }
-    return false;
-}
-
-void InstallUpdateAndRestart(const std::wstring& newExePath, bool isPaused)
-{
-    wchar_t selfPath[MAX_PATH];
-    GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
-
-    // Locate dedicated updater next to the main executable
-    std::wstring updaterPath = std::wstring(selfPath);
-    size_t lastSlash = updaterPath.find_last_of(L"\\/");
-    if (lastSlash != std::wstring::npos) {
-        updaterPath = updaterPath.substr(0, lastSlash + 1) + L"updater.exe";
-    } else {
-        updaterPath = L"updater.exe";
-    }
-
-    // If updater is missing, we cannot proceed safely without the batch fallback.
-    // Assuming updater.exe is shipped with the release.
-    if (GetFileAttributesW(updaterPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        Log("CRITICAL: updater.exe not found. Update aborted.");
-        return;
-    }
-
-    // Arguments: /silent is implicit for the restart, add --paused if needed
-    std::wstring restartArgs = L"/silent";
-    if (isPaused) restartArgs += L" --paused";
-
-    // Construct command line for updater
-    // Format: --pid <PID> --src <NewFile> --dst <CurrentExe> --args <RestartArgs>
-    std::wstring cmdArgs = L"--pid " + std::to_wstring(GetCurrentProcessId()) +
-                           L" --src \"" + newExePath + L"\"" +
-                           L" --dst \"" + std::wstring(selfPath) + L"\"" +
-                           L" --args \"" + restartArgs + L"\"";
-
-    SHELLEXECUTEINFOW sei = { sizeof(sei) };
-    sei.lpFile = updaterPath.c_str();
-    sei.lpParameters = cmdArgs.c_str();
-    sei.nShow = SW_HIDE; // Run updater invisibly
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
-
-    if (ShellExecuteExW(&sei)) {
-        // Yield execution immediately to allow updater to acquire lock
-        ExitProcess(0);
-    } else {
-        Log("CRITICAL: Failed to launch updater.exe");
-    }
+    ShellExecuteW(nullptr, L"open", GITHUB_RELEASES_URL, nullptr, nullptr, SW_SHOWNORMAL);
 }

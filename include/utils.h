@@ -74,11 +74,11 @@ void ForEachProcess(std::function<void(const PROCESSENTRY32W&)> callback);
 // Registry Helpers
 bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD& outVal);
 
+// Registry Anti-Hammering
+bool RegWriteDwordCached(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD data);
+
 // Updater Functions
-bool VerifyUpdateConnection(); // Replaces Winsock check with WinHTTP
-bool CheckForUpdates(std::wstring& outLatestVer);
-bool DownloadUpdate(const std::wstring& savePath);
-void InstallUpdateAndRestart(const std::wstring& newExePath, bool isPaused);
+void OpenUpdatePage();
 
 // RAII Wrapper for Windows HANDLEs
 struct HandleDeleter {

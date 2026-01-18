@@ -65,14 +65,10 @@ static constexpr UINT    ID_TRAY_EDIT_LAUNCHERS = 2007;
 static constexpr UINT    ID_TRAY_EDIT_VIDEO_PLAYERS = 2008;
 
 // PAYPAL
-static constexpr wchar_t SUPPORT_URL[]      = L"https://paypal.me/ianart/100";
+static constexpr wchar_t SUPPORT_URL[] = L"https://paypal.me/ianart/100";
 
 // Update Configuration
-static constexpr wchar_t UPDATE_HOST[]     = L"dl.dropboxusercontent.com";
-// Link to version.txt
-static constexpr wchar_t UPDATE_VER_PATH[] = L"/scl/fi/o0j64sw05j35e6v5cmi9i/version.txt?rlkey=031mtw388jyfbej0tuvtdn3ac";
-// Link to pman.exe
-static constexpr wchar_t UPDATE_BIN_PATH[] = L"/scl/fi/aaj2lplavy42q5zzxx6bo/pman.exe?rlkey=ixylbw2rxfsgifvl5ftwbj98f";
+static constexpr wchar_t GITHUB_RELEASES_URL[] = L"https://github.com/ian-art/Priority_Manager/releases";
 
 // Mutex and Event Names
 static constexpr wchar_t MUTEX_NAME[] = L"Global\\PriorityManager_Mutex_1F4E7D2A";

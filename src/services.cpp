@@ -360,7 +360,7 @@ bool WindowsServiceManager::SnapshotServiceStates()
 
     for (auto& entry : m_sessionServices) {
         // Needs PROCESS_QUERY_INFORMATION for Affinity
-        HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, entry.pid);
+        UniqueHandle hProcess(OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, entry.pid));
         
         if (!hProcess) {
              Log("[SERVICE] CRITICAL: Snapshot Failed - Cannot open PID " + std::to_string(entry.pid) + 
@@ -371,17 +371,17 @@ bool WindowsServiceManager::SnapshotServiceStates()
 
         DWORD_PTR processAffinity = 0;
         DWORD_PTR systemAffinity = 0;
-        if (!GetProcessAffinityMask(hProcess, &processAffinity, &systemAffinity)) {
+        if (!GetProcessAffinityMask(hProcess.get(), &processAffinity, &systemAffinity)) {
              Log("[SERVICE] CRITICAL: Snapshot Failed - Affinity query error " + std::to_string(GetLastError()));
-             CloseHandle(hProcess);
+             // Handle closes automatically
              m_sessionServices.clear();
              return false;
         }
 
-        DWORD priority = GetPriorityClass(hProcess);
+        DWORD priority = GetPriorityClass(hProcess.get());
         if (priority == 0) {
              Log("[SERVICE] CRITICAL: Snapshot Failed - Priority query error " + std::to_string(GetLastError()));
-             CloseHandle(hProcess);
+             // Handle closes automatically
              m_sessionServices.clear();
              return false;
         }
@@ -397,15 +397,15 @@ bool WindowsServiceManager::SnapshotServiceStates()
         entry.sessionId = sessionId;
         entry.timestamp = GetTickCount64();
 
-        // Phase 7 Prerequisite: Capture Creation Time
+        // Prerequisite: Capture Creation Time
         FILETIME ftCreate, ftExit, ftKernel, ftUser;
-        if (GetProcessTimes(hProcess, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+        if (GetProcessTimes(hProcess.get(), &ftCreate, &ftExit, &ftKernel, &ftUser)) {
             entry.creationTime = (static_cast<uint64_t>(ftCreate.dwHighDateTime) << 32) | ftCreate.dwLowDateTime;
         } else {
             entry.creationTime = 0; // Should not happen, but safe fallback
         }
         
-        CloseHandle(hProcess);
+        // Handle closes automatically
     }
 
     Log("[SERVICE] State Snapshot Complete. All targets captured successfully.");
@@ -419,36 +419,32 @@ void WindowsServiceManager::EnforceSessionPolicies()
     if (m_sessionServices.empty()) return;
 
     for (auto& entry : m_sessionServices) {
-        // Only monitor services we are currently managing
-        if (!entry.isModified) continue;
+    if (!entry.isModified) continue;
 
-        bool violation = false;
+    bool violation = false;
 
-        HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.pid);
-        if (!hProcess) {
-            // "Service Crashes" -> Process gone
-            Log("[SERVICE] ALERT: Service violation detected (Process Gone) - " + WideToUtf8(entry.name.c_str()));
-            violation = true;
-        } else {
-            DWORD exitCode = 0;
-            if (GetExitCodeProcess(hProcess, &exitCode) && exitCode == STILL_ACTIVE) {
-                // Verify Identity (PID Reuse Protection)
-                FILETIME ftCreate, ftExit, ftKernel, ftUser;
-                if (GetProcessTimes(hProcess, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
-                    uint64_t currentCreateTime = (static_cast<uint64_t>(ftCreate.dwHighDateTime) << 32) | ftCreate.dwLowDateTime;
-                    
-                    // Allow 1 second fuzziness for clock drift, though usually exact
-                    if (entry.creationTime != 0 && currentCreateTime != entry.creationTime) {
-                         Log("[SERVICE] ALERT: Service violation detected (PID Reused/Restarted) - " + WideToUtf8(entry.name.c_str()));
-                         violation = true;
-                    }
+    UniqueHandle hProcess(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.pid));
+    if (!hProcess) {
+        Log("[SERVICE] ALERT: Service violation detected (Process Gone) - " + WideToUtf8(entry.name.c_str()));
+        violation = true;
+    } else {
+        DWORD exitCode = 0;
+        if (GetExitCodeProcess(hProcess.get(), &exitCode) && exitCode == STILL_ACTIVE) {
+            FILETIME ftCreate, ftExit, ftKernel, ftUser;
+            if (GetProcessTimes(hProcess.get(), &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+                uint64_t currentCreateTime = (static_cast<uint64_t>(ftCreate.dwHighDateTime) << 32) | ftCreate.dwLowDateTime;
+
+                if (entry.creationTime != 0 && currentCreateTime != entry.creationTime) {
+                     Log("[SERVICE] ALERT: Service violation detected (PID Reused/Restarted) - " + WideToUtf8(entry.name.c_str()));
+                     violation = true;
                 }
-            } else {
-                Log("[SERVICE] ALERT: Service violation detected (Exited) - " + WideToUtf8(entry.name.c_str()));
-                violation = true;
             }
-            CloseHandle(hProcess);
+        } else {
+            Log("[SERVICE] ALERT: Service violation detected (Exited) - " + WideToUtf8(entry.name.c_str()));
+            violation = true;
         }
+        // Handle closes automatically
+    }
 
         // "Enforcement Rule: If a service... Restarts/Crashes... It is immediately blacklisted"
         if (violation) {
@@ -482,39 +478,34 @@ bool WindowsServiceManager::ApplySessionOptimizations(DWORD_PTR targetAffinityMa
         hexStream.str() + ")...");
 
     for (auto& entry : m_sessionServices) {
-        bool success = false;
-        
-        // Open with necessary rights
-        HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.pid);
-        if (hProcess) {
-            // 6.1 Apply Affinity FIRST
-            // "Restrict service threads to selected 2 cores"
-            if (SetProcessAffinityMask(hProcess, targetAffinityMask)) {
-                
-                // 6.2 Apply Priority SECOND
-                // "Set priority to BELOW_NORMAL_PRIORITY_CLASS"
-                // "Never lower" (We do not use IDLE)
-                if (SetPriorityClass(hProcess, BELOW_NORMAL_PRIORITY_CLASS)) {
-                    
-                    // 6.3 Immediate Validation
-                    // "Confirm Service responsiveness (Alive check)"
-                    DWORD exitCode = 0;
-                    if (GetExitCodeProcess(hProcess, &exitCode) && exitCode == STILL_ACTIVE) {
-                        success = true;
-                        entry.isModified = true;
-                    } else {
-                        Log("[SERVICE] Validation Failed: Service died immediately (" + WideToUtf8(entry.name.c_str()) + ")");
-                    }
+    bool success = false;
+
+    UniqueHandle hProcess(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.pid));
+    if (hProcess) {
+        // 6.1 Apply Affinity FIRST
+        if (SetProcessAffinityMask(hProcess.get(), targetAffinityMask)) {
+
+            // 6.2 Apply Priority SECOND
+            if (SetPriorityClass(hProcess.get(), BELOW_NORMAL_PRIORITY_CLASS)) {
+
+                // 6.3 Immediate Validation
+                DWORD exitCode = 0;
+                if (GetExitCodeProcess(hProcess.get(), &exitCode) && exitCode == STILL_ACTIVE) {
+                    success = true;
+                    entry.isModified = true;
                 } else {
-                     Log("[SERVICE] Failed to set Priority for " + WideToUtf8(entry.name.c_str()));
+                    Log("[SERVICE] Validation Failed: Service died immediately (" + WideToUtf8(entry.name.c_str()) + ")");
                 }
             } else {
-                Log("[SERVICE] Failed to set Affinity for " + WideToUtf8(entry.name.c_str()));
+                 Log("[SERVICE] Failed to set Priority for " + WideToUtf8(entry.name.c_str()));
             }
-            CloseHandle(hProcess);
         } else {
-            Log("[SERVICE] Failed to open service process " + std::to_string(entry.pid));
+            Log("[SERVICE] Failed to set Affinity for " + WideToUtf8(entry.name.c_str()));
         }
+        // Handle closes automatically
+    } else {
+        Log("[SERVICE] Failed to open service process " + std::to_string(entry.pid));
+    }
 
         // "Failure at any point -> immediate rollback of all services"
         if (!success) {
@@ -548,51 +539,43 @@ void WindowsServiceManager::RestoreSessionStatesLocked()
 
     // Restoration Order
     for (auto& entry : m_sessionServices) {
-        // "No services outside the original eligibility snapshot are touched."
-        if (!entry.isModified) continue;
+    if (!entry.isModified) continue;
 
-        // Needs QUERY_INFORMATION to Verify State
-        HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION, FALSE, entry.pid);
-        if (hProcess) {
-            bool success = true;
+    UniqueHandle hProcess(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION, FALSE, entry.pid));
+    if (hProcess) {
+        bool success = true;
 
-            // 1. Restore Affinity
-            if (!SetProcessAffinityMask(hProcess, entry.originalAffinity)) {
-                Log("[SERVICE] ERROR: Failed to restore Affinity for " + WideToUtf8(entry.name.c_str()));
-                success = false;
+        if (!SetProcessAffinityMask(hProcess.get(), entry.originalAffinity)) {
+            Log("[SERVICE] ERROR: Failed to restore Affinity for " + WideToUtf8(entry.name.c_str()));
+            success = false;
+        }
+
+        if (!SetPriorityClass(hProcess.get(), entry.originalPriority)) {
+            Log("[SERVICE] ERROR: Failed to restore Priority for " + WideToUtf8(entry.name.c_str()));
+            success = false;
+        }
+
+        if (success) {
+            DWORD_PTR processAffinity, systemAffinity;
+            DWORD currentPri = GetPriorityClass(hProcess.get());
+
+            if (currentPri != entry.originalPriority) {
+                 Log("[SERVICE] VERIFY FAIL: Priority mismatch for " + WideToUtf8(entry.name.c_str()));
+                 SetPriorityClass(hProcess.get(), entry.originalPriority);
+                 errorCount++;
             }
 
-            // 2. Restore Priority
-            if (!SetPriorityClass(hProcess, entry.originalPriority)) {
-                Log("[SERVICE] ERROR: Failed to restore Priority for " + WideToUtf8(entry.name.c_str()));
-                success = false;
-            }
-
-            // 3. Verify State
-            if (success) {
-                DWORD_PTR processAffinity, systemAffinity;
-                DWORD currentPri = GetPriorityClass(hProcess);
-                
-                if (currentPri != entry.originalPriority) {
-                     Log("[SERVICE] VERIFY FAIL: Priority mismatch for " + WideToUtf8(entry.name.c_str()));
-                     // Retry once
-                     SetPriorityClass(hProcess, entry.originalPriority);
-                     errorCount++;
-                }
-
-                if (GetProcessAffinityMask(hProcess, &processAffinity, &systemAffinity)) {
-                    if (processAffinity != entry.originalAffinity) {
-                        Log("[SERVICE] VERIFY FAIL: Affinity mismatch for " + WideToUtf8(entry.name.c_str()));
-                        // Retry once
-                        SetProcessAffinityMask(hProcess, entry.originalAffinity);
-                        errorCount++;
-                    }
+            if (GetProcessAffinityMask(hProcess.get(), &processAffinity, &systemAffinity)) {
+                if (processAffinity != entry.originalAffinity) {
+                    Log("[SERVICE] VERIFY FAIL: Affinity mismatch for " + WideToUtf8(entry.name.c_str()));
+                    SetProcessAffinityMask(hProcess.get(), entry.originalAffinity);
+                    errorCount++;
                 }
             }
-
-            CloseHandle(hProcess);
-            restoredCount++;
-        } else {
+        }
+        restoredCount++;
+        // Handle closes automatically
+    } else {
             // If process is gone (OpenProcess failed), it is effectively "restored" to the void.
             // We only log if it's an access error on a live process.
             DWORD err = GetLastError();

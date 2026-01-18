@@ -23,6 +23,7 @@
 #include "logger.h"
 #include "utils.h"
 #include "sysinfo.h"
+#include "nt_wrapper.h" // Centralized NT API
 #include <windows.h>
 #include <tlhelp32.h>
 #include <vector>
@@ -33,43 +34,28 @@
 #include <mutex>
 #include <thread> // For async trimming
 
-// NT MEMORY TRIM DEFINITIONS
-typedef NTSTATUS (NTAPI *NtSetSystemInformation_t)(
-    SYSTEM_INFORMATION_CLASS SystemInformationClass,
-    PVOID SystemInformation,
-    ULONG SystemInformationLength
-);
-
-static NtSetSystemInformation_t pNtSetSystemInformation = nullptr;
-
-static bool InitNtMemoryApi()
-{
-    if (pNtSetSystemInformation)
-        return true;
-
-    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    if (!ntdll)
-        return false;
-
-    pNtSetSystemInformation =
-        reinterpret_cast<NtSetSystemInformation_t>(
-            GetProcAddress(ntdll, "NtSetSystemInformation")
-        );
-
-    return pNtSetSystemInformation != nullptr;
-}
+// NT Definitions moved to nt_wrapper.h/cpp
 
 void IntelligentRamClean()
 {
     // CRITICAL FIX: Prevent 0x1A BSOD during Hibernate/Sleep
     if (g_isSuspended.load()) return;
 
-    if (!InitNtMemoryApi())
+    // Deprecate Aggressive Cleaning
+    // Windows manages Standby List better than we do for gaming.
+    // Only purge if we are truly running out of physical RAM (>90%).
+
+    MEMORYSTATUSEX ms = { sizeof(ms) };
+    if (!GlobalMemoryStatusEx(&ms)) return;
+
+    const int MEMORY_PRESSURE_THRESHOLD = 90; 
+    if (ms.dwMemoryLoad < MEMORY_PRESSURE_THRESHOLD) {
+        // RAM is fine, do not purge. It causes stuttering if we clear cache the game needs.
         return;
+    }
 
     SYSTEM_MEMORY_LIST_COMMAND cmd = MemoryPurgeStandbyList;
-
-    NTSTATUS st = pNtSetSystemInformation(
+    NTSTATUS st = NtWrapper::SetSystemInformation(
         SystemMemoryListInformation,
         &cmd,
         sizeof(cmd)
@@ -91,72 +77,20 @@ void IntelligentRamClean()
 
 bool SetPrioritySeparation(DWORD val)
 {
-    // CRITICAL FIX: Prevent registry corruption during power state transitions
     if (g_isSuspended.load()) return false;
 
-    // Global throttle: max 1 write per second
-    static DWORD g_lastPriorityTick = 0;
-    static std::atomic<DWORD> g_lastPriorityValue{0xFFFFFFFF};
+    // [Phase 4] Use Standardized Anti-Hammering
+    bool result = RegWriteDwordCached(
+        HKEY_LOCAL_MACHINE, 
+        L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
+        L"Win32PrioritySeparation", 
+        val
+    );
 
-    // [FIX] C28159: Use GetTickCount64 cast to DWORD
-    DWORD now = static_cast<DWORD>(GetTickCount64());
-    // If value hasn't changed AND it's been less than 1s, skip
-    if (now - g_lastPriorityTick < 1000 && g_lastPriorityValue.load() == val) return true;
-
-    // Registry Write Guard
-    DWORD cachedVal = g_cachedRegistryValue.load();
-    if (cachedVal != 0xFFFFFFFF && cachedVal == val)
-    {
-        return true;
-    }
-    
-HKEY rawKey = nullptr;
-    // Fix: Request KEY_QUERY_VALUE to check current value before writing
-    LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-                            L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
-                            0, KEY_SET_VALUE | KEY_QUERY_VALUE, &rawKey);
-    
-    // RAII wrapper takes ownership immediately
-    UniqueRegKey key(rawKey);
-
-    if (rc != ERROR_SUCCESS) 
-    {
-        if (rc == ERROR_ACCESS_DENIED)
-            Log("Registry access denied - need admin rights");
-        else
-            Log("Registry open failed: " + std::to_string(rc));
-        return false;
-    }
-
-    DWORD currentVal = 0;
-    DWORD size = sizeof(currentVal);
-    // Fix: Use key.get() now that key is declared
-	if (RegQueryValueExW(key.get(), L"Win32PrioritySeparation", nullptr, nullptr,
-                        reinterpret_cast<BYTE*>(&currentVal), &size) == ERROR_SUCCESS)
-    {
-        if (currentVal == val)
-        {
-            g_cachedRegistryValue.store(val);
-            return true; // Skip unnecessary write
-        }
-    }
-    
-    rc = RegSetValueExW(key.get(), L"Win32PrioritySeparation", 0, REG_DWORD,
-                        reinterpret_cast<const BYTE*>(&val), sizeof(val));
-    // No explicit RegCloseKey needed - automatic cleanup
-    
-    if (rc == ERROR_SUCCESS)
-    {
+    if (result) {
         g_cachedRegistryValue.store(val);
-        g_lastPriorityValue.store(val);
-        g_lastPriorityTick = now;
-        return true;
     }
-    else
-    {
-        Log("Registry set failed: " + std::to_string(rc));
-        return false;
-    }
+    return result;
 }
 
 void SetHybridCoreAffinity(DWORD pid, int mode)
@@ -360,50 +294,38 @@ void SetProcessIoPriority(DWORD pid, int mode)
     
     bool ioPrioritySet = false;
     
-    // Method 1: Try NtSetInformationProcess (most compatible)
-    typedef NTSTATUS (NTAPI *NtSetInformationProcessPtr)(HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG);
-    auto pNtSetInformationProcess = reinterpret_cast<NtSetInformationProcessPtr>(GetNtProc("NtSetInformationProcess"));
-    
-    if (pNtSetInformationProcess)
+    // Method 1: Try NtSetInformationProcess (Via Wrapper)
+    ULONG ioPriority;
+    if (mode == 1) ioPriority = IoPriorityHigh;
+    else ioPriority = IoPriorityLow;
+
+    NTSTATUS status = NtWrapper::SetInformationProcess(
+        hProcess,
+        ProcessIoPriority,
+        &ioPriority,
+        sizeof(ioPriority)
+    );
+
+   if (NT_SUCCESS(status))
     {
-        ULONG ioPriority;
-        if (mode == 1) 
-        {
-            ioPriority = IoPriorityHigh;
-        }
-        else 
-        {
-            ioPriority = IoPriorityLow;
-        }
-        
-        NTSTATUS status = pNtSetInformationProcess(
+        Log("[I/O] Priority set: " + 
+            std::string(mode == 1 ? "HIGH (game)" : "LOW (browser)") + " using NtSetInformationProcess");
+        ioPrioritySet = true;
+    }
+    else if (status == 0xC00000C9 && mode == 1)
+    {
+        ioPriority = IoPriorityNormal;
+        status = NtWrapper::SetInformationProcess(
             hProcess,
             ProcessIoPriority,
             &ioPriority,
             sizeof(ioPriority)
         );
-        
+
         if (NT_SUCCESS(status))
         {
-            Log("[I/O] Priority set: " + 
-                std::string(mode == 1 ? "HIGH (game)" : "LOW (browser)") + " using NtSetInformationProcess");
+            Log("[I/O] High priority unavailable, fallback: NORMAL (game) using NtSetInformationProcess");
             ioPrioritySet = true;
-        }
-        else if (status == 0xC00000C9 && mode == 1)
-        {
-            ioPriority = IoPriorityNormal;
-            status = pNtSetInformationProcess(
-                hProcess,
-                ProcessIoPriority,
-                &ioPriority,
-                sizeof(ioPriority)
-            );
-            
-            if (NT_SUCCESS(status))
-            {
-                Log("[I/O] High priority unavailable, fallback: NORMAL (game) using NtSetInformationProcess");
-                ioPrioritySet = true;
-            }
         }
     }
 
@@ -445,59 +367,28 @@ void SetProcessIoPriority(DWORD pid, int mode)
         std::lock_guard lock(g_ioPriorityCacheMtx);
         g_ioPriorityCache[pid] = mode;
     }
+    
+    // Note: hProcess (via hGuard) is automatically closed by UniqueHandle destructor
 }
-	
-    // CloseHandle(hProcess); // REMOVED: Managed by UniqueHandle hGuard to prevent double-free crash
 
 void SetNetworkQoS(int mode)
 {
     if (!g_caps.hasAdminRights) return;
-    
-    static std::atomic<DWORD> g_cachedNetworkQoS{0xFFFFFFFF};
-    
+
+    // 0xFFFFFFFF = Throttle Disabled (Game Mode)
+    // 10 = Default Throttle (Browser Mode)
     DWORD targetValue = (mode == 1) ? 0xFFFFFFFF : 10;
-    
-    DWORD cached = g_cachedNetworkQoS.load();
-    if (cached != 0xFFFFFFFF && cached == targetValue)
-    {
-        return;
-    }
-    
-    HKEY key = nullptr;
-    LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+
+    // Anti-Hammering
+    RegWriteDwordCached(
+        HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile",
-        0, KEY_SET_VALUE | KEY_QUERY_VALUE, &key);
-    
-    if (rc != ERROR_SUCCESS)
-    {
-        Log("[QoS] Failed to open registry key: " + std::to_string(rc));
-        return;
-    }
-    
-    DWORD currentValue = 0;
-    DWORD size = sizeof(currentValue);
-    if (RegQueryValueExW(key, L"NetworkThrottlingIndex", nullptr, nullptr,
-                        reinterpret_cast<BYTE*>(&currentValue), &size) == ERROR_SUCCESS)
-    {
-        if (currentValue == targetValue)
-        {
-            g_cachedNetworkQoS.store(targetValue);
-            RegCloseKey(key);
-            return;
-        }
-    }
-    
-    rc = RegSetValueExW(key, L"NetworkThrottlingIndex", 0, REG_DWORD,
-                       reinterpret_cast<const BYTE*>(&targetValue), sizeof(targetValue));
-    
-    if (rc == ERROR_SUCCESS)
-    {
-        g_cachedNetworkQoS.store(targetValue);
-        Log("[QoS] Network throttling " + 
-            std::string(mode == 1 ? "DISABLED (game mode)" : "ENABLED (browser mode)"));
-    }
-    
-    RegCloseKey(key);
+        L"NetworkThrottlingIndex",
+        targetValue
+    );
+
+    Log("[QoS] Network throttling " + 
+        std::string(mode == 1 ? "DISABLED (game mode)" : "ENABLED (browser mode)"));
 }
 
 void SetMemoryCompression(int mode)
@@ -632,26 +523,16 @@ void SetGpuPriority(DWORD pid, int mode)
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if (ntdll)
     {
-        typedef NTSTATUS (NTAPI *NtSetInformationProcessPtr)(
-            HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG);
-        
-        auto pNtSetInformationProcess = 
-            reinterpret_cast<NtSetInformationProcessPtr>(
-                GetProcAddress(ntdll, "NtSetInformationProcess"));
-		if (pNtSetInformationProcess)
+        PROCESS_INFORMATION_CLASS gpuPriorityClass = ProcessGpuPriority;
+        ULONG gpuPriority = (mode == 1) ? 1 : 0;
+
+        NTSTATUS status = NtWrapper::SetInformationProcess(
+            hProcess, gpuPriorityClass, &gpuPriority, sizeof(gpuPriority));
+
+        if (NT_SUCCESS(status))
         {
-			PROCESS_INFORMATION_CLASS gpuPriorityClass = ProcessGpuPriority;
-            
-            ULONG gpuPriority = (mode == 1) ? 1 : 0;
-            
-            NTSTATUS status = pNtSetInformationProcess(
-                hProcess, gpuPriorityClass, &gpuPriority, sizeof(gpuPriority));
-            
-            if (NT_SUCCESS(status))
-            {
-                Log("[GPU] Priority set: " + 
-                    std::string(mode == 1 ? "HIGH (game)" : "NORMAL (browser)"));
-            }
+            Log("[GPU] Priority set: " + 
+                std::string(mode == 1 ? "HIGH (game)" : "NORMAL (browser)"));
         }
     }
     
@@ -660,27 +541,11 @@ void SetGpuPriority(DWORD pid, int mode)
 
 void SetTimerResolution(int mode)
 {
-    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    if (!ntdll) return;
-    
-    typedef NTSTATUS (NTAPI *NtSetTimerResolutionPtr)(ULONG, BOOLEAN, PULONG);
-    typedef NTSTATUS (NTAPI *NtQueryTimerResolutionPtr)(PULONG, PULONG, PULONG);
-    
-    auto pNtSetTimerResolution = 
-        reinterpret_cast<NtSetTimerResolutionPtr>(
-            GetProcAddress(ntdll, "NtSetTimerResolution"));
-    
-	auto pNtQueryTimerResolution = 
-        reinterpret_cast<NtQueryTimerResolutionPtr>(
-            GetProcAddress(ntdll, "NtQueryTimerResolution"));
-    
-    if (!pNtSetTimerResolution || !pNtQueryTimerResolution) return;
-
     // Fix: Capture original resolution once
     if (g_originalTimerResolution.load() == 0)
     {
         ULONG min = 0, max = 0, current = 0;
-        if (NT_SUCCESS(pNtQueryTimerResolution(&min, &max, &current)))
+        if (NT_SUCCESS(NtWrapper::QueryTimerResolution(&min, &max, &current)))
         {
             g_originalTimerResolution.store(current);
         }
@@ -692,12 +557,12 @@ void SetTimerResolution(int mode)
         ULONG desired = 5000; // Default target: 0.5ms
 
         // Query capabilities to find true maximum
-        if (NT_SUCCESS(pNtQueryTimerResolution(&min, &max, &current))) {
+        if (NT_SUCCESS(NtWrapper::QueryTimerResolution(&min, &max, &current))) {
             desired = max; // Usually 5000 (0.5ms) or 10000 (1ms)
         }
-        
+
         ULONG actual = 0;
-        NTSTATUS status = pNtSetTimerResolution(desired, TRUE, &actual);
+        NTSTATUS status = NtWrapper::SetTimerResolution(desired, TRUE, &actual);
         if (NT_SUCCESS(status))
         {
             g_timerResolutionActive.store(actual);
@@ -708,14 +573,14 @@ void SetTimerResolution(int mode)
 	else if (mode == 2 && g_timerResolutionActive.load() != 0)
     {
         ULONG min, max, current;
-        if (NT_SUCCESS(pNtQueryTimerResolution(&min, &max, &current)))
+        if (NT_SUCCESS(NtWrapper::QueryTimerResolution(&min, &max, &current)))
         {
             ULONG actual = 0;
             // Fix Restore original resolution or disable request properly
             ULONG restoreVal = g_originalTimerResolution.load();
             if (restoreVal == 0) restoreVal = current; // Fallback
-            
-            pNtSetTimerResolution(restoreVal, FALSE, &actual);
+
+            NtWrapper::SetTimerResolution(restoreVal, FALSE, &actual);
             g_timerResolutionActive.store(0);
             Log("[TIMER] Browser mode: Released timer request (system default)");
         }

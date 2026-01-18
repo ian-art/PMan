@@ -16,6 +16,10 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+ 
+#pragma once
+#include <windows.h>
+#include <string>
 
 #ifndef PMAN_RESTORE_H
 #define PMAN_RESTORE_H
@@ -23,5 +27,13 @@
 // Checks if a restore point has been created for this version/installation.
 // If not, attempts to create one and marks the flag in the registry.
 void EnsureStartupRestorePoint();
+
+// Manually attempts to create a named System Restore point.
+// Returns true if successful or if the request was accepted by the OS.
+bool CreateRestorePoint();
+
+// Crash-Proof Watchdog
+void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWORD originalVal, const std::wstring& startupPowerScheme);
+void LaunchRegistryGuard(DWORD originalVal);
 
 #endif // PMAN_RESTORE_H
