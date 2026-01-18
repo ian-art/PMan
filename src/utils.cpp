@@ -300,16 +300,26 @@ ULONGLONG FileTimeToULL(const FILETIME& ft) {
     return (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
 }
 
-// FIX: Centralized Anti-Cheat detection
+// FIX: Centralized Anti-Cheat detection (Architecture Aware)
 bool IsAntiCheatProcess(const std::wstring& exeName)
 {
-    if (exeName == L"riot-vanguard.exe" || 
-        exeName == L"easyanticheat.exe" || 
-        exeName == L"beservice.exe" || 
-        exeName == L"navapsvc.exe")
-    {
-        return true;
-    }
+    // Common Anti-Cheats (x86/x64)
+    static const std::unordered_set<std::wstring> AC_COMMON = { 
+        L"riot-vanguard.exe", L"easyanticheat.exe", L"beservice.exe", L"navapsvc.exe",
+        L"vgk.exe", L"faceitclient.exe"
+    };
+
+    // ARM64 Specific Variants (Hypothetical/Future-proofing)
+    static const std::unordered_set<std::wstring> AC_ARM64 = { 
+        L"vanguard-arm64.exe", L"eas-arm64.exe", L"beservice_a64.exe"
+    };
+
+    if (AC_COMMON.count(exeName)) return true;
+
+#if defined(_M_ARM64)
+    if (AC_ARM64.count(exeName)) return true;
+#endif
+
     return false;
 }
 
