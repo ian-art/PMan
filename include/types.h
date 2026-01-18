@@ -209,6 +209,7 @@ struct OSCapabilities
     bool hasSessionApi = false;     // Can use ProcessIdToSessionId
     bool hasHybridCores = false;
     bool supportsPowerThrottling = false;
+	bool isPrismEmulated = false; // Tracks if running under x64 emulation on ARM64
 };
 
 // Memory Telemetry
