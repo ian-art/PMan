@@ -34,8 +34,10 @@
 #include <bitset> // Use bitset for C++17 compatibility
 
 // Forward declarations
+#if defined(_M_AMD64) || defined(_M_IX86)
 static void DetectAMDChipletTopology();
 static void DetectAMDFeatures();
+#endif
 
 static void DetectCPUVendor()
 {
@@ -109,6 +111,7 @@ static void DetectCPUVendor()
 #endif
 }
 
+#if defined(_M_AMD64) || defined(_M_IX86)
 static void DetectAMDFeatures()
 {
     // AMD CPUID leaf 0x80000001: Extended features
@@ -166,7 +169,7 @@ static void DetectAMDChipletTopology()
     
     // Parse topology to identify CCDs (L3 cache groups = chiplets)
 	std::unordered_map<DWORD, std::vector<DWORD>> l3CacheGroups;
-    DWORD detectedCoresPerCcd = 0; // New tracking variable
+    DWORD detectedCoresPerCcd = 0; 
     BYTE* ptr = buffer.data();
     BYTE* end = buffer.data() + bufferSize;
     
@@ -181,11 +184,8 @@ static void DetectAMDChipletTopology()
             DWORD ccdId = static_cast<DWORD>(l3CacheGroups.size());
 
 			// Count cores in this L3 group
-            // Fix: Directly popcount the mask to get accurate core count per CCD
-            // Using std::bitset for C++17 compatibility instead of std::popcount (C++20)
             DWORD coreCount = static_cast<DWORD>(std::bitset<sizeof(ULONG_PTR) * 8>(current->Cache.GroupMask.Mask).count());
             
-            // Store the detected count (assuming symmetric CCDs, max is safest)
             if (coreCount > detectedCoresPerCcd)
             {
                 detectedCoresPerCcd = coreCount;
@@ -202,12 +202,10 @@ static void DetectAMDChipletTopology()
     // For 3D V-Cache CPUs: CCD0 has the cache, CCD1+ don't
     if (g_cpuInfo.hasAmd3DVCache && g_cpuInfo.ccdCount >= 2)
     {
-	// Detect which CPU sets belong to which CCD
-    typedef BOOL (WINAPI *GetSystemCpuSetInformationPtr)(PSYSTEM_CPU_SET_INFORMATION, ULONG, PULONG, HANDLE, ULONG);
-    // FIX: GetSystemCpuSetInformation is in Kernel32, not NTDLL
-    static auto pGetSystemCpuSetInformation = reinterpret_cast<GetSystemCpuSetInformationPtr>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetSystemCpuSetInformation"));
-    
-    if (pGetSystemCpuSetInformation)
+        typedef BOOL (WINAPI *GetSystemCpuSetInformationPtr)(PSYSTEM_CPU_SET_INFORMATION, ULONG, PULONG, HANDLE, ULONG);
+        static auto pGetSystemCpuSetInformation = reinterpret_cast<GetSystemCpuSetInformationPtr>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetSystemCpuSetInformation"));
+        
+        if (pGetSystemCpuSetInformation)
         {
             ULONG cpuSetBufferSize = 0;
             pGetSystemCpuSetInformation(nullptr, 0, &cpuSetBufferSize, nullptr, 0);
@@ -220,41 +218,31 @@ static void DetectAMDChipletTopology()
                 if (pGetSystemCpuSetInformation(cpuSets, cpuSetBufferSize, &cpuSetBufferSize, nullptr, 0))
                 {
                     ULONG numSets = cpuSetBufferSize / sizeof(SYSTEM_CPU_SET_INFORMATION);
-                    
-					// Validation: g_physicalCoreCount is set in DetectOSCapabilities before DetectCPUVendor is called.
-                    // We verify it here to prevent division by zero or invalid topology logic.
+					
 					static bool topologyLogged = false;
 					DWORD coresPerCcd = 0;
 					
                     if (g_physicalCoreCount == 0 || g_cpuInfo.ccdCount == 0) {
                         if (!topologyLogged) {
-                            Log("[AMD] WARNING: Topology detection incomplete - Physical cores: " + 
-                                std::to_string(g_physicalCoreCount) + 
-                                ", CCDs: " + std::to_string(g_cpuInfo.ccdCount) + 
-                                ". Skipping layout optimization.");
+                            Log("[AMD] WARNING: Topology detection incomplete. Skipping layout optimization.");
                             topologyLogged = true;
                         }
                         return;
                     }
 
-					// Fix: Use the accurate count we detected earlier
                     if (detectedCoresPerCcd > 0)
                     {
                         coresPerCcd = detectedCoresPerCcd;
                     }
 					else
                     {
-                        // Fallback to heuristic if detection failed
-                        // Fix: Prevent division by zero crash on detection failure
                         if (g_cpuInfo.ccdCount > 0) {
                             coresPerCcd = g_physicalCoreCount / g_cpuInfo.ccdCount;
                         } else {
-                            Log("[AMD] Topology detection failed (CCD count 0). Skipping affinity optimization.");
                             coresPerCcd = 0;
                         }
                     }
                                         
-                    // If 0, we can't proceed with splitting.
                     if (coresPerCcd > 0)
                     {
                         g_cpuInfo.coresPerCcd = coresPerCcd;
@@ -267,7 +255,6 @@ static void DetectAMDChipletTopology()
                                 ULONG cpuSetId = cpuSets[i].CpuSet.Id;
                                 BYTE coreIndex = cpuSets[i].CpuSet.CoreIndex;
                                 
-                                // Heuristic: cores 0 to (coresPerCcd-1) are CCD0
                                 if (coreIndex < g_cpuInfo.coresPerCcd)
                                 {
                                     g_cpuInfo.ccd0CoreSets.push_back(cpuSetId);
@@ -284,6 +271,7 @@ static void DetectAMDChipletTopology()
         }
     }
 }
+#endif
 
 bool DetectIoPrioritySupport()
 {
