@@ -46,10 +46,29 @@ static void DetectCPUVendor()
     g_cpuInfo.vendorString = "ARM64";
     g_cpuInfo.brandString = "Windows on ARM64";
     
-    // Basic feature detection for ARM64
-    if (IsProcessorFeaturePresent(PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE))
+    // Registry-based detection for ARM64 SoCs
+    wchar_t cpuName[128] = {};
+    DWORD size = sizeof(cpuName);
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, KEY_READ, &hKey) == ERROR_SUCCESS)
     {
-        g_cpuInfo.brandString += " (Crypto Extensions)";
+        if (RegQueryValueExW(hKey, L"ProcessorNameString", nullptr, nullptr, (LPBYTE)cpuName, &size) == ERROR_SUCCESS)
+        {
+            g_cpuInfo.brandString = WideToUtf8(cpuName);
+        }
+        else
+        {
+             g_cpuInfo.brandString += " (Generic ARM64)";
+        }
+        RegCloseKey(hKey);
+    }
+    else
+    {
+        // Fallback feature detection
+        if (IsProcessorFeaturePresent(PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE))
+        {
+            g_cpuInfo.brandString += " (Crypto Extensions)";
+        }
     }
 #elif defined(_M_AMD64) || defined(_M_IX86)
     int cpuInfo[4] = {0};
@@ -356,10 +375,10 @@ bool DetectGameIoPrioritySupport()
 
 void DetectHybridCoreSupport()
 {
-    // Skip for non-Intel CPUs (AMD 3D V-Cache is handled separately)
-    if (g_cpuInfo.vendor != CPUVendor::Intel)
+    // Skip for non-Hybrid capable vendors (AMD 3D V-Cache is handled separately)
+    if (g_cpuInfo.vendor != CPUVendor::Intel && g_cpuInfo.vendor != CPUVendor::ARM64)
     {
-        Log("[HYBRID] CPU is " + g_cpuInfo.vendorString + " - skipping Intel hybrid detection");
+        Log("[HYBRID] CPU is " + g_cpuInfo.vendorString + " - skipping hybrid detection");
         return;
     }
     
@@ -403,17 +422,28 @@ void DetectHybridCoreSupport()
         if (cpuSets[i].Type == CpuSetInformation)
         {
             BYTE effClass = cpuSets[i].CpuSet.EfficiencyClass;
+            ULONG id = cpuSets[i].CpuSet.Id;
+
+            // [ARM64] Validation Logging
+            if (g_cpuInfo.vendor == CPUVendor::ARM64) {
+                Log("[ARM64-DBG] Core " + std::to_string(id) + 
+                    " EfficiencyClass=" + std::to_string(effClass));
+            }
             ULONG cpuSetId = cpuSets[i].CpuSet.Id;
             
             efficiencyClasses.insert(effClass);
             
-            if (effClass == 0) 
+            if (g_cpuInfo.vendor == CPUVendor::ARM64)
             {
-                pCores.push_back(cpuSetId);  // P-cores = efficiency class 0
+                // ARM: Class 0 = Efficiency (Silver), Class 1+ = Performance/Prime
+                if (effClass == 0) eCores.push_back(cpuSetId);
+                else pCores.push_back(cpuSetId);
             }
-            else if (effClass == 1) 
+            else
             {
-                eCores.push_back(cpuSetId);  // E-cores = efficiency class 1
+                // Intel (Default): Class 0 = P-cores, Class 1 = E-cores
+                if (effClass == 0) pCores.push_back(cpuSetId);
+                else if (effClass == 1) eCores.push_back(cpuSetId);
             }
         }
     }
@@ -478,6 +508,11 @@ static bool IsKnownEmulator()
             strstr(vendor, "Bochs") || strstr(vendor, "Xen") ||
             strstr(vendor, "Parallels")) return true;
     }
+#endif
+
+#if defined(_M_ARM64)
+    // ARM64: Check firmware virtualization flag
+    if (IsProcessorFeaturePresent(PF_VIRT_FIRMWARE_ENABLED)) return true;
 #endif
 
     // --- TIER 2: SMBIOS/Registry Check (Harder to spoof) ---
@@ -621,6 +656,22 @@ void DetectOSCapabilities()
             Log("AMD Zen 3+ Architecture: DETECTED (no 3D V-Cache)");
         }
     }
+    
+    // ARM64 Topology Logging
+    if (g_cpuInfo.vendor == CPUVendor::ARM64)
+    {
+        // Ensure hybrid detection has run or check caps
+        if (g_caps.hasHybridCores)
+        {
+             Log("[ARM64] DynamIQ topology detected: " + 
+                std::to_string(g_pCoreSets.size()) + " Performance/Prime cores, " +
+                std::to_string(g_eCoreSets.size()) + " Efficiency cores");
+        }
+        else
+        {
+             Log("[ARM64] Topology: Homogeneous (or detection failed)");
+        }
+    }
 
     // 1. Check Windows Version
     auto hMod = GetModuleHandleW(L"ntdll.dll");
@@ -682,6 +733,30 @@ void DetectOSCapabilities()
                 Log("System Init ID: " + std::to_string(secretId));
             }
         }
+    }
+
+    // [ARM64] Prism (x64 Emulation) Detection
+    // Critical: Emulated games/apps need aggressive isolation to separate them from the emulator overhead
+    HMODULE hKernel = GetModuleHandleW(L"kernel32.dll");
+    if (hKernel) {
+        typedef BOOL (WINAPI *IsWow64Process2Ptr)(HANDLE, USHORT*, USHORT*);
+        auto pIsWow64Process2 = (IsWow64Process2Ptr)GetProcAddress(hKernel, "IsWow64Process2");
+        if (pIsWow64Process2) {
+            USHORT processMachine = 0, nativeMachine = 0;
+            if (pIsWow64Process2(GetCurrentProcess(), &processMachine, &nativeMachine)) {
+                // IMAGE_FILE_MACHINE_ARM64 = 0xAA64, IMAGE_FILE_MACHINE_AMD64 = 0x8664
+                if (nativeMachine == 0xAA64 && processMachine == 0x8664) {
+                    Log("[ARM64] x64 emulation (Prism) detected - enabling aggressive isolation");
+                    g_caps.isPrismEmulated = true;
+                }
+            }
+        }
+    }
+
+    if (g_cpuInfo.vendor == CPUVendor::ARM64) {
+        Log("[ARM64] CPU: " + g_cpuInfo.brandString + " | Native: " + 
+            (g_caps.isPrismEmulated ? "NO (Prism)" : "YES") + " | Topology: " + 
+            (g_caps.hasHybridCores ? "Hybrid" : "Homogeneous"));
     }
 
     // 2. Check Admin Rights
@@ -871,11 +946,27 @@ void DetectOSCapabilities()
         }
     }
     
+    // [ARM64] Architecture Transparency Log
+    if (g_cpuInfo.vendor == CPUVendor::ARM64) {
+        std::string nativeStatus = g_caps.isPrismEmulated ? "NO (Prism Emulation)" : "YES";
+        std::string topoStatus = g_caps.hasHybridCores ? "Hybrid (DynamIQ)" : "Homogeneous";
+        
+        Log("[ARM64] CPU: " + g_cpuInfo.brandString);
+        Log("[ARM64] Native Code: " + nativeStatus + " | Topology: " + topoStatus);
+    }
+    
     Log("-------------------------------------");
 }
 
 AffinityStrategy GetRecommendedStrategy()
 {
+    // [ARM64] Policy Override
+    // If we are emulated (Prism), force GameIsolation to keep emulator overhead on unpinned cores.
+    // If we are Native ARM64, we also prefer Isolation to keep the game on the big cores.
+    if (g_caps.isPrismEmulated || g_cpuInfo.vendor == CPUVendor::ARM64) {
+        return AffinityStrategy::GameIsolation;
+    }
+
     // 1. Hybrid Architecture (Intel 12th+) -> Always use P/E Logic
     if (g_caps.hasHybridCores) return AffinityStrategy::HybridPinning;
 
