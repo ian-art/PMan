@@ -1279,10 +1279,17 @@ if (!taskExists)
         Log("Failed to create shutdown event: " + std::to_string(GetLastError()));
     }
     
-    // Helper to pin thread to last physical cores (away from games)
+    // Helper to pin thread to Efficiency cores (ARM64/Hybrid safe)
     auto PinBackgroundThread = [](std::thread& t) {
-        if (g_physicalCoreCount >= 4) {
-            // [PERF FIX] Use last 2 cores instead of 1 to reduce contention
+        if (!g_eCoreSets.empty()) {
+            // Pin to first two Efficiency cores
+            DWORD_PTR mask = 0;
+            if (g_eCoreSets.size() >= 1) mask |= (1ULL << g_eCoreSets[0]);
+            if (g_eCoreSets.size() >= 2) mask |= (1ULL << g_eCoreSets[1]);
+            SetThreadAffinityMask(t.native_handle(), mask);
+        }
+        else if (g_physicalCoreCount >= 4) {
+            // Legacy Fallback: Use last 2 physical cores
             DWORD_PTR affinityMask = (1ULL << (g_physicalCoreCount - 1)) | (1ULL << (g_physicalCoreCount - 2));
             SetThreadAffinityMask(t.native_handle(), affinityMask);
         }
