@@ -476,6 +476,7 @@ void EtwThread()
                    TRACE_LEVEL_INFORMATION, 0x1, 0, 0, nullptr); // Reduced to INFO
 
 	// Enable DPC & ISR Providers (Verbose for duration data))
+#if defined(_M_AMD64) || defined(_M_IX86)
     // DPC: Only capture duration warnings (>1ms)
     status = EnableTraceEx2(hSession, &DPCGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
                            TRACE_LEVEL_WARNING, 0x10, 0, 0, nullptr);
@@ -485,6 +486,11 @@ void EtwThread()
     status = EnableTraceEx2(hSession, &ISRGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
                            TRACE_LEVEL_WARNING, 0x10, 0, 0, nullptr);
     if (status != ERROR_SUCCESS) Log("ETW: ISR EnableTraceEx2 failed: " + std::to_string(status));
+#else
+    Log("[ARM64] DPC/ISR monitoring disabled (ARM GIC not supported)");
+    // Ensure status is SUCCESS so we don't bail out below
+    status = ERROR_SUCCESS;
+#endif
 
     if (status != ERROR_SUCCESS)
     {
