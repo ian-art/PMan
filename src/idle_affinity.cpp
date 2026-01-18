@@ -106,6 +106,18 @@ bool IdleAffinityManager::IsSafeToPark()
     // [USER] Pause on Idle requested - prevent CPU limiting
     if (g_pauseIdle.load()) return false;
 
+    // [ARM64] Safety Fallback
+    // If topology detection failed (no E-cores found on ARM), disable parking 
+    // to prevent accidental locking of Prime/Performance cores.
+    if (g_cpuInfo.vendor == CPUVendor::ARM64 && g_eCoreSets.empty()) {
+        static bool s_logged = false;
+        if (!s_logged) { 
+            Log("[ARM64] Topology map unavailable - parking disabled for safety"); 
+            s_logged = true; 
+        }
+        return false;
+    }
+
     if (!m_enabled.load()) return false;
     
     // RAM Check
@@ -148,14 +160,24 @@ void IdleAffinityManager::OnProcessStart(DWORD pid)
     }
     if (!IsSafeToPark()) return;
 
-    // Calculate Park Mask (Last N cores)
-    int reserved = m_reservedCores.load();
-    if (reserved >= static_cast<int>(g_physicalCoreCount)) reserved = g_physicalCoreCount - 1;
-    
-    DWORD_PTR parkMask = 0;
-    for (int i = 0; i < reserved; i++) {
-        parkMask |= (1ULL << (g_physicalCoreCount - 1 - i));
-    }
+    // Calculate Park Mask
+        DWORD_PTR parkMask = 0;
+        int reserved = m_reservedCores.load();
+
+        if (!g_eCoreSets.empty()) {
+            // Use available Efficiency cores (up to reserved count)
+            int count = min(reserved, (int)g_eCoreSets.size());
+            for (int i = 0; i < count; i++) {
+                parkMask |= (1ULL << g_eCoreSets[i]);
+            }
+        } 
+        else {
+            // Legacy/Fallback: Use last N cores
+            if (reserved >= static_cast<int>(g_physicalCoreCount)) reserved = g_physicalCoreCount - 1;
+            for (int i = 0; i < reserved; i++) {
+                parkMask |= (1ULL << (g_physicalCoreCount - 1 - i));
+            }
+        }
     
     SetProcessIdleAffinity(pid, parkMask);
 }
@@ -171,12 +193,22 @@ void IdleAffinityManager::ApplyIdleAffinity()
     // [CRASH FIX] Wrap in try-catch to prevent thread termination on std::bad_alloc
     try {
         // Calculate Park Mask
-        int reserved = m_reservedCores.load();
-        if (reserved >= static_cast<int>(g_physicalCoreCount)) reserved = g_physicalCoreCount - 1;
-        
         DWORD_PTR parkMask = 0;
-        for (int i = 0; i < reserved; i++) {
-            parkMask |= (1ULL << (g_physicalCoreCount - 1 - i));
+        int reserved = m_reservedCores.load();
+
+        if (!g_eCoreSets.empty()) {
+            // Use available Efficiency cores (up to reserved count)
+            int count = min(reserved, (int)g_eCoreSets.size());
+            for (int i = 0; i < count; i++) {
+                parkMask |= (1ULL << g_eCoreSets[i]);
+            }
+        } 
+        else {
+            // Legacy/Fallback: Use last N cores
+            if (reserved >= static_cast<int>(g_physicalCoreCount)) reserved = g_physicalCoreCount - 1;
+            for (int i = 0; i < reserved; i++) {
+                parkMask |= (1ULL << (g_physicalCoreCount - 1 - i));
+            }
         }
 
         // [FIX] Detect Foreground App to protect it from parking (e.g. Watching YouTube = Idle Input but Active App)
