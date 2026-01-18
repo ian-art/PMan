@@ -347,21 +347,32 @@ void ExplorerBooster::ApplyBoosts(DWORD pid, ExplorerBoostState state) {
 
     // 1. Disable Power Throttling (EcoQoS)
     if (m_config.disablePowerThrottling) {
-        PROCESS_POWER_THROTTLING_STATE PowerThrottling;
-        RtlZeroMemory(&PowerThrottling, sizeof(PowerThrottling));
-        PowerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        // [ARM64] Runtime check for EcoQoS support (Build 21354+)
+        static bool s_apiChecked = false;
+        static bool s_apiAvailable = false;
+        if (!s_apiChecked) {
+            HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+            if (kernel32) s_apiAvailable = (GetProcAddress(kernel32, "SetProcessInformation") != nullptr);
+            s_apiChecked = true;
+            if (!s_apiAvailable && m_config.debugLogging) Log("[ARM64] EcoQoS unavailable (OS build too old)");
+        }
+
+        if (s_apiAvailable) {
+            PROCESS_POWER_THROTTLING_STATE PowerThrottling;
+            RtlZeroMemory(&PowerThrottling, sizeof(PowerThrottling));
+            PowerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
         PowerThrottling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
         PowerThrottling.StateMask = 0; // 0 = Disable Throttling (Boost)
         
         if (SetProcessInformation(hProc, ProcessPowerThrottling, 
-                              &PowerThrottling, sizeof(PowerThrottling))) {
-            if (logSuccess) Log("[EXPLORER] EcoQoS Disabled (Boosted) for PID " + std::to_string(pid));
-        } else {
+                                  &PowerThrottling, sizeof(PowerThrottling))) {
+                if (logSuccess) Log("[EXPLORER] EcoQoS Disabled (Boosted) for PID " + std::to_string(pid));
+            } else {
              Log("[EXPLORER] Failed to disable EcoQoS for PID " + std::to_string(pid) + 
                  " Error: " + std::to_string(GetLastError()));
-        }
-    }
-
+			}
+		}
+	}
     // 2. I/O Priority
     if (m_config.boostIoPriority) {
         SetProcessIoPriority(pid, 1); // High
