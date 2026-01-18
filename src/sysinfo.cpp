@@ -470,7 +470,9 @@ void DetectHybridCoreSupport()
 // [SECURITY] Secret VM Detection Helper (Enhanced)
 static bool IsKnownEmulator()
 {
+#if defined(_M_AMD64) || defined(_M_IX86)
     // --- TIER 1: CPUID Check (Fastest) ---
+    // Only available on x86/x64
     int cpuInfo[4] = {0};
     __cpuid(cpuInfo, 1);
     
@@ -488,6 +490,7 @@ static bool IsKnownEmulator()
             strstr(vendor, "Bochs") || strstr(vendor, "Xen") ||
             strstr(vendor, "Parallels")) return true;
     }
+#endif
 
     // --- TIER 2: SMBIOS/Registry Check (Harder to spoof) ---
     // Real PCs (even with VBS/Core Isolation) pass through hardware strings (e.g. "Dell", "ASUS").
