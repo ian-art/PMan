@@ -22,6 +22,7 @@
 #define PMAN_GLOBALS_H
 
 #include "types.h"
+#include "context.h" // Integrated Context
 #include "services.h" // Needed for WindowsServiceManager type
 #include "performance.h" // Performance Guardian
 #include "explorer_booster.h" // Smart Explorer Booster
@@ -48,60 +49,60 @@ enum class NetworkState {
 #include <chrono>
 
 // Service Manager
-extern WindowsServiceManager g_serviceManager;
-extern std::atomic<bool> g_servicesSuspended;
+#define g_serviceManager (*PManContext::Get().subs.serviceMgr)
+#define g_servicesSuspended (PManContext::Get().servicesSuspended)
 
 // Performance Guardian
-extern PerformanceGuardian g_perfGuardian;
+#define g_perfGuardian (*PManContext::Get().subs.perf)
 
 // Explorer Booster
-extern ExplorerBooster g_explorerBooster;
+#define g_explorerBooster (*PManContext::Get().subs.explorer)
 
 // Input Guardian
-extern InputGuardian g_inputGuardian;
+extern InputGuardian g_inputGuardian; // Pending: Not present in globals.cpp
 
 // Idle Core Parking
-extern IdleAffinityManager g_idleAffinityMgr;
+#define g_idleAffinityMgr (*PManContext::Get().subs.idle)
 
 // Memory Optimizer
-extern MemoryOptimizer g_memoryOptimizer;
+#define g_memoryOptimizer (*PManContext::Get().subs.mem)
 
 // Memory Telemetry
-extern MemoryTelemetry g_memTelemetry;
+#define g_memTelemetry (PManContext::Get().telem.mem)
 
 // App State
-extern std::atomic<bool> g_running;
-extern std::atomic<bool> g_reloadNow;
+#define g_running (PManContext::Get().isRunning)
+#define g_reloadNow (PManContext::Get().reloadRequested)
 // Fix Combine Mode (low 32) and PID (high 32) for atomic updates
 extern std::atomic<uint64_t> g_policyState; 
-extern std::atomic<int>   g_lastMode; // Kept for legacy reads, updated after
-extern std::atomic<DWORD> g_lastPid;  // Kept for legacy reads, updated after
+#define g_lastMode (PManContext::Get().lastMode)
+#define g_lastPid  (PManContext::Get().lastGamePid)
 extern std::atomic<DWORD> g_lastRamCleanPid;
 
 // Process Identity (PID reuse protection)
-extern std::mutex g_processIdentityMtx;
-extern ProcessIdentity g_lastProcessIdentity;
-extern ProcessIdentity g_lockedProcessIdentity;
+#define g_processIdentityMtx    (PManContext::Get().proc.identityMtx)
+#define g_lastProcessIdentity   (PManContext::Get().proc.lastIdentity)
+#define g_lockedProcessIdentity (PManContext::Get().proc.lockedIdentity)
 
 // Process Hierarchy
-extern std::shared_mutex g_hierarchyMtx;
-extern std::unordered_map<ProcessIdentity, ProcessNode, ProcessIdentityHash> g_processHierarchy GUARDED_BY(g_hierarchyMtx);
-extern std::unordered_map<DWORD, ProcessIdentity> g_inheritedGamePids GUARDED_BY(g_hierarchyMtx);
+#define g_hierarchyMtx      (PManContext::Get().proc.hierarchyMtx)
+#define g_processHierarchy  (PManContext::Get().proc.hierarchy)
+#define g_inheritedGamePids (PManContext::Get().proc.inheritedGamePids)
 
 // Config Flags
-extern std::atomic<bool> g_ignoreNonInteractive;
-extern std::atomic<bool> g_restoreOnExit;
-extern std::atomic<bool> g_lockPolicy; 
-extern std::atomic<int>  g_interferenceCount;
-extern std::atomic<bool> g_suspendUpdatesDuringGames;
-extern std::atomic<bool> g_isSuspended;
-extern std::atomic<bool> g_userPaused;
-extern std::atomic<bool> g_pauseIdle;
+#define g_ignoreNonInteractive (PManContext::Get().ignoreNonInteractive)
+#define g_restoreOnExit        (PManContext::Get().restoreOnExit)
+#define g_lockPolicy           (PManContext::Get().conf.lockPolicy)
+#define g_interferenceCount    (PManContext::Get().conf.interferenceCount)
+#define g_suspendUpdatesDuringGames (PManContext::Get().conf.suspendUpdatesDuringGames)
+#define g_isSuspended (PManContext::Get().isSuspended)
+#define g_userPaused  (PManContext::Get().isPaused)
+#define g_pauseIdle            (PManContext::Get().conf.pauseIdle)
 extern std::atomic<NetworkState> g_networkState;
 
 // Idle Revert Feature
-extern std::atomic<bool> g_idleRevertEnabled;
-extern std::atomic<uint32_t> g_idleTimeoutMs; // Store in MS for precision
+#define g_idleRevertEnabled    (PManContext::Get().conf.idleRevertEnabled)
+#define g_idleTimeoutMs        (PManContext::Get().conf.idleTimeoutMs)
 
 // Session Lock (Anti-Flapping)
 extern std::atomic<bool> g_sessionLocked;
@@ -109,35 +110,35 @@ extern std::atomic<DWORD> g_lockedGamePid;
 extern std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime;
 
 // Config Storage
-extern std::shared_mutex g_setMtx;
-extern std::unordered_set<std::wstring> g_games GUARDED_BY(g_setMtx);
-extern std::unordered_set<std::wstring> g_browsers GUARDED_BY(g_setMtx);
-extern std::unordered_set<std::wstring> g_videoPlayers GUARDED_BY(g_setMtx);
-extern std::unordered_set<std::wstring> g_gameWindows GUARDED_BY(g_setMtx);
-extern std::unordered_set<std::wstring> g_browserWindows GUARDED_BY(g_setMtx);
-extern std::unordered_set<std::wstring> g_customLaunchers GUARDED_BY(g_setMtx);
-extern std::unordered_set<std::wstring> g_ignoredProcesses GUARDED_BY(g_setMtx);
-extern std::unordered_set<std::wstring> g_oldGames GUARDED_BY(g_setMtx); // Legacy/DX9 Games
+#define g_setMtx           (PManContext::Get().conf.setMtx)
+#define g_games            (PManContext::Get().conf.games)
+#define g_browsers         (PManContext::Get().conf.browsers)
+#define g_videoPlayers     (PManContext::Get().conf.videoPlayers)
+#define g_gameWindows      (PManContext::Get().conf.gameWindows)
+#define g_browserWindows   (PManContext::Get().conf.browserWindows)
+#define g_customLaunchers  (PManContext::Get().conf.customLaunchers)
+#define g_ignoredProcesses (PManContext::Get().conf.ignoredProcesses)
+#define g_oldGames         (PManContext::Get().conf.oldGames)
 
 // Event Handles & Synchronization
-extern HANDLE  g_hIocp;
+#define g_hIocp (PManContext::Get().runtime.hIocp)
 extern HPOWERNOTIFY g_pwr1;
 extern HPOWERNOTIFY g_pwr2;
 
-extern std::mutex g_shutdownMtx;
-extern std::condition_variable g_shutdownCv;
-extern std::atomic<int> g_threadCount;
-extern std::atomic<std::chrono::steady_clock::time_point::rep> g_lastConfigReload;
+#define g_shutdownMtx      (PManContext::Get().runtime.shutdownMtx)
+#define g_shutdownCv       (PManContext::Get().runtime.shutdownCv)
+#define g_threadCount      (PManContext::Get().runtime.threadCount)
+#define g_lastConfigReload (PManContext::Get().runtime.lastConfigReload)
 
 extern HANDLE g_hMutex; // Single instance mutex
 
 // Hardware & OS Capabilities
-extern OSCapabilities g_caps;
-extern CPUInfo g_cpuInfo;
+#define g_caps    (PManContext::Get().sys.caps)
+#define g_cpuInfo (PManContext::Get().sys.cpu)
 
 // Fix Compatibility Flags for low-end systems
-extern std::atomic<bool> g_isLowCoreCount;
-extern std::atomic<bool> g_isLowMemory;
+#define g_isLowCoreCount (PManContext::Get().feat.isLowCoreCount)
+#define g_isLowMemory    (PManContext::Get().feat.isLowMemory)
 
 // Hybrid Core Management
 extern std::vector<ULONG> g_pCoreSets;
@@ -145,48 +146,48 @@ extern std::vector<ULONG> g_eCoreSets;
 extern std::mutex g_cpuSetMtx;
 
 // Registry & Feature States
-extern std::atomic<bool> g_memoryCompressionModified;
-extern std::atomic<DWORD> g_originalMemoryCompression;
-extern std::atomic<bool> g_gpuSchedulingAvailable;
-extern std::atomic<ULONG> g_timerResolutionActive;
-extern std::atomic<ULONG> g_originalTimerResolution;
+#define g_memoryCompressionModified (PManContext::Get().feat.memoryCompressionModified)
+#define g_originalMemoryCompression (PManContext::Get().feat.originalMemoryCompression)
+#define g_gpuSchedulingAvailable    (PManContext::Get().feat.gpuSchedulingAvailable)
+#define g_timerResolutionActive     (PManContext::Get().feat.timerResolutionActive)
+#define g_originalTimerResolution   (PManContext::Get().feat.originalTimerResolution)
 
 // CPU Topology
-extern DWORD g_physicalCoreCount;
-extern DWORD g_logicalCoreCount;
-extern DWORD_PTR g_physicalCoreMask;
+#define g_physicalCoreCount (PManContext::Get().sys.physicalCoreCount)
+#define g_logicalCoreCount  (PManContext::Get().sys.logicalCoreCount)
+#define g_physicalCoreMask  (PManContext::Get().sys.physicalCoreMask)
 
 // Working Set Management
-extern std::atomic<bool> g_workingSetManagementAvailable;
-extern std::mutex g_workingSetMtx;
-extern std::unordered_map<DWORD, SIZE_T> g_originalWorkingSets GUARDED_BY(g_workingSetMtx);
-extern std::mutex g_trimTimeMtx;
-extern std::unordered_map<DWORD, std::chrono::steady_clock::time_point> g_lastTrimTimes GUARDED_BY(g_trimTimeMtx);
+#define g_workingSetManagementAvailable (PManContext::Get().feat.workingSetManagementAvailable)
+#define g_workingSetMtx       (PManContext::Get().proc.workingSetMtx)
+#define g_originalWorkingSets (PManContext::Get().proc.originalWorkingSets)
+#define g_trimTimeMtx         (PManContext::Get().proc.trimTimeMtx)
+#define g_lastTrimTimes       (PManContext::Get().proc.lastTrimTimes)
 
 // DPC/ISR Latency Management
-extern std::atomic<bool> g_dpcLatencyAvailable;
-extern std::atomic<bool> g_timerCoalescingAvailable;
-extern std::atomic<bool> g_highResTimersActive;
-extern std::mutex g_dpcStateMtx;
-extern std::unordered_map<DWORD, bool> g_processesWithBoostDisabled GUARDED_BY(g_dpcStateMtx);
+#define g_dpcLatencyAvailable      (PManContext::Get().feat.dpcLatencyAvailable)
+#define g_timerCoalescingAvailable (PManContext::Get().feat.timerCoalescingAvailable)
+#define g_highResTimersActive      (PManContext::Get().feat.highResTimersActive)
+#define g_dpcStateMtx            (PManContext::Get().proc.dpcStateMtx)
+#define g_processesWithBoostDisabled (PManContext::Get().proc.processesWithBoostDisabled)
 
 // Policy & Shutdown
-extern std::atomic<std::chrono::steady_clock::time_point::rep> g_lastPolicyChange;
+#define g_lastPolicyChange (PManContext::Get().lastPolicyChange)
 extern std::atomic<DWORD> g_cachedRegistryValue;
-extern HANDLE g_hShutdownEvent;
+#define g_hShutdownEvent (PManContext::Get().runtime.hShutdownEvent)
 extern DWORD g_originalRegistryValue;
-extern std::atomic<TRACEHANDLE> g_etwSession;
-extern std::atomic<uint64_t> g_lastEtwHeartbeat; // ETW Liveness
+#define g_etwSession       (PManContext::Get().telem.etwSession)
+#define g_lastEtwHeartbeat (PManContext::Get().telem.lastEtwHeartbeat)
 
 // Root Cause Correlation Global
-extern std::atomic<double> g_lastDpcLatency;
+#define g_lastDpcLatency (PManContext::Get().telem.lastDpcLatency)
 
 // Network Activity Cache
 // Stores PIDs that have active TCP connections (Updated by NetworkMonitor)
-extern std::shared_mutex g_netActivityMtx;
-extern std::unordered_set<DWORD> g_activeNetPids GUARDED_BY(g_netActivityMtx);
+#define g_netActivityMtx (PManContext::Get().net.mtx)
+#define g_activeNetPids  (PManContext::Get().net.activePids)
 
 // Session Smart Cache (Atomic Raw Pointer)
-extern std::atomic<SessionSmartCache*> g_sessionCache;
+#define g_sessionCache (PManContext::Get().runtime.sessionCache)
 
 #endif // PMAN_GLOBALS_H
