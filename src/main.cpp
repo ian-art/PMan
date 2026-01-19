@@ -70,33 +70,10 @@ static UINT g_wmTaskbarCreated = 0;
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
 static GUID* g_pSleepScheme = nullptr;
+static uint64_t g_resumeStabilizationTime = 0; // Replaces detached sleep thread;
 
-// Async launcher to prevent UI thread blocking
-void LaunchProcessAsync(const std::wstring& cmd, std::function<void(DWORD)> callback) {
-    std::thread([cmd, callback]{
-        STARTUPINFOW si{sizeof(si)};
-        PROCESS_INFORMATION pi{};
-        // Create mutable buffer for CreateProcessW
-        std::vector<wchar_t> buf(cmd.begin(), cmd.end());
-        buf.push_back(0);
-
-        if (CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, 
-                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-
-            // RAII Adoption
-            UniqueHandle hProc(pi.hProcess);
-            UniqueHandle hThread(pi.hThread);
-
-            WaitForSingleObject(hProc.get(), 5000);
-            DWORD exitCode = 0;
-            GetExitCodeProcess(hProc.get(), &exitCode);
-            // Handles closed automatically
-            if (callback) callback(exitCode);
-        } else {
-            if (callback) callback(GetLastError());
-        }
-    }).detach();
-}
+// Removed LaunchProcessAsync (Dead Code / Unsafe Detach)
+// All process launches now use synchronous CreateProcessW or the unified background worker.
 
 // --- Background Worker for Async Tasks ---
 static std::thread g_backgroundWorker;
@@ -720,11 +697,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 L"Apply System Tweaks", MB_YESNO | MB_ICONQUESTION);
 
             if (result == IDYES) {
-                std::thread([]{
+                // Use unified background worker instead of detach
+                std::lock_guard<std::mutex> lock(g_backgroundQueueMtx);
+                g_backgroundTasks.push_back([]{
                     if (ApplyStaticTweaks()) {
                         MessageBoxW(nullptr, L"System tweaks have been applied successfully.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
                     }
-                }).detach();
+                });
+                g_backgroundCv.notify_one();
             }
         } 
         else if (wmId == ID_TRAY_REFRESH_GPU) {
@@ -791,8 +771,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 int wmain(int argc, wchar_t* argv[])
 {
+	try {
+		
     // Initialize Telemetry-Safe Logger
     InitLogger();
+
+    // Lifecycle Management
+    std::vector<std::thread> lifecycleThreads;
 
 	// 1. Initialize Global Instance Handle (Required for Tray Icon)
     g_hInst = GetModuleHandle(nullptr);
@@ -992,11 +977,12 @@ if (!taskExists)
     ServiceWatcher::Initialize();
 
     DetectOSCapabilities();
-    // Create restore point in background thread (non-blocking)
+    // Managed thread lifetime (removed detach)
     std::thread restoreThread([]() {
         EnsureStartupRestorePoint();
     });
-    restoreThread.detach(); // Don't block startup
+    lifecycleThreads.push_back(std::move(restoreThread));
+    
     DetectHybridCoreSupport();
 
     // Safety check: Restore services if they were left suspended from a crash
@@ -1110,7 +1096,8 @@ if (!taskExists)
         g_memoryOptimizer.RunThread();
     });
     PinBackgroundThread(memOptThread);
-    memOptThread.detach(); // Allow it to run independently until app exit
+    // Store for clean shutdown
+    lifecycleThreads.push_back(std::move(memOptThread));
 	
     // FIX: Check return value (C6031)
     HRESULT hrInit = CoInitialize(nullptr);
@@ -1210,49 +1197,47 @@ if (!taskExists)
                 
                 DefWindowProc(msg.hwnd, msg.message, msg.wParam, msg.lParam);
             }
-            else if (msg.message == WM_POWERBROADCAST)
-            {
-                if (msg.wParam == PBT_APMQUERYSUSPEND || msg.wParam == PBT_APMSUSPEND)
-                {
-                    Log("System suspending - pausing operations to prevent memory corruption");
-                    g_isSuspended.store(true);
+            			else if (msg.message == WM_POWERBROADCAST)
+			{
+					if (msg.wParam == PBT_APMQUERYSUSPEND || msg.wParam == PBT_APMSUSPEND)
+				{
+					Log("System suspending - pausing operations to prevent memory corruption");
+					g_isSuspended.store(true);
 
-                    // Switch to Power Saver when about to sleep
-                    if (g_pSleepScheme == nullptr) {
-                        if (PowerGetActiveScheme(NULL, &g_pSleepScheme) == ERROR_SUCCESS) {
-                            if (PowerSetActiveScheme(NULL, &GUID_MAX_POWER_SAVINGS) == ERROR_SUCCESS) {
-                                Log("[POWER] Switched to Efficiency power plan for sleep.");
-                            } else {
-                                LocalFree(g_pSleepScheme);
-                                g_pSleepScheme = nullptr;
-                            }
-                        }
-                    }
-                }
-                else if (msg.wParam == PBT_APMRESUMEAUTOMATIC || msg.wParam == PBT_APMRESUMESUSPEND)
-                {
-                    Log("System resumed - waiting 5s for kernel stability");
-                    
-                    // Restore Original Power Plan on wake
-                    if (g_pSleepScheme != nullptr) {
-                        if (PowerSetActiveScheme(NULL, g_pSleepScheme) == ERROR_SUCCESS) {
-                            Log("[POWER] Restored original power plan.");
-                        }
-                        LocalFree(g_pSleepScheme);
-                        g_pSleepScheme = nullptr;
-                    }
+					// Switch to Power Saver when about to sleep
+					if (g_pSleepScheme == nullptr) {
+						if (PowerGetActiveScheme(NULL, &g_pSleepScheme) == ERROR_SUCCESS) {
+							if (PowerSetActiveScheme(NULL, &GUID_MAX_POWER_SAVINGS) == ERROR_SUCCESS) {
+								Log("[POWER] Switched to Efficiency power plan for sleep.");
+							} else {
+								LocalFree(g_pSleepScheme);
+								g_pSleepScheme = nullptr;
+							}
+						}
+					}
+				}
+				else if (msg.wParam == PBT_APMRESUMEAUTOMATIC || msg.wParam == PBT_APMRESUMESUSPEND)
+				{
+					Log("System resumed - waiting 5s for kernel stability");
+        
+					// Restore Original Power Plan on wake
+					if (g_pSleepScheme != nullptr) {
+						if (PowerSetActiveScheme(NULL, g_pSleepScheme) == ERROR_SUCCESS) {
+							Log("[POWER] Restored original power plan.");
+						}
+						LocalFree(g_pSleepScheme);
+						g_pSleepScheme = nullptr;
+					}
 
-                    // Fix: Move blocking wait to background thread to prevent UI freeze
-                    std::thread([]() {
-                        Sleep(5000); 
-                        g_isSuspended.store(false);
-                    }).detach();
-                }
-                else if (msg.wParam == PBT_POWERSETTINGCHANGE)
-                {
-                    g_reloadNow = true;
-                }
-            }
+					// State-based delay instead of detached thread
+					g_resumeStabilizationTime = GetTickCount64() + 5000;
+					g_isSuspended.store(true); // Keep suspended until stabilization
+				}
+				else if (msg.wParam == PBT_POWERSETTINGCHANGE)
+				{
+					g_reloadNow = true;
+				}
+			}
             
             DispatchMessage(&msg);
         }
@@ -1276,6 +1261,15 @@ if (!taskExists)
 
         // Safety check: ensure services are not left suspended
         CheckAndReleaseSessionLock();
+
+        // Handle Resume Stabilization (Non-blocking)
+        if (g_resumeStabilizationTime > 0) {
+             if (GetTickCount64() >= g_resumeStabilizationTime) {
+                 g_isSuspended.store(false);
+                 g_resumeStabilizationTime = 0;
+                 Log("System stabilized - resuming operations");
+             }
+        }
 
         // Wait for messages with timeout - efficient polling that doesn't spin CPU
         // Use MsgWaitForMultipleObjects to stay responsive to inputs/shutdown while waiting
@@ -1361,7 +1355,10 @@ if (!taskExists)
     if (etwThread.joinable()) etwThread.join();
     if (watchdogThread.joinable()) watchdogThread.join();
     
-    WaitForThreads();
+    // Join managed lifecycle threads
+    for (auto& t : lifecycleThreads) {
+        if (t.joinable()) t.join();
+    }
     
 	if (g_hIocp && g_hIocp != INVALID_HANDLE_VALUE) {
         CloseHandle(g_hIocp);
@@ -1392,4 +1389,34 @@ if (!taskExists)
     ShutdownLogger();
 
     return 0;
+
+    } catch (const std::exception& e) {
+        // Top-level crash boundary
+        std::string msg = "[CRITICAL] Unhandled exception in main: ";
+        msg += e.what();
+        
+        // Try logging to disk
+        try {
+            Log(msg);
+            ShutdownLogger(); // Force flush
+        } catch (...) {
+            // Ignore secondary failures during crash handling
+        }
+
+        // Deterministic failure - visible to OS/User
+        MessageBoxA(nullptr, msg.c_str(), "Priority Manager - Fatal Error", MB_OK | MB_ICONERROR);
+        return -1;
+
+    } catch (...) {
+        // Catch non-standard exceptions
+        try {
+            Log("[CRITICAL] Unknown non-standard exception caught in main.");
+            ShutdownLogger();
+        } catch (...) {
+            // Ignore secondary failures
+        }
+
+        MessageBoxW(nullptr, L"Unknown fatal error occurred.", L"Priority Manager - Fatal Error", MB_OK | MB_ICONERROR);
+        return -1;
+    }
 }
