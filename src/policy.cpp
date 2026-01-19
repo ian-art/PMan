@@ -295,8 +295,8 @@ void CheckAndReleaseSessionLock()
             g_perfGuardian.OnGameStop(lockedPid);
 
             // [CACHE] Atomic destruction (Acquire)
-            SessionSmartCache* oldCache = g_sessionCache.exchange(nullptr, std::memory_order_acquire);
-            if (oldCache) delete oldCache;
+            // Storing nullptr releases our reference. If other threads hold it, it stays alive.
+            g_sessionCache.store(nullptr, std::memory_order_release);
             
             // ---------------------------------------------------------
             // CRITICAL FIX: Trigger Post-Game Boost immediately
@@ -500,8 +500,8 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
 
         // READ INTEGRATION: Check Cache First
         bool identityConfirmed = false;
-        // Acquire the atomic pointer safely
-        SessionSmartCache* cache = g_sessionCache.load(std::memory_order_acquire);
+        // Acquire the atomic shared_ptr safely (This increments ref count, preventing deletion)
+        auto cache = g_sessionCache.load(std::memory_order_acquire);
         
         // 1. Check if cache exists and is valid
         if (cache && cache->IsValid()) {
@@ -715,18 +715,16 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                 
                 // [CACHE] Atomic Update (Release)
                 // Build new instance locally first
-                SessionSmartCache* newCache = new SessionSmartCache(pid);
+                std::shared_ptr<SessionSmartCache> newCache = std::make_shared<SessionSmartCache>(pid);
                 
                 // Fail-Safe - Do not publish if invalid
                 if (!newCache->IsValid()) {
-                     delete newCache;
-                     newCache = nullptr;
+                     newCache = nullptr; // Releases memory
                      Log("[CACHE] Transition init failed. Cache disabled.");
                 }
 
-                // Publish atomically
-                SessionSmartCache* prevCache = g_sessionCache.exchange(newCache, std::memory_order_release);
-                if (prevCache) delete prevCache;
+                // Publish atomically (Old cache is automatically released)
+                g_sessionCache.store(newCache, std::memory_order_release);
 
                 // Update process identity for the lock
                 ProcessIdentity newIdentity;
@@ -851,15 +849,14 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                 g_perfGuardian.OnGameStart(pid, exe);
 
                 // [CACHE] Atomic Publication (Release)
-                SessionSmartCache* initCache = new SessionSmartCache(pid);
+                std::shared_ptr<SessionSmartCache> initCache = std::make_shared<SessionSmartCache>(pid);
                 
                 if (!initCache->IsValid()) {
-                    delete initCache;
-                    initCache = nullptr;
+                    initCache = nullptr; // Releases memory
                     Log("[CACHE] Initialization failed checks. Cache disabled for this session.");
                 }
 
-                std::atomic_store_explicit(&g_sessionCache, initCache, std::memory_order_release);
+                g_sessionCache.store(initCache, std::memory_order_release);
         
                 // Verify if core pinning is allowed by profile
                 // Note: Actual enforcement happens in Affinity Strategy block below
@@ -918,8 +915,7 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                     DWORD stoppingPid = g_lockedGamePid.load();
                     if (stoppingPid != 0) g_perfGuardian.OnGameStop(stoppingPid);
 
-                    SessionSmartCache* dyingCache = g_sessionCache.exchange(nullptr, std::memory_order_acquire);
-                    if (dyingCache) delete dyingCache;
+                    g_sessionCache.store(nullptr, std::memory_order_release);
 
                     g_sessionLocked.store(false);
                     g_lockedGamePid.store(0);
