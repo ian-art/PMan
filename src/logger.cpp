@@ -38,6 +38,10 @@ static std::deque<std::string> g_logBuffer;
 static std::mutex g_logMtx;
 static std::atomic<bool> g_loggerInitialized{false};
 
+// Managed flush worker
+static std::thread g_flushWorker;
+static std::mutex g_flushWorkerMtx;
+   
 std::filesystem::path GetLogPath()
 {
     wchar_t* programData = nullptr;
@@ -103,9 +107,18 @@ void FlushLogger()
             g_logBuffer.clear();
         }
     }
-    catch (...) {
-        // Disk I/O errors are suppressed in release build to prevent crashes
-    }
+    catch (const std::exception& e) {
+       // Observable failure
+       // We do not throw here because this IS the logger, and throwing 
+       // would cause a recursive crash loop if the boundary tries to log.
+       // Instead, we output to debug stream for visibility.
+       std::string err = "Logger Flush Failed: ";
+       err += e.what();
+       OutputDebugStringA(err.c_str());
+   }
+   catch (...) {
+       OutputDebugStringW(L"Logger Flush Failed: Unknown Exception");
+   }
 }
 
 void InitLogger()
@@ -153,13 +166,22 @@ void InitLogger()
 }
 
 void ShutdownLogger()
-{
-    if (g_loggerInitialized) {
-        Log("--- Logger Shutdown (Flushing to disk) ---");
-        FlushLogger();
-        g_loggerInitialized = false;
-    }
-}
+   {
+       if (g_loggerInitialized) {
+           Log("--- Logger Shutdown (Flushing to disk) ---");
+           FlushLogger();
+           
+           // Wait for async flush worker to complete
+           {
+               std::lock_guard<std::mutex> lock(g_flushWorkerMtx);
+               if (g_flushWorker.joinable()) {
+                   g_flushWorker.join();
+               }
+           }
+           
+           g_loggerInitialized = false;
+       }
+   }
 
 void Log(const std::string& msg)
 {
@@ -203,15 +225,22 @@ void Log(const std::string& msg)
         lastViewerCheck = static_cast<DWORD>(nowTicks);
     }
 
-    // [OPTIMIZATION] Async flush trigger
-    // Flushes to disk in a background thread to prevent Main Thread UI lag
-    if (hViewer && IsWindowVisible(hViewer)) {
-        std::thread([]() {
-            FlushLogger(); 
-            // Fix C4456: Renamed local variable 'hTarget' to avoid shadowing static 'hViewer'
-            if (HWND hTarget = FindWindowW(L"PManLogViewer", nullptr)) {
-                PostMessageW(hTarget, WM_LOG_UPDATED, 0, 0);
-            }
-        }).detach();
-    }
+    // Managed async flush (No detached threads)
+   // We use a static single-thread worker that joins the previous operation
+   // to ensure we never have "fire and forget" zombies accessing dead globals.
+   static std::thread s_flushWorker;
+   static std::mutex s_workerMtx;
+
+   // Managed async flush (No detached threads)
+   if (hViewer && IsWindowVisible(hViewer)) {
+       std::lock_guard<std::mutex> lock(g_flushWorkerMtx);
+       if (g_flushWorker.joinable()) g_flushWorker.join();
+
+       g_flushWorker = std::thread([]() {
+           FlushLogger(); 
+           if (HWND hTarget = FindWindowW(L"PManLogViewer", nullptr)) {
+               PostMessageW(hTarget, WM_LOG_UPDATED, 0, 0);
+           }
+       });
+   }
 }
