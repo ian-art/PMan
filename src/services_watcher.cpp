@@ -31,6 +31,7 @@ void ServiceWatcher::Initialize() {
 
 // Static atomic guard to prevent thread stacking
 static std::atomic<bool> s_scanInProgress{false};
+static std::thread s_workerThread; // Managed thread handle
 
 void ServiceWatcher::OnTick() {
     if (!g_suspendUpdatesDuringGames.load()) return;
@@ -45,11 +46,15 @@ void ServiceWatcher::OnTick() {
 
     lastCheck = now;
 
-    // FIX: Offload SCM operations to background thread to prevent Main Thread lag
-    std::thread([]{
+    // Manage thread lifetime (No detach)
+    if (s_workerThread.joinable()) {
+        s_workerThread.join(); // Clean up previous finished run
+    }
+
+    s_workerThread = std::thread([]{
         ScanAndTrimManualServices();
         s_scanInProgress.store(false); // Release lock
-    }).detach();
+    });
 }
 
 // Check if other running services depend on this one
