@@ -14,10 +14,25 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+* along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
  
 #include "context.h"
+#include "services.h"
+#include "performance.h"
+#include "explorer_booster.h"
+#include "idle_affinity.h"
+#include "memory_optimizer.h"
 
-// Currently pure header-only singleton, but reserved for future expansion
-// (e.g., loading state from disk)
+// Constructor: Initialize Subsystems
+PManContext::PManContext() {
+    subs.serviceMgr = std::make_unique<WindowsServiceManager>();
+    subs.perf       = std::make_unique<PerformanceGuardian>();
+    subs.explorer   = std::make_unique<ExplorerBooster>();
+    subs.idle       = std::make_unique<IdleAffinityManager>();
+    subs.mem        = std::make_unique<MemoryOptimizer>();
+}
+
+// Destructor: Default (Required for unique_ptr with forward declared types)
+PManContext::~PManContext() = default;
+
