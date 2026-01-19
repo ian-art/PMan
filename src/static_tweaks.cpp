@@ -300,7 +300,7 @@ static void EnumerateAndConfigureUserServices(const wchar_t* pattern, DWORD star
 // MAIN TWEAK LOGIC
 // --------------------------------------------------------------------------------
 
-void ApplyStaticTweaks()
+bool ApplyStaticTweaks()
 {
     // 1. Auto-Create Restore Point
     Log("[SAFETY] Attempting to create System Restore point...");
@@ -313,7 +313,7 @@ void ApplyStaticTweaks()
         
         if (result == IDNO) {
             Log("[SAFETY] User aborted tweaks due to failed restore point.");
-            return;
+            return false;
         }
     }
 
@@ -902,4 +902,5 @@ void ApplyStaticTweaks()
 
 	Log("[TWEAK] System optimizations applied successfully.");
     Log("*********************************");
+    return true;
 }

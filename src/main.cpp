@@ -721,8 +721,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
             if (result == IDYES) {
                 std::thread([]{
-                    ApplyStaticTweaks();
-                    MessageBoxW(nullptr, L"System tweaks have been applied successfully.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
+                    if (ApplyStaticTweaks()) {
+                        MessageBoxW(nullptr, L"System tweaks have been applied successfully.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
+                    }
                 }).detach();
             }
         } 

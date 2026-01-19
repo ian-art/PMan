@@ -22,6 +22,7 @@
 
 // Executes the list of one-time system optimizations.
 // Uses native Windows APIs to avoid AV detection (no cmd/reg.exe).
-void ApplyStaticTweaks();
+// Returns true if tweaks were applied, false if aborted.
+bool ApplyStaticTweaks();
 
 #endif // PMAN_STATIC_TWEAKS_H
