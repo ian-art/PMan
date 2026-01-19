@@ -21,56 +21,38 @@
 #include "idle_affinity.h"
 
 // Service Manager
-WindowsServiceManager g_serviceManager;
-std::atomic<bool> g_servicesSuspended{false};
+// g_serviceManager moved to PManContext.subs
+// g_servicesSuspended moved to PManContext
 
-// Performance Guardian
-PerformanceGuardian g_perfGuardian;
-
-// Explorer Booster
-ExplorerBooster g_explorerBooster;
-
-// Idle Core Parking
-IdleAffinityManager g_idleAffinityMgr;
-
-// RAM Cleaner
-MemoryOptimizer g_memoryOptimizer;
+// Subsystems moved to PManContext.subs
 
 // Memory Telemetry
-MemoryTelemetry g_memTelemetry{};
+// g_memTelemetry moved to PManContext.telem
 
 // App State
-std::atomic<bool> g_running{true};
-std::atomic<bool> g_reloadNow{false};
+// g_running moved to PManContext
+// g_reloadNow moved to PManContext
 std::atomic<uint64_t> g_policyState{0}; // Fix
-std::atomic<DWORD> g_lastPid{0};
-std::atomic<int>   g_lastMode{0}; 
+// g_lastPid moved to PManContext
+// g_lastMode moved to PManContext
 std::atomic<DWORD> g_lastRamCleanPid{0};
 
-// Process Identity
-std::mutex g_processIdentityMtx;
-ProcessIdentity g_lastProcessIdentity = {0, {0, 0}};
-ProcessIdentity g_lockedProcessIdentity = {0, {0, 0}};
-
-// Process Hierarchy
-std::shared_mutex g_hierarchyMtx;
-std::unordered_map<ProcessIdentity, ProcessNode, ProcessIdentityHash> g_processHierarchy;
-std::unordered_map<DWORD, ProcessIdentity> g_inheritedGamePids;
+// Process Identity & Hierarchy
+// g_processIdentityMtx, g_lastProcessIdentity, g_lockedProcessIdentity moved to PManContext.proc
+// g_hierarchyMtx, g_processHierarchy, g_inheritedGamePids moved to PManContext.proc
 
 // Config Flags
-std::atomic<bool> g_ignoreNonInteractive{true};
-std::atomic<bool> g_restoreOnExit{true};
-std::atomic<bool> g_lockPolicy{false};
-std::atomic<int>  g_interferenceCount{0};
-std::atomic<bool> g_suspendUpdatesDuringGames{false};
-std::atomic<bool> g_isSuspended{false};
-std::atomic<bool> g_userPaused{false};
-std::atomic<bool> g_pauseIdle{false};
+// g_ignoreNonInteractive moved to PManContext
+// g_restoreOnExit moved to PManContext
+// g_lockPolicy, g_interferenceCount moved to PManContext.conf
+// g_suspendUpdatesDuringGames moved to PManContext.conf
+// g_isSuspended moved to PManContext
+// g_userPaused moved to PManContext
+// g_pauseIdle moved to PManContext.conf
 std::atomic<NetworkState> g_networkState{NetworkState::Offline};
 
 // Idle Revert Feature
-std::atomic<bool> g_idleRevertEnabled{true};
-std::atomic<uint32_t> g_idleTimeoutMs{300000}; // Default 5m
+// g_idleRevertEnabled, g_idleTimeoutMs moved to PManContext.conf
 
 // Session Lock
 std::atomic<bool> g_sessionLocked{false};
@@ -78,35 +60,24 @@ std::atomic<DWORD> g_lockedGamePid{0};
 std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime{0};
 
 // Config Storage
-std::shared_mutex g_setMtx;
-std::unordered_set<std::wstring> g_games;
-std::unordered_set<std::wstring> g_browsers;
-std::unordered_set<std::wstring> g_videoPlayers;
-std::unordered_set<std::wstring> g_gameWindows;
-std::unordered_set<std::wstring> g_browserWindows;
-std::unordered_set<std::wstring> g_customLaunchers;
-std::unordered_set<std::wstring> g_ignoredProcesses;
-std::unordered_set<std::wstring> g_oldGames;
+// Sets and g_setMtx moved to PManContext.conf
 
 // Event Handles & Synchronization
-HANDLE  g_hIocp = nullptr;
+// g_hIocp moved to PManContext
 HPOWERNOTIFY g_pwr1 = nullptr;
 HPOWERNOTIFY g_pwr2 = nullptr;
 
-std::mutex g_shutdownMtx;
-std::condition_variable g_shutdownCv;
-std::atomic<int> g_threadCount{0};
-std::atomic<std::chrono::steady_clock::time_point::rep> g_lastConfigReload{0};
+// g_shutdownMtx, g_shutdownCv, g_threadCount moved to PManContext
+// g_lastConfigReload moved to PManContext
 
 HANDLE g_hMutex = nullptr;
 
 // Hardware & OS Capabilities
-OSCapabilities g_caps;
-CPUInfo g_cpuInfo;
+// g_caps moved to PManContext
+// g_cpuInfo moved to PManContext
 
 // Fix Compatibility Flags
-std::atomic<bool> g_isLowCoreCount{false};
-std::atomic<bool> g_isLowMemory{false};
+// g_isLowCoreCount, g_isLowMemory moved to PManContext.feat
 
 // Hybrid Core Management
 std::vector<ULONG> g_pCoreSets;
@@ -114,45 +85,36 @@ std::vector<ULONG> g_eCoreSets;
 std::mutex g_cpuSetMtx;
 
 // Registry & Feature States
-std::atomic<bool> g_memoryCompressionModified{false};
-std::atomic<DWORD> g_originalMemoryCompression{0xFFFFFFFF};
-std::atomic<bool> g_gpuSchedulingAvailable{false};
-std::atomic<ULONG> g_timerResolutionActive{0};
-std::atomic<ULONG> g_originalTimerResolution{0};
+// g_memoryCompressionModified, g_originalMemoryCompression moved to PManContext.feat
+// g_gpuSchedulingAvailable moved to PManContext.feat
+// g_timerResolutionActive, g_originalTimerResolution moved to PManContext.feat
 
 // CPU Topology
-DWORD g_physicalCoreCount = 0;
-DWORD g_logicalCoreCount = 0;
-DWORD_PTR g_physicalCoreMask = 0;
+// g_physicalCoreCount moved to PManContext
+// g_logicalCoreCount moved to PManContext
+// g_physicalCoreMask moved to PManContext
 
 // Working Set Management
-std::atomic<bool> g_workingSetManagementAvailable{false};
-std::mutex g_workingSetMtx;
-std::unordered_map<DWORD, SIZE_T> g_originalWorkingSets;
-std::mutex g_trimTimeMtx;
-std::unordered_map<DWORD, std::chrono::steady_clock::time_point> g_lastTrimTimes;
+// g_workingSetManagementAvailable moved to PManContext.feat
+// g_workingSetMtx, g_originalWorkingSets moved to PManContext.proc
+// g_trimTimeMtx, g_lastTrimTimes moved to PManContext.proc
 
 // DPC/ISR Latency Management
-std::atomic<bool> g_dpcLatencyAvailable{false};
-std::atomic<bool> g_timerCoalescingAvailable{false};
-std::atomic<bool> g_highResTimersActive{false};
-std::mutex g_dpcStateMtx;
-std::unordered_map<DWORD, bool> g_processesWithBoostDisabled;
+// g_dpcLatencyAvailable, g_timerCoalescingAvailable, g_highResTimersActive moved to PManContext.feat
+// g_dpcStateMtx, g_processesWithBoostDisabled moved to PManContext.proc
 
 // Policy & Shutdown
-std::atomic<std::chrono::steady_clock::time_point::rep> g_lastPolicyChange{0};
+// g_lastPolicyChange moved to PManContext
 std::atomic<DWORD> g_cachedRegistryValue{0xFFFFFFFF};
-HANDLE g_hShutdownEvent = nullptr;
+// g_hShutdownEvent moved to PManContext
 DWORD g_originalRegistryValue = 0xFFFFFFFF;
-std::atomic<TRACEHANDLE> g_etwSession{0};
-std::atomic<uint64_t> g_lastEtwHeartbeat{0};
+// g_etwSession, g_lastEtwHeartbeat moved to PManContext.telem
 
 // Root Cause Correlation Global
-std::atomic<double> g_lastDpcLatency{0.0};
+// g_lastDpcLatency moved to PManContext.telem
 
 // Network Activity Cache
-std::shared_mutex g_netActivityMtx;
-std::unordered_set<DWORD> g_activeNetPids;
+// g_netActivityMtx, g_activeNetPids moved to PManContext.net
 
 // Session Smart Cache (Atomic Raw Pointer)
-std::atomic<SessionSmartCache*> g_sessionCache{nullptr};
+// g_sessionCache moved to PManContext.runtime
