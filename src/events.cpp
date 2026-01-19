@@ -1126,8 +1126,8 @@ void PerformGracefulShutdown()
     Log("Performing graceful shutdown...");
     
     // [CACHE] Atomic destruction on shutdown
-    SessionSmartCache* oldCache = g_sessionCache.exchange(nullptr, std::memory_order_acquire);
-    if (oldCache) delete oldCache;
+    // Releasing the shared_ptr automatically cleans up the cache if no other threads are using it.
+    g_sessionCache.store(nullptr, std::memory_order_release);
     
     StopEtwSession();
     
