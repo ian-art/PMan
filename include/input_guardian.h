@@ -23,9 +23,13 @@
 #include "types.h"
 #include <atomic>
 #include <mutex>
+#include <thread> // Required for m_worker
 
 class InputGuardian {
 public:
+    InputGuardian() = default;
+    ~InputGuardian(); // Non-trivial destructor required
+
     void Initialize();
     void Shutdown();
     
@@ -34,6 +38,7 @@ public:
 
     // Game Mode Integration
     void SetGameMode(bool enabled);
+    bool IsGameModeActive() const { return m_blockingEnabled; }
 
 private:
     std::atomic<bool> m_active{false};
@@ -53,12 +58,13 @@ private:
     uint64_t m_lastBoostTime{0};
     uint64_t m_lastDwmScan{0};
     
+    // Managed Worker Thread
+    std::thread m_worker;
+
     // Boost Logic
     void ApplyResponsivenessBoost();
     void BoostThread(DWORD tid, const char* debugTag);
     void BoostDwmProcess();
 };
-
-extern InputGuardian g_inputGuardian;
 
 #endif // PMAN_INPUT_GUARDIAN_H

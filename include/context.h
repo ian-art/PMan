@@ -25,9 +25,9 @@
 #include <condition_variable>
 #include <shared_mutex>
 #include <unordered_set>
-#include <unordered_map> 
+#include <unordered_map>
 #include <string>
-#include <memory> // Required for unique_ptr & shared_ptr
+#include <memory> 
 #include "types.h"
 
 // Forward declarations to avoid circular dependencies
@@ -37,6 +37,7 @@ class PerformanceGuardian;
 class ExplorerBooster;
 class IdleAffinityManager;
 class MemoryOptimizer;
+class InputGuardian; 
 
 class PManContext {
 public:
@@ -49,17 +50,17 @@ public:
     PManContext(const PManContext&) = delete;
     PManContext& operator=(const PManContext&) = delete;
 
-    // -- State Variables --
+    // -- App State --
     std::atomic<bool> isRunning{true};
-    std::atomic<bool> isPaused{false};
-    std::atomic<bool> isSuspended{false}; // System sleep/hibernate state
-    std::atomic<bool> servicesSuspended{false};
     std::atomic<bool> reloadRequested{false};
+    std::atomic<bool> servicesSuspended{false};
+    std::atomic<bool> isSuspended{false};
+    std::atomic<bool> isPaused{false};
 
-    // -- Configuration State --
+    // [FIX] Restored Missing Flags
     std::atomic<bool> ignoreNonInteractive{true};
     std::atomic<bool> restoreOnExit{true};
-    
+
     // -- Session State --
     std::atomic<DWORD> lastGamePid{0};
     std::atomic<int>   lastMode{0};
@@ -180,6 +181,7 @@ public:
         std::unique_ptr<ExplorerBooster>       explorer;
         std::unique_ptr<IdleAffinityManager>   idle;
         std::unique_ptr<MemoryOptimizer>       mem;
+        std::unique_ptr<InputGuardian>         input; 
     } subs;
 
 private:

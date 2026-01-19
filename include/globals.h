@@ -59,7 +59,7 @@ enum class NetworkState {
 #define g_explorerBooster (*PManContext::Get().subs.explorer)
 
 // Input Guardian
-extern InputGuardian g_inputGuardian; // Pending: Not present in globals.cpp
+#define g_inputGuardian (*PManContext::Get().subs.input)
 
 // Idle Core Parking
 #define g_idleAffinityMgr (*PManContext::Get().subs.idle)

@@ -22,8 +22,9 @@
 #include "utils.h"
 #include "globals.h" // For g_userPaused
 #include <tlhelp32.h>
+#include <vector>
 
-InputGuardian g_inputGuardian;
+// Removed global instance (Now in PManContext)
 
 // Low-Level Keyboard Hook
 // Blocks Windows Key (Left/Right) when Game Mode is active
@@ -36,6 +37,14 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lP
         }
     }
     return CallNextHookEx(nullptr, nCode, wParam, lParam);
+}
+
+// Destructor to ensure thread safety
+InputGuardian::~InputGuardian() {
+    Shutdown();
+    if (m_worker.joinable()) {
+        m_worker.join();
+    }
 }
 
 void InputGuardian::Initialize() {
@@ -101,30 +110,20 @@ void InputGuardian::ToggleInterferenceBlocker(bool enable) {
 void InputGuardian::OnInput(DWORD msgTime) {
     if (!m_active || g_userPaused.load()) return;
 
-    // 1. Monitor Latency
-    // msgTime is the timestamp when the input event was generated (driver/OS level).
-    // GetTickCount() is now (application processing level).
-    // [FIX] Use GetTickCount64 cast to DWORD to prevent C28159 warning while preserving 32-bit wrap-around logic for MSG comparison
     DWORD now = static_cast<DWORD>(GetTickCount64());
     
-    // Handle wrap-around or future timestamps gracefully
     if (now >= msgTime) {
         DWORD latency = now - msgTime;
-        
-        // Log significant input lag (>50ms is perceptible)
         if (latency > 50) {
             static uint64_t lastLog = 0;
             uint64_t now64 = GetTickCount64();
-            if (now64 - lastLog > 2000) { // Rate limit logging
+            if (now64 - lastLog > 2000) { 
                 Log("[INPUT] High Input Latency Detected: " + std::to_string(latency) + "ms");
                 lastLog = now64;
             }
         }
     }
 
-    // 2. Apply Boosts (Throttled)
-    // We don't want to spam OpenThread every millisecond on high-poll mice.
-    // 500ms cooldown ensures we re-apply boost if it was lost, but not constantly.
     uint64_t now64 = GetTickCount64();
     if (now64 - m_lastBoostTime > 500) {
         ApplyResponsivenessBoost();
@@ -133,31 +132,21 @@ void InputGuardian::OnInput(DWORD msgTime) {
 }
 
 void InputGuardian::ApplyResponsivenessBoost() {
-    // A. Foreground App Boost
     HWND hFg = GetForegroundWindow();
     if (hFg) {
         DWORD pid = 0;
         DWORD tid = GetWindowThreadProcessId(hFg, &pid);
-        
         if (tid != 0) {
             BoostThread(tid, "Foreground");
         }
     }
-
-    // B. DWM Boost (Only when input detected)
     BoostDwmProcess();
 }
 
 void InputGuardian::BoostThread(DWORD tid, const char* debugTag) {
-    // THREAD_SET_INFORMATION is required for SetThreadPriorityBoost
-    // THREAD_QUERY_INFORMATION is good practice to verify handle
     HANDLE hThread = OpenThread(THREAD_SET_INFORMATION | THREAD_QUERY_INFORMATION, FALSE, tid);
     if (hThread) {
-        // DisablePriorityBoost = FALSE means "Dynamic Boost IS ENABLED".
-        // This ensures the OS can boost this thread when it leaves wait states (e.g. input available).
-        // Some "optimizers" or background modes might disable this; we enforce it ON.
         if (!SetThreadPriorityBoost(hThread, FALSE)) {
-            // Improve: Log failure using the debug tag for diagnostics
             Log("[INPUT] Failed to boost " + std::string(debugTag) + " thread " + 
                 std::to_string(tid) + " Error: " + std::to_string(GetLastError()));
         } 
@@ -166,13 +155,11 @@ void InputGuardian::BoostThread(DWORD tid, const char* debugTag) {
 }
 
 void InputGuardian::BoostDwmProcess() {
-    // [FIX] Use async update to prevent Main Thread freeze during snapshot
     static std::vector<DWORD> cachedThreads;
     static std::mutex cacheMtx;
     static uint64_t lastCacheUpdate = 0;
     static std::atomic<bool> isUpdating = false;
 
-    // Refresh DWM PID occasionally in case of crash/restart
     uint64_t now = GetTickCount64();
     if (now - m_lastDwmScan > 10000 || m_dwmPid == 0) {
         m_dwmPid = GetDwmProcessId();
@@ -181,18 +168,23 @@ void InputGuardian::BoostDwmProcess() {
 
     if (m_dwmPid == 0) return;
 
-    // Rate limit actual boosting application
     static uint64_t lastBoostApply = 0;
     if (now - lastBoostApply < 5000) return;
     lastBoostApply = now;
 
-    // Async Update Trigger
-    // [OPTIMIZATION] Cache valid for 60 seconds (DWM threads rarely change)
+    // Async Update Trigger with Managed Thread
     if (!isUpdating && (now - lastCacheUpdate > 60000 || cachedThreads.empty())) {
-        isUpdating = true;
-        DWORD targetPid = m_dwmPid; // Capture for lambda
         
-        std::thread([targetPid]() {
+        // Join previous worker if it exists (Cleanup)
+        if (m_worker.joinable()) {
+            m_worker.join();
+        }
+
+        isUpdating = true;
+        DWORD targetPid = m_dwmPid; 
+        
+        // Managed Worker Thread (Replaces detach)
+        m_worker = std::thread([targetPid]() {
             std::vector<DWORD> newThreads;
             UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0));
             if (hSnap.get() != INVALID_HANDLE_VALUE) {
@@ -206,17 +198,15 @@ void InputGuardian::BoostDwmProcess() {
                 }
             }
             
-            // Swap safely
             {
                 std::lock_guard<std::mutex> lock(cacheMtx);
                 cachedThreads = std::move(newThreads);
                 lastCacheUpdate = GetTickCount64();
             }
             isUpdating = false;
-        }).detach();
+        });
     }
 
-    // Boost cached threads (Thread-Safe Read)
     std::lock_guard<std::mutex> lock(cacheMtx);
     for (DWORD tid : cachedThreads) {
         BoostThread(tid, "DWM");
