@@ -17,20 +17,46 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
  
-#include <windows.h> // Include Windows FIRST to ensure types are available
-#include <objbase.h> // Required for StringFromGUID2 and CLSIDFromString
+#include <windows.h> // Include Windows FIRST
+#include <objbase.h>
 #include "restore.h"
 #include "logger.h"
-#include "globals.h" // For g_caps
-#include "utils.h"   // For UniqueRegKey
+#include "globals.h" 
+#include "utils.h"   
 #include <string>
 #include <srrestoreptapi.h>
 #include <vector>
+#include <fstream>
+#include <filesystem>
 #include <powrprof.h>
 #pragma comment(lib, "PowrProf.lib")
-#pragma comment(lib, "Ole32.lib") // Required for COM functions
+#pragma comment(lib, "Ole32.lib") 
 
-// Registry key to track if we've already done the first-run backup
+// File-based state persistence for robust recovery
+static const wchar_t* STATE_FILENAME = L"pman_restore.bin";
+
+// Helper: Get State File Path (Temp Directory)
+std::filesystem::path GetStateFilePath() {
+    wchar_t tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+    return std::filesystem::path(tempPath) / STATE_FILENAME;
+}
+
+// Helper: RAII Registry Reader
+DWORD ReadRegDWORD(HKEY hRoot, const wchar_t* subKey, const wchar_t* valueName) {
+    HKEY rawKey;
+    if (RegOpenKeyExW(hRoot, subKey, 0, KEY_QUERY_VALUE, &rawKey) != ERROR_SUCCESS) return 0xFFFFFFFF;
+    UniqueRegKey hKey(rawKey);
+    
+    DWORD data = 0;
+    DWORD size = sizeof(data);
+    if (RegQueryValueExW(hKey.get(), valueName, nullptr, nullptr, (LPBYTE)&data, &size) == ERROR_SUCCESS) {
+        return data;
+    }
+    return 0xFFFFFFFF;
+}
+
+// Registry key to track if we've already done startup restore
 static const wchar_t* REG_KEY_PATH = L"SOFTWARE\\PriorityManager";
 static const wchar_t* REG_VALUE_NAME = L"FirstRunRestorePoint";
 
@@ -233,137 +259,307 @@ void EnsureStartupRestorePoint()
 }
 
 // --- Service Watchdog ("Dead Man's Switch") ---
-void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWORD originalVal, const std::wstring& startupPowerScheme)
+// Helper: Restore a DWORD to registry
+static void RestoreDwordReg(HKEY root, LPCWSTR subKey, LPCWSTR valueName, DWORD val)
 {
-    // 1. Wait for the main process to exit (crash, kill, or close)
-    HANDLE hProcess = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
-    if (hProcess)
-    {
-        // Verify process identity using creation time to prevent PID reuse
-        FILETIME ftCreation, ftExit, ftKernel, ftUser;
-        if (GetProcessTimes(hProcess, &ftCreation, &ftExit, &ftKernel, &ftUser))
-        {
-            if (ftCreation.dwLowDateTime == lowTime && ftCreation.dwHighDateTime == highTime)
-            {
-                WaitForSingleObject(hProcess, INFINITE);
-            }
-        }
-        CloseHandle(hProcess);
-    }
+    // 0xFFFFFFFF usually implies we shouldn't touch it.
+    if (val == 0xFFFFFFFF) return;
 
-    // 2. Check if registry was left in a modified state
-    HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-        L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
-        0, KEY_QUERY_VALUE | KEY_SET_VALUE, &key) == ERROR_SUCCESS)
-    {
-        DWORD currentVal = 0;
-        DWORD size = sizeof(currentVal);
-        if (RegQueryValueExW(key, L"Win32PrioritySeparation", nullptr, nullptr, 
-            reinterpret_cast<BYTE*>(&currentVal), &size) == ERROR_SUCCESS)
-        {
-            if (currentVal != originalVal)
-            {
-                RegSetValueExW(key, L"Win32PrioritySeparation", 0, REG_DWORD,
-                    reinterpret_cast<const BYTE*>(&originalVal), sizeof(originalVal));
-                Log("[GUARD] Main process crash detected. Registry Restored.");
-            }
-        }
+    HKEY key;
+    if (RegOpenKeyExW(root, subKey, 0, KEY_SET_VALUE, &key) == ERROR_SUCCESS) {
+        RegSetValueExW(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&val), sizeof(val));
         RegCloseKey(key);
     }
+}
 
-    // 3. Power Plan Safety Check
-    if (!startupPowerScheme.empty())
+static void RestoreStringReg(HKEY root, LPCWSTR subKey, LPCWSTR valueName, const wchar_t* val)
+{
+    if (val[0] == L'\0') return; // Empty/Was missing
+
+    HKEY key;
+    if (RegOpenKeyExW(root, subKey, 0, KEY_SET_VALUE, &key) == ERROR_SUCCESS) {
+        RegSetValueExW(key, valueName, 0, REG_SZ, (const BYTE*)val, (DWORD)((wcslen(val) + 1) * sizeof(wchar_t)));
+        RegCloseKey(key);
+    }
+}
+
+void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWORD originalVal, const std::wstring& startupPowerScheme)
+{
+    // 1. Verify Parent Identity
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, targetPid);
+    if (!hProc) return; // Process already gone or inaccessible
+
+    FILETIME ftCreation, ftExit, ftKernel, ftUser;
+    if (GetProcessTimes(hProc, &ftCreation, &ftExit, &ftKernel, &ftUser))
     {
-        GUID* pCurrentScheme = nullptr;
-        if (PowerGetActiveScheme(NULL, &pCurrentScheme) == ERROR_SUCCESS)
+        if (ftCreation.dwLowDateTime != lowTime || ftCreation.dwHighDateTime != highTime)
         {
-            wchar_t currentGuidStr[64] = {};
-            if (StringFromGUID2(*pCurrentScheme, currentGuidStr, 64) == 0) currentGuidStr[0] = L'\0';
+            CloseHandle(hProc);
+            return; // PID reused, not our parent
+        }
+    }
+    else
+    {
+        CloseHandle(hProc);
+        return;
+    }
 
-            if (_wcsicmp(currentGuidStr, startupPowerScheme.c_str()) != 0)
-            {
-                 GUID originalGuid;
-                 if (CLSIDFromString(startupPowerScheme.c_str(), &originalGuid) == S_OK)
-                 {
-                     PowerSetActiveScheme(NULL, &originalGuid);
-                     Log("[GUARD] Crash detected. Restored original Power Plan.");
-                 }
+    // 2. Wait for Parent Termination
+    // Block indefinitely until PMan exits (cleanly or crash)
+    WaitForSingleObject(hProc, INFINITE);
+    CloseHandle(hProc);
+
+    // 3. Begin Restoration Transaction
+    Sleep(1000); // Allow PMan's own cleanup to race first
+
+    RegistryBackupState state;
+    std::filesystem::path backupPath = GetLogPath() / L"pman_restore.bin";
+    std::ifstream file(backupPath, std::ios::binary);
+    bool useFile = false;
+
+    if (file.read(reinterpret_cast<char*>(&state), sizeof(state))) {
+        if (state.isValid) useFile = true;
+    }
+
+    // --- Restore Priority Separation ---
+    DWORD priRestore = useFile ? state.prioritySeparation : originalVal;
+    if (priRestore != 0xFFFFFFFF) {
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, 
+            L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
+            L"Win32PrioritySeparation", priRestore);
+    }
+
+    if (useFile) {
+        // --- Core System ---
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, 
+            L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", 
+            L"NetworkThrottlingIndex", state.networkThrottling);
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, 
+            L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", 
+            L"SystemResponsiveness", state.systemResponsiveness);
+
+        // --- Multimedia Tasks ---
+        const wchar_t* gamesKey = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games";
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, gamesKey, L"GPU Priority", state.gpuPriority);
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, gamesKey, L"Priority", state.gamesPriority);
+        RestoreStringReg(HKEY_LOCAL_MACHINE, gamesKey, L"Scheduling Category", state.schedulingCategory);
+        RestoreStringReg(HKEY_LOCAL_MACHINE, gamesKey, L"SFIO Priority", state.sfioPriority);
+
+        // --- Kernel & Memory ---
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, 
+            L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\kernel", L"CoalescingTimerInterval", state.coalescingTimer);
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, 
+            L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\kernel", L"DistributeTimers", state.distributeTimers);
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, 
+            L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"StoreCompression", state.memoryCompression);
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, 
+            L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"LargeSystemCache", state.largeSystemCache);
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, 
+            L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"DisablePagingExecutive", state.disablePagingExecutive);
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, 
+            L"SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"Size", state.lanmanServerSize);
+
+        // --- GameDVR ---
+        const wchar_t* gameConfigKey = L"System\\GameConfigStore";
+        RestoreDwordReg(HKEY_CURRENT_USER, gameConfigKey, L"GameDVR_Enabled", state.gameDvrEnabled);
+        RestoreDwordReg(HKEY_CURRENT_USER, gameConfigKey, L"GameDVR_FSEBehaviorMode", state.gameDvrFseBehavior);
+        RestoreDwordReg(HKEY_CURRENT_USER, gameConfigKey, L"GameDVR_HonorUserFSEBehaviorMode", state.gameDvrHonorUserFse);
+        RestoreDwordReg(HKEY_CURRENT_USER, gameConfigKey, L"GameDVR_DXGIHonorFSEWindowsCompatible", state.gameDvrDxgiHonorFse);
+        RestoreDwordReg(HKEY_CURRENT_USER, 
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR", L"AppCaptureEnabled", state.appCaptureEnabled);
+        
+        RestoreDwordReg(HKEY_LOCAL_MACHINE, 
+            L"SOFTWARE\\Policies\\Microsoft\\Windows\\GameDVR", L"AllowGameDVR", state.allowGameDvrPolicy);
+
+        // --- Restore Power Scheme ---
+        if (state.powerSchemeGuid[0] != 0) {
+            GUID scheme;
+            if (CLSIDFromString(state.powerSchemeGuid, &scheme) == NOERROR) {
+                PowerSetActiveScheme(NULL, &scheme);
             }
-            LocalFree(pCurrentScheme);
+        }
+    }
+    else {
+        // Fallback: Restore only what was passed on command line (Legacy Mode)
+        if (!startupPowerScheme.empty()) {
+            GUID scheme;
+            if (CLSIDFromString(startupPowerScheme.c_str(), &scheme) == NOERROR) {
+                PowerSetActiveScheme(NULL, &scheme);
+            }
         }
     }
 
-    // 4. CRITICAL: Check and resume suspended services
-    Log("[GUARD] Checking for stranded suspended services...");
-    SC_HANDLE scManager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-    if (scManager) 
-    {
-        auto CheckAndResume = [&](const wchar_t* name) {
-            SC_HANDLE hSvc = OpenServiceW(scManager, name, SERVICE_QUERY_STATUS | SERVICE_START);
-            if (hSvc) {
-                SERVICE_STATUS status;
-                if (QueryServiceStatus(hSvc, &status) && status.dwCurrentState == SERVICE_STOPPED) {
-                    DWORD configSize = 0;
-                    // FIX: Explicitly check for expected failure (C6031)
-                    if (!QueryServiceConfigW(hSvc, nullptr, 0, &configSize) && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
-                        std::vector<BYTE> buffer(configSize);
-                        LPQUERY_SERVICE_CONFIGW config = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(buffer.data());
-                        if (QueryServiceConfigW(hSvc, config, configSize, &configSize)) {
-                            if (config->dwStartType != SERVICE_DISABLED) {
-                                StartServiceW(hSvc, 0, nullptr);
-                                Log("[GUARD] Service restored: " + WideToUtf8(name));
-                            }
-                        }
-                    }
-                }
-                CloseServiceHandle(hSvc);
-            }
-        };
+    // 4. Cleanup
+    if (useFile) {
+        std::error_code ec;
+        std::filesystem::remove(backupPath, ec);
+    }
+}
 
-        CheckAndResume(L"BITS");
-        CheckAndResume(L"wuauserv");
-        CheckAndResume(L"dosvc");
-        CheckAndResume(L"clicktorunsvc");
+// Helper: Read a DWORD from registry safely
+static DWORD ReadDwordReg(HKEY root, LPCWSTR subKey, LPCWSTR valueName, DWORD defaultVal)
+{
+    DWORD data = defaultVal;
+    DWORD size = sizeof(data);
+    if (RegGetValueW(root, subKey, valueName, RRF_RT_REG_DWORD, nullptr, &data, &size) == ERROR_SUCCESS) {
+        return data;
+    }
+    return defaultVal;
+}
 
-        CloseServiceHandle(scManager);
+static void ReadStringReg(HKEY root, LPCWSTR subKey, LPCWSTR valueName, wchar_t* outBuf, size_t bufSize)
+{
+    DWORD type = REG_SZ;
+    DWORD size = static_cast<DWORD>(bufSize * sizeof(wchar_t));
+    if (RegGetValueW(root, subKey, valueName, RRF_RT_REG_SZ, &type, outBuf, &size) != ERROR_SUCCESS) {
+        outBuf[0] = L'\0'; // Mark as empty/not found
     }
 }
 
 void LaunchRegistryGuard(DWORD originalVal)
 {
-    wchar_t selfPath[MAX_PATH];
-    GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
+    // 1. Capture Full Registry State
+    RegistryBackupState state{};
+    state.isValid = true;
+    state.prioritySeparation = originalVal;
 
-    FILETIME ftCreation, ftExit, ftKernel, ftUser;
-    GetProcessTimes(GetCurrentProcess(), &ftCreation, &ftExit, &ftKernel, &ftUser);
+    // --- Core System ---
+    const wchar_t* systemProfile =
+        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile";
 
-    std::wstring powerGuidStr = L"";
+    state.networkThrottling = ReadDwordReg(
+        HKEY_LOCAL_MACHINE, systemProfile, L"NetworkThrottlingIndex", 10);
+
+    state.systemResponsiveness = ReadDwordReg(
+        HKEY_LOCAL_MACHINE, systemProfile, L"SystemResponsiveness", 20);
+
+    // --- Multimedia Tasks (Games) ---
+    const wchar_t* gamesKey =
+        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games";
+
+    state.gpuPriority     = ReadDwordReg(HKEY_LOCAL_MACHINE, gamesKey, L"GPU Priority", 8);
+    state.gamesPriority  = ReadDwordReg(HKEY_LOCAL_MACHINE, gamesKey, L"Priority", 2);
+
+    ReadStringReg(HKEY_LOCAL_MACHINE, gamesKey,
+                  L"Scheduling Category", state.schedulingCategory, 32);
+
+    ReadStringReg(HKEY_LOCAL_MACHINE, gamesKey,
+                  L"SFIO Priority", state.sfioPriority, 32);
+
+    // --- Kernel & Memory ---
+    const wchar_t* kernelKey =
+        L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\kernel";
+
+    const wchar_t* memoryKey =
+        L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management";
+
+    state.coalescingTimer = ReadDwordReg(
+        HKEY_LOCAL_MACHINE, kernelKey, L"CoalescingTimerInterval", 0);
+
+    state.distributeTimers = ReadDwordReg(
+        HKEY_LOCAL_MACHINE, kernelKey, L"DistributeTimers", 0);
+
+    state.disablePagingExecutive = ReadDwordReg(
+        HKEY_LOCAL_MACHINE, memoryKey, L"DisablePagingExecutive", 0);
+
+    state.largeSystemCache = ReadDwordReg(
+        HKEY_LOCAL_MACHINE, memoryKey, L"LargeSystemCache", 0);
+
+    state.memoryCompression = ReadDwordReg(
+        HKEY_LOCAL_MACHINE, memoryKey, L"StoreCompression", 1);
+
+    state.lanmanServerSize = ReadDwordReg(
+        HKEY_LOCAL_MACHINE,
+        L"SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters",
+        L"Size", 1);
+
+    // --- GameDVR (HKCU) ---
+    const wchar_t* gameConfigKey = L"System\\GameConfigStore";
+
+    state.gameDvrEnabled = ReadDwordReg(
+        HKEY_CURRENT_USER, gameConfigKey, L"GameDVR_Enabled", 1);
+
+    state.gameDvrFseBehavior = ReadDwordReg(
+        HKEY_CURRENT_USER, gameConfigKey, L"GameDVR_FSEBehaviorMode", 0);
+
+    state.gameDvrHonorUserFse = ReadDwordReg(
+        HKEY_CURRENT_USER, gameConfigKey, L"GameDVR_HonorUserFSEBehaviorMode", 0);
+
+    state.gameDvrDxgiHonorFse = ReadDwordReg(
+        HKEY_CURRENT_USER, gameConfigKey, L"GameDVR_DXGIHonorFSEWindowsCompatible", 0);
+
+    state.appCaptureEnabled = ReadDwordReg(
+        HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR",
+        L"AppCaptureEnabled", 1);
+
+    // --- Policies ---
+    state.allowGameDvrPolicy = ReadDwordReg(
+        HKEY_LOCAL_MACHINE,
+        L"SOFTWARE\\Policies\\Microsoft\\Windows\\GameDVR",
+        L"AllowGameDVR", 1);
+
+    // --- Power Scheme ---
     GUID* pStartupScheme = nullptr;
-    if (PowerGetActiveScheme(NULL, &pStartupScheme) == ERROR_SUCCESS)
+    if (PowerGetActiveScheme(nullptr, &pStartupScheme) == ERROR_SUCCESS)
     {
-        wchar_t buf[64] = {};
-        if (StringFromGUID2(*pStartupScheme, buf, 64) != 0) powerGuidStr = buf;
+        StringFromGUID2(*pStartupScheme, state.powerSchemeGuid, 64);
         LocalFree(pStartupScheme);
     }
 
-    std::wstring cmd = L"\"" + std::wstring(selfPath) + L"\" --guard " +
-                       std::to_wstring(GetCurrentProcessId()) + L" " +
-                       std::to_wstring(ftCreation.dwLowDateTime) + L" " +
-                       std::to_wstring(ftCreation.dwHighDateTime) + L" " +
-                       std::to_wstring(originalVal) + L" \"" +
-                       powerGuidStr + L"\"";
+    // 2. Serialize to Disk (Transaction Log)
+    const std::filesystem::path backupPath =
+        GetLogPath() / L"pman_restore.bin";
 
-    STARTUPINFOW si{}; si.cb = sizeof(si);
+    if (std::ofstream file(backupPath, std::ios::binary); file)
+    {
+        file.write(reinterpret_cast<const char*>(&state), sizeof(state));
+    }
+    else
+    {
+        Log("[GUARD] Warning: Failed to write restore state file.");
+    }
+
+    // 3. Launch Watchdog Process
+    wchar_t selfPath[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
+
+    FILETIME ftCreation{}, ftExit{}, ftKernel{}, ftUser{};
+    GetProcessTimes(GetCurrentProcess(), &ftCreation, &ftExit, &ftKernel, &ftUser);
+
+    std::wstring cmd =
+        L"\"" + std::wstring(selfPath) + L"\" --guard " +
+        std::to_wstring(GetCurrentProcessId()) + L" " +
+        std::to_wstring(ftCreation.dwLowDateTime) + L" " +
+        std::to_wstring(ftCreation.dwHighDateTime) + L" " +
+        std::to_wstring(originalVal) + L" \"\"";
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+
     PROCESS_INFORMATION pi{};
 
-    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 
-                       CREATE_NO_WINDOW | DETACHED_PROCESS, 
-                       nullptr, nullptr, &si, &pi))
+    if (CreateProcessW(
+            nullptr,
+            cmd.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB,
+            nullptr,
+            nullptr,
+            &si,
+            &pi))
     {
-        SetPriorityClass(pi.hProcess, IDLE_PRIORITY_CLASS);
-        CloseHandle(pi.hThread);
+        Log("[GUARD] Registry Safety Guard launched (PID " +
+            std::to_string(pi.dwProcessId) + ")");
         CloseHandle(pi.hProcess);
-        Log("[GUARD] Safety guard launched.");
+        CloseHandle(pi.hThread);
+    }
+    else
+    {
+        Log("[GUARD] Failed to launch Safety Guard: " +
+            std::to_string(GetLastError()));
     }
 }
+
