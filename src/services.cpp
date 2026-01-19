@@ -32,16 +32,27 @@
 static constexpr int SERVICE_OP_WAIT_RETRIES = 50;
 static constexpr int SERVICE_OP_WAIT_DELAY_MS = 100;
 
-WindowsServiceManager::~WindowsServiceManager()
-{
-    Cleanup();
+// Helper: Check for active dependent services to prevent cascade failures
+static bool HasActiveDependents(SC_HANDLE hSvc) {
+    DWORD bytesNeeded = 0;
+    DWORD count = 0;
+    // Check if any services depend on this one and are currently running
+    if (!EnumDependentServicesW(hSvc, SERVICE_ACTIVE, nullptr, 0, &bytesNeeded, &count) && 
+        GetLastError() == ERROR_MORE_DATA && count > 0) {
+        return true; 
+    }
+    return false;
 }
+
+// Destructor is now automatic thanks to RAII
+WindowsServiceManager::~WindowsServiceManager() = default;
 
 bool WindowsServiceManager::Initialize()
 {
     if (m_scManager) return true;
     
-    m_scManager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT | SC_MANAGER_ENUMERATE_SERVICE);
+    // reset() handles the closure of any existing handle automatically
+    m_scManager.reset(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT | SC_MANAGER_ENUMERATE_SERVICE));
     if (!m_scManager)
     {
         Log("[SERVICE] Failed to open SC Manager: " + std::to_string(GetLastError()));
@@ -66,18 +77,9 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
     if (m_services.find(serviceName) != m_services.end())
         return true;
     
-    // RAII Wrapper for safety
-    class ServiceHandleGuard {
-        SC_HANDLE h_;
-    public:
-        ServiceHandleGuard(SC_HANDLE h) : h_(h) {}
-        ~ServiceHandleGuard() { if (h_) CloseServiceHandle(h_); }
-        SC_HANDLE release() { SC_HANDLE tmp = h_; h_ = nullptr; return tmp; }
-        operator SC_HANDLE() const { return h_; }
-        operator bool() const { return h_ != nullptr; }
-    };
-
-    ServiceHandleGuard safeHandle(OpenServiceW(m_scManager, serviceName.c_str(), accessRights));
+    // RAII Wrapper (Using standard ScHandle)
+    // .get() is required for raw handle access to C-APIs
+    ScHandle safeHandle(OpenServiceW(m_scManager.get(), serviceName.c_str(), accessRights));
 
     if (!safeHandle)
     {
@@ -95,49 +97,50 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
     }
     
     ServiceState state;
-    state.handle = safeHandle;
-    state.isDisabled = false;
-    state.action = ServiceAction::None;
-    state.originalState = SERVICE_STOPPED;
-	
-	// Check if service is disabled
-    DWORD bytesNeeded = 0;
-    // FIX: Check return value (C6031)
-    if (!QueryServiceConfigW(state.handle, nullptr, 0, &bytesNeeded)) {
-        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-            // Should not happen for size query, but handling gracefully
-            Log("[SERVICE] QueryServiceConfigW size check failed: " + std::to_string(GetLastError()));
-        }
-    }
-    
-    std::vector<BYTE> configBuffer(bytesNeeded);
-    LPQUERY_SERVICE_CONFIGW config = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(configBuffer.data());
-    
-    if (QueryServiceConfigW(state.handle, config, bytesNeeded, &bytesNeeded))
-    {
-        if (config->dwStartType == SERVICE_DISABLED)
-        {
-            state.isDisabled = true;
-            Log("[SERVICE] Service '" + WideToUtf8(serviceName.c_str()) + "' is disabled - will skip");
-            // safeHandle destructor closes it automatically
-            m_services[serviceName] = state;
-            return false;
-        }
-    }
-    
-    // Query original state
-    SERVICE_STATUS status;
-    if (QueryServiceStatus(safeHandle, &status))
-    {
-        state.originalState = status.dwCurrentState;
-    }
+	state.isDisabled = false;
+	state.action = ServiceAction::None;
+	state.originalState = SERVICE_STOPPED;
+	// DON'T assign handle yet - we'll move it at the end
 
-    // Transfer ownership to state object
-    state.handle = safeHandle.release();
-    m_services[serviceName] = state;
-    Log("[SERVICE] Added service: " + WideToUtf8(serviceName.c_str()));
-    return true;
-}
+	// Check if service is disabled
+	DWORD bytesNeeded = 0;
+	// FIX: Check return value (C6031)
+	if (!QueryServiceConfigW(safeHandle.get(), nullptr, 0, &bytesNeeded)) {
+		if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+			// Should not happen for size query, but handling gracefully
+			Log("[SERVICE] QueryServiceConfigW size check failed: " + std::to_string(GetLastError()));
+		}
+	}
+
+	std::vector<BYTE> configBuffer(bytesNeeded);
+	LPQUERY_SERVICE_CONFIGW config = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(configBuffer.data());
+
+	if (QueryServiceConfigW(safeHandle.get(), config, bytesNeeded, &bytesNeeded))
+	{
+		if (config->dwStartType == SERVICE_DISABLED)
+		{
+			state.isDisabled = true;
+			Log("[SERVICE] Service '" + WideToUtf8(serviceName.c_str()) + "' is disabled - will skip");
+			// Transfer ownership even for disabled services (for proper cleanup)
+			state.handle = std::move(safeHandle);
+			m_services[serviceName] = std::move(state);
+			return false;
+		}
+	}
+
+	// Query original state
+	SERVICE_STATUS status;
+	if (QueryServiceStatus(safeHandle.get(), &status))
+	{
+		state.originalState = status.dwCurrentState;
+	}
+
+	// Transfer ownership to state object (Move Semantics)
+	state.handle = std::move(safeHandle);
+	m_services[serviceName] = std::move(state);
+	Log("[SERVICE] Added service: " + WideToUtf8(serviceName.c_str()));
+	return true;
+	}
 
 bool WindowsServiceManager::IsHardExcluded(const std::wstring& serviceName, DWORD currentState) const
 {
@@ -223,7 +226,7 @@ bool WindowsServiceManager::CaptureSessionSnapshot()
     DWORD resumeHandle = 0;
 
     // FIX: Use SERVICE_STATE_ALL to enumerate all services, then filter by RUNNING
-    if (!EnumServicesStatusExW(m_scManager, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, 
+    if (!EnumServicesStatusExW(m_scManager.get(), SC_ENUM_PROCESS_INFO, SERVICE_WIN32, 
         SERVICE_STATE_ALL, nullptr, 0, &bytesNeeded, &servicesReturned, &resumeHandle, nullptr))
     {
         DWORD err = GetLastError();
@@ -236,7 +239,7 @@ bool WindowsServiceManager::CaptureSessionSnapshot()
     std::vector<BYTE> buffer(bytesNeeded);
     LPENUM_SERVICE_STATUS_PROCESSW services = reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buffer.data());
 
-    if (!EnumServicesStatusExW(m_scManager, SC_ENUM_PROCESS_INFO, SERVICE_WIN32,
+    if (!EnumServicesStatusExW(m_scManager.get(), SC_ENUM_PROCESS_INFO, SERVICE_WIN32,
         SERVICE_STATE_ALL, buffer.data(), bytesNeeded, &bytesNeeded, 
         &servicesReturned, &resumeHandle, nullptr)) {
         Log("[SERVICE] Snapshot failed: Enum error " + std::to_string(GetLastError()));
@@ -684,9 +687,15 @@ bool WindowsServiceManager::SuspendService(const std::wstring& serviceName, Bypa
     ServiceState& state = it->second;
     SERVICE_STATUS status;
     
-    if (!QueryServiceStatus(state.handle, &status))
+    if (!QueryServiceStatus(state.handle.get(), &status))
         return false;
     
+    // Safety: Do not suspend if other active services depend on this one
+    if (HasActiveDependents(state.handle.get())) {
+        Log("[SEC] Blocked suspend of " + WideToUtf8(serviceName.c_str()) + " (Has active dependents)");
+        return false;
+    }
+
     if (status.dwCurrentState == SERVICE_STOPPED) {
         Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " already stopped");
         return false;
@@ -700,7 +709,7 @@ bool WindowsServiceManager::SuspendService(const std::wstring& serviceName, Bypa
     
     // Try to pause first (preferred for services like BITS)
     if (status.dwControlsAccepted & SERVICE_ACCEPT_PAUSE_CONTINUE) {
-        if (ControlService(state.handle, SERVICE_CONTROL_PAUSE, &status)) {
+        if (ControlService(state.handle.get(), SERVICE_CONTROL_PAUSE, &status)) {
             state.action = ServiceAction::Paused;
             Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " paused successfully");
             m_anythingSuspended.store(true);
@@ -709,11 +718,11 @@ bool WindowsServiceManager::SuspendService(const std::wstring& serviceName, Bypa
     }
     
     // Fallback to stop
-    if (ControlService(state.handle, SERVICE_CONTROL_STOP, &status)) {
+    if (ControlService(state.handle.get(), SERVICE_CONTROL_STOP, &status)) {
         // Wait for service to stop (max 5 seconds)
         for (int i = 0; i < SERVICE_OP_WAIT_RETRIES && status.dwCurrentState != SERVICE_STOPPED; ++i) {
             Sleep(SERVICE_OP_WAIT_DELAY_MS);
-            if (!QueryServiceStatus(state.handle, &status)) break;
+            if (!QueryServiceStatus(state.handle.get(), &status)) break;
         }
         
         state.action = ServiceAction::Stopped;
@@ -743,7 +752,7 @@ static bool ResumeServiceState(WindowsServiceManager::ServiceState& state, const
 
     if (state.action == ServiceAction::Stopped)
     {
-        if (StartServiceW(state.handle, 0, nullptr))
+        if (StartServiceW(state.handle.get(), 0, nullptr))
         {
             Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " started successfully");
             success = true;
@@ -769,7 +778,7 @@ static bool ResumeServiceState(WindowsServiceManager::ServiceState& state, const
         // Services may fail transiently if dependencies are busy.
         bool resumed = false;
         for (int attempt = 0; attempt < 3; ++attempt) {
-            if (ControlService(state.handle, SERVICE_CONTROL_CONTINUE, &status)) {
+            if (ControlService(state.handle.get(), SERVICE_CONTROL_CONTINUE, &status)) {
                 resumed = true;
                 break;
             }
@@ -861,23 +870,24 @@ void WindowsServiceManager::Cleanup()
 {
     std::lock_guard lock(m_mutex);
     
-    for (auto& [name, state] : m_services)
+    // SAFETY: Auto-Resume services if we are shutting down while suspended.
+    // This ensures we never leave the user with disabled updates/audio on exit.
+    if (m_anythingSuspended)
     {
-        if (state.handle)
+        Log("[SERVICE] Safety Resume: Restoring suspended services before shutdown...");
+        for (auto& [name, state] : m_services)
         {
-            CloseServiceHandle(state.handle);
-            state.handle = nullptr;
+            // Re-use existing helper (safe since we hold the lock)
+            ResumeServiceState(state, name);
         }
+        m_anythingSuspended = false;
     }
-    
-    if (m_scManager)
-    {
-        CloseServiceHandle(m_scManager);
-        m_scManager = nullptr;
-    }
-    
+
+    // RAII handles cleanup automatically when the map is cleared
     m_services.clear();
-    m_anythingSuspended = false;
+    
+    // Explicitly release the manager handle
+    m_scManager.reset();
 }
 
 // --------------------------------------------------------------------------
