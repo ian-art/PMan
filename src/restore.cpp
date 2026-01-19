@@ -314,12 +314,15 @@ void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWORD orig
 
     RegistryBackupState state;
     std::filesystem::path backupPath = GetLogPath() / L"pman_restore.bin";
-    std::ifstream file(backupPath, std::ios::binary);
+    std::ifstream file(backupPath, std::ios::binary); // <--- File opens here
     bool useFile = false;
 
     if (file.read(reinterpret_cast<char*>(&state), sizeof(state))) {
         if (state.isValid) useFile = true;
     }
+    
+    // [FIX] Close the file immediately so we can delete it later
+    file.close();
 
     // --- Restore Priority Separation ---
     DWORD priRestore = useFile ? state.prioritySeparation : originalVal;
