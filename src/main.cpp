@@ -1250,8 +1250,7 @@ if (!taskExists)
                 g_backgroundTasks.push_back([]() {
                     Sleep(250);
                     // [CACHE] Atomic destruction on Config Reload
-                    SessionSmartCache* oldCache = g_sessionCache.exchange(nullptr, std::memory_order_acquire);
-                    if (oldCache) delete oldCache;
+                    g_sessionCache.store(nullptr, std::memory_order_release);
                     Sleep(250);
                     LoadConfig();
                 });
