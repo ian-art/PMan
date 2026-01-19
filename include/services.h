@@ -26,6 +26,15 @@
 #include <unordered_map>
 #include <mutex>
 #include <atomic>
+#include <memory> // For std::unique_ptr
+
+// RAII Deleter for Service Handles
+struct ScHandleDeleter {
+    void operator()(SC_HANDLE h) const {
+        if (h) ::CloseServiceHandle(h);
+    }
+};
+using ScHandle = std::unique_ptr<std::remove_pointer_t<SC_HANDLE>, ScHandleDeleter>;
 
 // Enhanced Service Management Class
 class WindowsServiceManager
@@ -34,7 +43,7 @@ public:
     struct ServiceState
     {
         std::wstring name;
-        SC_HANDLE handle;
+        ScHandle handle; // RAII Managed
         ServiceAction action;
         DWORD originalState;
         bool isDisabled;
@@ -57,7 +66,7 @@ public:
     };
     
 private:
-    SC_HANDLE m_scManager;
+    ScHandle m_scManager; // RAII Managed
 	std::unordered_map<std::wstring, ServiceState> m_services;
     std::vector<ServiceSessionEntry> m_sessionServices; // Frozen List
     std::mutex m_mutex;
