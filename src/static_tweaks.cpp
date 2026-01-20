@@ -28,6 +28,11 @@
 #include <shlobj.h>
 #include <sstream>
 #include <iomanip>
+#include <taskschd.h>
+#include <comdef.h>
+
+#pragma comment(lib, "taskschd.lib")
+#pragma comment(lib, "comsupp.lib")
 
 // Define custom flag for Delayed Start since it's not a standard single API value
 #ifndef SERVICE_DELAYED_AUTO_START
@@ -228,7 +233,6 @@ static void SetServiceStartup(const wchar_t* serviceName, DWORD startupType)
 }
 
 // Helper to enumerate and configure dynamic user services (e.g. suffixes like _1a2b3)
-// Helper to enumerate and configure dynamic user services (e.g. suffixes like _1a2b3)
 static void EnumerateAndConfigureUserServices(const wchar_t* pattern, DWORD startupType)
 {
     // RAII wrapper for SC_HANDLE to ensure closure on any return path
@@ -253,23 +257,16 @@ static void EnumerateAndConfigureUserServices(const wchar_t* pattern, DWORD star
     std::vector<BYTE> buffer;
 
     // Loop to handle the race condition where service count changes between size check and data retrieval
-    // This resolves C6385 by ensuring the buffer is always large enough for the actual data read.
     while (true) {
-        // Attempt to enumerate
         if (EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL,
             buffer.data(), static_cast<DWORD>(buffer.size()), &bytesNeeded,
             &servicesReturned, &resumeHandle, nullptr)) {
-            // Success
             break;
         }
 
         DWORD error = GetLastError();
         if (error == ERROR_MORE_DATA) {
-            // Resize buffer to the required size and retry
-            buffer.resize(bytesNeeded + static_cast<DWORD>(buffer.size())); // + current size to be safe, though bytesNeeded is usually total
-            // Reset for next pass (though resumeHandle maintains position in some contexts, we want full list usually)
-            // Note: EnumServicesStatusExW continues from resumeHandle if non-zero. 
-            // For a robust "snapshot", if we resized, we just continue loop.
+            buffer.resize(bytesNeeded + static_cast<DWORD>(buffer.size()));
         }
         else {
             Log("[ERROR] EnumServicesStatusExW failed: " + std::to_string(error));
@@ -278,22 +275,55 @@ static void EnumerateAndConfigureUserServices(const wchar_t* pattern, DWORD star
     }
 
     if (servicesReturned > 0 && !buffer.empty()) {
-        // Strict safety check: Ensure the buffer is actually large enough for the array of structs
         if (buffer.size() < servicesReturned * sizeof(ENUM_SERVICE_STATUS_PROCESSW)) {
-            return; // Should theoretically never happen on success, but satisfies static analysis
+            return; 
         }
 
         auto* services = reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buffer.data());
         size_t patternLen = wcslen(pattern);
 
         for (DWORD i = 0; i < servicesReturned; i++) {
-            // Additional bounds check for the string pointer is implicit in Windows API guarantees, 
-            // but we ensure the struct access itself (services[i]) is valid via the check above.
             if (wcsncmp(services[i].lpServiceName, pattern, patternLen) == 0) {
                 SetServiceStartup(services[i].lpServiceName, startupType);
             }
         }
     }
+}
+
+// Helper to disable a scheduled task via COM
+static void DisableScheduledTask(const std::wstring& taskPath)
+{
+    HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    
+    ITaskService* pService = NULL;
+    hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&pService);
+    
+    if (SUCCEEDED(hr)) {
+        // Use empty variants for optional parameters instead of undefined VARIANT_NO
+        hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+        if (SUCCEEDED(hr)) {
+            ITaskFolder* pRootFolder = NULL;
+            hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
+            if (SUCCEEDED(hr)) {
+                IRegisteredTask* pTask = NULL;
+                // GetTask accepts relative paths from the folder
+                hr = pRootFolder->GetTask(_bstr_t(taskPath.c_str()), &pTask);
+                if (SUCCEEDED(hr)) {
+                    // Disable the task (Enabled = false)
+                    hr = pTask->put_Enabled(VARIANT_FALSE);
+                    if (SUCCEEDED(hr)) {
+                        Log("[TASK] Disabled: " + WideToUtf8(taskPath.c_str()));
+                    } else {
+                        Log("[TASK] Failed to disable: " + WideToUtf8(taskPath.c_str()));
+                    }
+                    pTask->Release();
+                }
+                pRootFolder->Release();
+            }
+        }
+        pService->Release();
+    }
+    CoUninitialize();
 }
 
 // --------------------------------------------------------------------------------
@@ -579,9 +609,36 @@ bool ApplyStaticTweaks()
 	ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32", L"", L"");
 
     // ============================================================================
+    // NETWORK DISCIPLINE
+    // ============================================================================
+    Log("[TWEAK] Applying Network Discipline...");
+    // Disable automatic discovery of network folders and printers (NoNetCrawling)
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"NoNetCrawling", 1);
+
+    // ============================================================================
+    // TELEMETRY TASKS
+    // ============================================================================
+    Log("[TWEAK] Suppressing Telemetry Scheduled Tasks...");
+    const std::vector<std::wstring> telemetryTasks = {
+        L"Microsoft\\Windows\\Application Experience\\Microsoft Compatibility Appraiser",
+        L"Microsoft\\Windows\\Application Experience\\ProgramDataUpdater",
+        L"Microsoft\\Windows\\Autochk\\Proxy",
+        L"Microsoft\\Windows\\Customer Experience Improvement Program\\Consolidator",
+        L"Microsoft\\Windows\\Customer Experience Improvement Program\\UsbCeip",
+        L"Microsoft\\Windows\\DiskDiagnostic\\Microsoft-Windows-DiskDiagnosticDataCollector",
+        L"Microsoft\\Windows\\Feedback\\Siuf\\DmClient",
+        L"Microsoft\\Windows\\Feedback\\Siuf\\DmClientOnScenarioDownload",
+        L"Microsoft\\Windows\\Windows Error Reporting\\QueueReporting"
+    };
+
+    for (const auto& task : telemetryTasks) {
+        DisableScheduledTask(task);
+    }
+
+    // ============================================================================
     // POLICY & PERSISTENCE (AV-SAFE)
     // ============================================================================
-    Log("[TWEAK] Applying Phase 7: Policy & Persistence...");
+    Log("[TWEAK] Applying Policy & Persistence...");
 
     // 1. Update Deferral (Not Disabling)
     // AUOptions = 2 (Notify for download and auto install). Gives user control without breaking OS.
@@ -633,271 +690,90 @@ bool ApplyStaticTweaks()
     // ============================================================================
     // REMOVE PIN TO QUICKACCES IN RECYCLEBIN
     // ============================================================================
-    ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Classes\\Folder\\shell\\pintohome", L"AppliesTo", L"System.ParsingName:<>\"{645FF040-5081-101B-9F08-00AA002F954E}\"");
+    ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Classes\\Folder\\shell\\pintohome", L"AppliesTo", L"System.ParsingName:<>\"::{645FF040-5081-101B-9F08-00AA002F954E}\"");
 
 	// ============================================================================
 	// WINDOWS SERVICES CONFIGURATION
 	// ============================================================================
-	Log("[TWEAK] Configuring Windows Services...");
+	Log("[TWEAK] Configuring Windows Services (Set to Manual)...");
 
-	// --- Core telemetry / performance-related services ---
-	SetServiceStartup(L"DiagTrack", SERVICE_DISABLED);
-	SetServiceStartup(L"dmwappushservice", SERVICE_DISABLED);
-	SetServiceStartup(L"SysMain", SERVICE_DISABLED);
+    // List of services to set to DEMAND_START (Manual).
+    // Note: User-pattern services (ending in *) are handled separately.
+    const std::vector<std::wstring> serviceList = {
+        L"AJRouter", L"ALG", L"AppIDSvc", L"AppMgmt", L"AppReadiness", L"AppVClient", L"AppXSvc", L"Appinfo", 
+        L"AssignedAccessManagerSvc", L"AudioEndpointBuilder", L"AudioSrv", L"Audiosrv", L"AxInstSV", L"BDESVC", 
+        L"BFE", L"BITS", L"BTAGService", L"BrokerInfrastructure", L"Browser", L"BthAvctpSvc", L"BthHFSrv", 
+        L"CDPSvc", L"COMSysApp", L"CertPropSvc", L"ClipSVC", L"CoreMessagingRegistrar", L"CryptSvc", L"CscService", 
+        L"DPS", L"DcomLaunch", L"DcpSvc", L"DevQueryBroker", L"DeviceAssociationService", L"DeviceInstall", 
+        L"Dhcp", L"DiagTrack", L"DialogBlockingService", L"DispBrokerDesktopSvc", L"DisplayEnhancementService", 
+        L"DmEnrollmentSvc", L"Dnscache", L"EFS", L"EapHost", L"EntAppSvc", L"EventLog", L"EventSystem", 
+        L"FDResPub", L"Fax", L"FontCache", L"FrameServer", L"FrameServerMonitor", L"GraphicsPerfSvc", 
+        L"HomeGroupListener", L"HomeGroupProvider", L"HvHost", L"IEEtwCollectorService", L"IKEEXT", 
+        L"InstallService", L"InventorySvc", L"IpxlatCfgSvc", L"KeyIso", L"KtmRm", L"LSM", L"LanmanServer", 
+        L"LanmanWorkstation", L"LicenseManager", L"LxpSvc", L"MSDTC", L"MSiSCSI", L"MapsBroker", 
+        L"McpManagementService", L"MicrosoftEdgeElevationService", L"MixedRealityOpenXRSvc", L"MpsSvc", 
+        L"MsKeyboardFilter", L"NaturalAuthentication", L"NcaSvc", L"NcbService", L"NcdAutoSetup", L"NetSetupSvc", 
+        L"NetTcpPortSharing", L"Netlogon", L"Netman", L"NgcCtnrSvc", L"NgcSvc", L"NlaSvc", L"PNRPAutoReg", 
+        L"PNRPsvc", L"PcaSvc", L"PeerDistSvc", L"PerfHost", L"PhoneSvc", L"PlugPlay", L"PolicyAgent", L"Power", 
+        L"PrintNotify", L"ProfSvc", L"PushToInstall", L"QWAVE", L"RasAuto", L"RasMan", L"RemoteAccess", 
+        L"RemoteRegistry", L"RetailDemo", L"RmSvc", L"RpcEptMapper", L"RpcLocator", L"RpcSs", L"SCPolicySvc", 
+        L"SCardSvr", L"SDRSVC", L"SEMgrSvc", L"SENS", L"SNMPTRAP", L"SNMPTrap", L"SSDPSRV", L"SamSs", 
+        L"ScDeviceEnum", L"Schedule", L"SecurityHealthService", L"Sense", L"SensorDataService", L"SensorService", 
+        L"SensrSvc", L"SessionEnv", L"SharedAccess", L"SharedRealitySvc", L"ShellHWDetection", L"SmsRouter", 
+        L"Spooler", L"SstpSvc", L"StiSvc", L"StorSvc", L"SysMain", L"SystemEventsBroker", L"TabletInputService", 
+        L"TapiSrv", L"TermService", L"Themes", L"TieringEngineService", L"TimeBroker", L"TimeBrokerSvc", 
+        L"TokenBroker", L"TrkWks", L"TroubleshootingSvc", L"TrustedInstaller", L"UI0Detect", L"UevAgentService", 
+        L"UmRdpService", L"UserManager", L"UsoSvc", L"VGAuthService", L"VMTools", L"VSS", L"VacSvc", L"VaultSvc", 
+        L"W32Time", L"WEPHOSTSVC", L"WFDSConMgrSvc", L"WMPNetworkSvc", L"WManSvc", L"WPDBusEnum", L"WSService", 
+        L"WSearch", L"WaaSMedicSvc", L"WalletService", L"WarpJITSvc", L"WbioSrvc", L"Wcmsvc", L"WcsPlugInService", 
+        L"WdNisSvc", L"WdiServiceHost", L"WdiSystemHost", L"WebClient", L"Wecsvc", L"WerSvc", L"WiaRpc", 
+        L"WinDefend", L"WinHttpAutoProxySvc", L"WinRM", L"Winmgmt", L"WpcMonSvc", L"WpnService", 
+        L"XblAuthManager", L"XblGameSave", L"XboxGipSvc", L"XboxNetApiSvc", L"autotimesvc", L"bthserv", 
+        L"camsvc", L"cloudidsvc", L"dcsvc", L"defragsvc", L"diagnosticshub.standardcollector.service", 
+        L"diagsvc", L"dmwappushservice", L"dot3svc", L"edgeupdate", L"edgeupdatem", L"embeddedmode", L"fdPHost", 
+        L"fhsvc", L"gpsvc", L"hidserv", L"icssvc", L"iphlpsvc", L"lfsvc", L"lltdsvc", L"lmhosts", L"mpssvc", 
+        L"msiserver", L"netprofm", L"nsi", L"p2pimsvc", L"p2psvc", L"perceptionsimulation", L"pla", L"seclogon", 
+        L"shpamsvc", L"smphost", L"spectrum", L"sppsvc", L"ssh-agent", L"svsvc", L"swprv", L"tiledatamodelsvc", 
+        L"tzautoupdate", L"uhssvc", L"upnphost", L"vds", L"vm3dservice", L"vmicguestinterface", L"vmicheartbeat", 
+        L"vmickvpexchange", L"vmicrdv", L"vmicshutdown", L"vmictimesync", L"vmicvmsession", L"vmicvss", L"vmvss", 
+        L"wbengine", L"wcncsvc", L"webthreatdefsvc", L"wercplsupport", L"wisvc", L"wlidsvc", L"wlpasvc", 
+        L"wmiApSrv", L"workfolderssvc", L"wscsvc", L"wuauserv", L"wudfsvc"
+    };
 
-	// --- Complete service configuration set ---
-	SetServiceStartup(L"AxInstSV", SERVICE_DEMAND_START);
-	SetServiceStartup(L"ADPSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"AppReadiness", SERVICE_DEMAND_START);
-	SetServiceStartup(L"AppIDSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"Appinfo", SERVICE_DEMAND_START);
-	SetServiceStartup(L"ALG", SERVICE_DEMAND_START);
-	SetServiceStartup(L"AppMgmt", SERVICE_DEMAND_START);
-	SetServiceStartup(L"AppXSvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"AssignedAccessManagerSvc", SERVICE_DISABLED);
-	SetServiceStartup(L"tzautoupdate", SERVICE_DISABLED);
-	SetServiceStartup(L"BthAvctpSvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"BITS", SERVICE_DEMAND_START);
-	SetServiceStartup(L"BrokerInfrastructure", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"BFE", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"BDESVC", SERVICE_DEMAND_START);
-	SetServiceStartup(L"wbengine", SERVICE_DEMAND_START);
-	SetServiceStartup(L"BTAGService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"bthserv", SERVICE_DEMAND_START);
-	SetServiceStartup(L"camsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"autotimesvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"CertPropSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"ClipSVC", SERVICE_DEMAND_START);
-	SetServiceStartup(L"KeyIso", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"EventSystem", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"COMSysApp", SERVICE_DEMAND_START);
-	SetServiceStartup(L"CDPSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"CoreMessagingRegistrar", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"VaultSvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"CryptSvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"DsSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"DusmSvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"DcomLaunch", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"dcsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"DoSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"DeviceAssociationService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"DeviceInstall", SERVICE_DEMAND_START);
-	SetServiceStartup(L"DmEnrollmentSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"DsmSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"DevQueryBroker", SERVICE_DEMAND_START);
-	SetServiceStartup(L"Dhcp", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"diagsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"DPS", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"WdiServiceHost", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WdiSystemHost", SERVICE_DEMAND_START);
-	SetServiceStartup(L"DisplayEnhancementService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"DispBrokerDesktopSvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"TrkWks", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"MSDTC", SERVICE_DEMAND_START);
-	SetServiceStartup(L"Dnscache", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"MapsBroker", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"embeddedmode", SERVICE_DEMAND_START);
-	SetServiceStartup(L"EFS", SERVICE_DEMAND_START);
-	SetServiceStartup(L"EntAppSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"EapHost", SERVICE_DEMAND_START);
-	SetServiceStartup(L"fhsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"fdPHost", SERVICE_DEMAND_START);
-	SetServiceStartup(L"FDResPub", SERVICE_DEMAND_START);
-	SetServiceStartup(L"GameInputSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"lfsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"GoogleChromeElevationService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"GraphicsPerfSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"gpsvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"hpatchmon", SERVICE_DEMAND_START);
-	SetServiceStartup(L"hidserv", SERVICE_DEMAND_START);
-	SetServiceStartup(L"HvHost", SERVICE_DEMAND_START);
-	SetServiceStartup(L"vmickvpexchange", SERVICE_DEMAND_START);
-	SetServiceStartup(L"vmicguestinterface", SERVICE_DEMAND_START);
-	SetServiceStartup(L"vmicshutdown", SERVICE_DEMAND_START);
-	SetServiceStartup(L"vmicheartbeat", SERVICE_DEMAND_START);
-	SetServiceStartup(L"vmicvmsession", SERVICE_DEMAND_START);
-	SetServiceStartup(L"vmicrdv", SERVICE_DEMAND_START);
-	SetServiceStartup(L"vmictimesync", SERVICE_DEMAND_START);
-	SetServiceStartup(L"vmicvss", SERVICE_DEMAND_START);
-	SetServiceStartup(L"IKEEXT", SERVICE_DEMAND_START);
-	SetServiceStartup(L"SharedAccess", SERVICE_DEMAND_START);
-	SetServiceStartup(L"InventorySvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"iphlpsvc", SERVICE_DISABLED);
-	SetServiceStartup(L"IpxlatCfgSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"PolicyAgent", SERVICE_DEMAND_START);
-	SetServiceStartup(L"LocalKdc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"KtmRm", SERVICE_DEMAND_START);
-	SetServiceStartup(L"LxpSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"lltdsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"wlpasvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"McpManagementService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"wlidsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"cloudidsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"MicrosoftEdgeElevationService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"edgeupdate", SERVICE_DEMAND_START);
-	SetServiceStartup(L"edgeupdatem", SERVICE_DEMAND_START);
-	SetServiceStartup(L"MSiSCSI", SERVICE_DEMAND_START);
-	SetServiceStartup(L"NgcSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"NgcCtnrSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"swprv", SERVICE_DEMAND_START);
-	SetServiceStartup(L"smphost", SERVICE_DEMAND_START);
-	SetServiceStartup(L"wuqisvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"SmsRouter", SERVICE_DEMAND_START);
-	SetServiceStartup(L"McmSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"NaturalAuthentication", SERVICE_DEMAND_START);
-	SetServiceStartup(L"NetTcpPortSharing", SERVICE_DISABLED);
-	SetServiceStartup(L"Netlogon", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"NcdAutoSetup", SERVICE_DEMAND_START);
-	SetServiceStartup(L"Netman", SERVICE_DEMAND_START);
-	SetServiceStartup(L"NcaSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"netprofm", SERVICE_DEMAND_START);
-	SetServiceStartup(L"NlaSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"nsi", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"nvsvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"CscService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"ssh-agent", SERVICE_DISABLED);
-	SetServiceStartup(L"defragsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"SEMgrSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"PerfHost", SERVICE_DEMAND_START);
-	SetServiceStartup(L"pla", SERVICE_DEMAND_START);
-	SetServiceStartup(L"PhoneSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"PlugPlay", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WPDBusEnum", SERVICE_DEMAND_START);
-	SetServiceStartup(L"Power", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"PrintDeviceConfigurationService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"Spooler", SERVICE_DISABLED);
-	SetServiceStartup(L"PrintScanBrokerService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"wercplsupport", SERVICE_DEMAND_START);
-	SetServiceStartup(L"PcaSvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"QWAVE", SERVICE_DEMAND_START);
-	SetServiceStartup(L"RmSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"TroubleshootingSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"refsdedupsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"RasAuto", SERVICE_DEMAND_START);
-	SetServiceStartup(L"RasMan", SERVICE_DEMAND_START);
-	SetServiceStartup(L"SessionEnv", SERVICE_DEMAND_START);
-	SetServiceStartup(L"TermService", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"RpcSs", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"RpcLocator", SERVICE_DEMAND_START);
-	SetServiceStartup(L"RemoteRegistry", SERVICE_DISABLED);
-	SetServiceStartup(L"RetailDemo", SERVICE_DEMAND_START);
-	SetServiceStartup(L"RpcEptMapper", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"seclogon", SERVICE_DEMAND_START);
-	SetServiceStartup(L"SstpSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"SamSs", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"wscsvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"SensorService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"LanmanServer", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"shpamsvc", SERVICE_DISABLED);
-	SetServiceStartup(L"ShellHWDetection", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"SCardSvr", SERVICE_DEMAND_START);
-	SetServiceStartup(L"ScDeviceEnum", SERVICE_DEMAND_START);
-	SetServiceStartup(L"SCPolicySvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"sppsvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"svsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"SSDPSRV", SERVICE_DEMAND_START);
-	SetServiceStartup(L"StateRepository", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"StorSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"TieringEngineService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"SynTPEnhService", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"SENS", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"SystemEventsBroker", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"Schedule", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"lmhosts", SERVICE_DEMAND_START);
-	SetServiceStartup(L"TapiSrv", SERVICE_DEMAND_START);
-	SetServiceStartup(L"TextInputManagementService", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"Themes", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"TimeBrokerSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"UsoSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"upnphost", SERVICE_DEMAND_START);
-	SetServiceStartup(L"UserManager", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"ProfSvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"vds", SERVICE_DEMAND_START);
-	SetServiceStartup(L"VSInstallerElevationService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"VSS", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WaaSMedicSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WarpJITSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"TokenBroker", SERVICE_DEMAND_START);
-	SetServiceStartup(L"webthreatdefsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WebClient", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WFDSConMgrSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"Audiosrv", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"AudioEndpointBuilder", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"SDRSVC", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WbioSrvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"FrameServer", SERVICE_DEMAND_START);
-	SetServiceStartup(L"FrameServerMonitor", SERVICE_DEMAND_START);
-	SetServiceStartup(L"wcncsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"Wcmsvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"mpssvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"WEPHOSTSVC", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WerSvc", SERVICE_DISABLED);
-	SetServiceStartup(L"Wecsvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"EventLog", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"FontCache", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"whesvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"wisvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"msiserver", SERVICE_DEMAND_START);
-	SetServiceStartup(L"LicenseManager", SERVICE_DEMAND_START);
-	SetServiceStartup(L"Winmgmt", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"WManSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"midisrv", SERVICE_DEMAND_START);
-	SetServiceStartup(L"icssvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"TrustedInstaller", SERVICE_DEMAND_START);
-	SetServiceStartup(L"perceptionsimulation", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WpnService", SERVICE_DEMAND_START);
-	SetServiceStartup(L"PushToInstall", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WinRM", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WSearch", SERVICE_DEMAND_START);
-    SetServiceStartup(L"W32Time", SERVICE_DEMAND_START);
-    // FIX: Do not disable Update Service. Set to Manual and rely on Policy Deferral.
-    SetServiceStartup(L"wuauserv", SERVICE_DEMAND_START);
-    SetServiceStartup(L"ApxSvc", SERVICE_DEMAND_START);
-    SetServiceStartup(L"WinHttpAutoProxySvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"dot3svc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"WlanSvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"wmiApSrv", SERVICE_DEMAND_START);
-	SetServiceStartup(L"LanmanWorkstation", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"WSAIFabricSvc", SERVICE_DELAYED_AUTO_START);
-	SetServiceStartup(L"WwanSvc", SERVICE_DEMAND_START);
-	SetServiceStartup(L"XboxGipSvc", SERVICE_DISABLED);
+    // Apply Manual start (SERVICE_DEMAND_START) to standard services
+    for (const auto& svc : serviceList) {
+        SetServiceStartup(svc.c_str(), SERVICE_DEMAND_START);
+    }
 
-	// --- Pattern-based per-user service handling ---
+	// --- Pattern-based per-user service handling (Manual) ---
 	const wchar_t* userServicePatterns[] = {
-		L"BluetoothUserService_",
-		L"BcastDVRUserService_",
-		L"CDPUserSvc_",
-		L"CaptureService_",
-		L"ConsentUxUserSvc_",
-		L"CredentialEnrollmentManagerUserSvc_",
-		L"DeviceAssociationBrokerSvc_",
-		L"DevicePickerUserSvc_",
-		L"DevicesFlowUserSvc_",
-		L"NPSMSvc_",
-		L"OneSyncSvc_",
-		L"P9RdrService_",
-		L"PenService_",
-		L"PimIndexMaintenanceSvc_",
-		L"PrintWorkflowUserSvc_",
-		L"UdkUserSvc_",
-		L"UnistoreSvc_",
-		L"UserDataSvc_",
-		L"WpnUserService_",
-		L"cbdhsvc_",
-		L"webthreatdefusersvc_"
+        L"BcastDVRUserService_",
+        L"BluetoothUserService_",
+        L"CDPUserSvc_",
+        L"CaptureService_",
+        L"ConsentUxUserSvc_",
+        L"CredentialEnrollmentManagerUserSvc_",
+        L"DeviceAssociationBrokerSvc_",
+        L"DevicePickerUserSvc_",
+        L"DevicesFlowUserSvc_",
+        L"MessagingService_",
+        L"NPSMSvc_",
+        L"OneSyncSvc_",
+        L"P9RdrService_",
+        L"PenService_",
+        L"PimIndexMaintenanceSvc_",
+        L"PrintWorkflowUserSvc_",
+        L"UdkUserSvc_",
+        L"UnistoreSvc_",
+        L"UserDataSvc_",
+        L"WpnUserService_",
+        L"cbdhsvc_",
+        L"webthreatdefusersvc_"
 	};
 
 	for (const wchar_t* pattern : userServicePatterns) {
-		DWORD startupType = SERVICE_DEMAND_START;
-
-		if (wcscmp(pattern, L"CDPUserSvc_") == 0 ||
-			wcscmp(pattern, L"OneSyncSvc_") == 0 ||
-			wcscmp(pattern, L"webthreatdefusersvc_") == 0 ||
-            wcscmp(pattern, L"cbdhsvc_") == 0) { // Added missing service from explicit list
-			startupType = SERVICE_DELAYED_AUTO_START;
-		}
-
-		EnumerateAndConfigureUserServices(pattern, startupType);
+        // Strict adherence to "Minimal" spec: All services set to Manual, no exceptions.
+		EnumerateAndConfigureUserServices(pattern, SERVICE_DEMAND_START);
 	}
 
 	Log("[TWEAK] System optimizations applied successfully.");
