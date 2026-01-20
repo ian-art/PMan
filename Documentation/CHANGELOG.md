@@ -63,7 +63,7 @@ This release focuses on eliminating technical debt, enforcing thread safety, and
   - ARM64
 
 - **Implementation**
-  - Language: C++17
+  - Language: C++20 (Required for atomic smart pointers and advanced threading safety)
   - API: Win32
 
 - **System Impact**
