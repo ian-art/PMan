@@ -28,6 +28,15 @@
 #include <filesystem>
 #include <deque>
 #include <vector>
+#include <memory> // Required for std::shared_ptr
+
+// Forward declarations for RAII Guards
+class PowerSchemeGuard;
+class VisualsSuspend;
+class CacheLimiter;
+class ServiceSuspensionGuard;
+class InputModeGuard;
+class AudioModeGuard;
 
 struct GameProfile {
     std::wstring exeName;
@@ -84,6 +93,14 @@ private:
 
         // Emergency Boost Cooldown
         uint64_t lastEmergencyBoostTime = 0;
+
+        // RAII optimization guards (Alive as long as session exists)
+        std::shared_ptr<PowerSchemeGuard> powerGuard;
+        std::shared_ptr<VisualsSuspend> visualGuard;
+        std::shared_ptr<CacheLimiter> cacheGuard;
+        std::shared_ptr<ServiceSuspensionGuard> serviceGuard;
+        std::shared_ptr<InputModeGuard> inputGuard;
+        std::shared_ptr<AudioModeGuard> audioGuard;
     };
 
     // Root Cause Correlation
@@ -134,12 +151,14 @@ public:
     
     // Returns true if specific optimization is allowed based on learned profile
     bool IsOptimizationAllowed(const std::wstring& exeName, const std::string& feature);
-    
-    // Audio Isolation
-    void OptimizeAudioService(bool enable);
 
     // Emergency response
     void TriggerEmergencyBoost(DWORD pid);
+
+private:
+    // Background Service Management
+    void SuspendBackgroundServices();
+    void ResumeBackgroundServices();
 };
 
 #endif // PMAN_PERFORMANCE_H

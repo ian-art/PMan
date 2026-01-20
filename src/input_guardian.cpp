@@ -77,16 +77,18 @@ void InputGuardian::ToggleInterferenceBlocker(bool enable) {
         }
 
         // 2. Disable Sticky Keys / Filter Keys Hotkeys
+        // FIX: Set flags to 0 to disable Hotkeys AND Confirmations. 
+        // SKF_CONFIRMHOTKEY actually *enables* the dialog, which we want to avoid.
         STICKYKEYS sk = { sizeof(STICKYKEYS), 0 };
-        sk.dwFlags = SKF_CONFIRMHOTKEY; // Disable SKF_HOTKEYACTIVE
+        sk.dwFlags = 0; 
         SystemParametersInfoW(SPI_SETSTICKYKEYS, sizeof(sk), &sk, 0);
 
         TOGGLEKEYS tk = { sizeof(TOGGLEKEYS), 0 };
-        tk.dwFlags = TKF_CONFIRMHOTKEY;
+        tk.dwFlags = 0;
         SystemParametersInfoW(SPI_SETTOGGLEKEYS, sizeof(tk), &tk, 0);
 
         FILTERKEYS fk = { sizeof(FILTERKEYS), 0 };
-        fk.dwFlags = FKF_CONFIRMHOTKEY;
+        fk.dwFlags = 0;
         SystemParametersInfoW(SPI_SETFILTERKEYS, sizeof(fk), &fk, 0);
 
         Log("[INPUT] Game Mode: Blocked Windows Key & Sticky Keys");
@@ -136,8 +138,10 @@ void InputGuardian::ApplyResponsivenessBoost() {
     if (hFg) {
         DWORD pid = 0;
         DWORD tid = GetWindowThreadProcessId(hFg, &pid);
-        if (tid != 0) {
+        // Optimization: Only boost if focus changed to a new thread
+        if (tid != 0 && tid != m_lastForegroundTid) {
             BoostThread(tid, "Foreground");
+            m_lastForegroundTid = tid;
         }
     }
     BoostDwmProcess();
@@ -155,12 +159,15 @@ void InputGuardian::BoostThread(DWORD tid, const char* debugTag) {
 }
 
 void InputGuardian::BoostDwmProcess() {
+    // Static cache for DWM threads
     static std::vector<DWORD> cachedThreads;
     static std::mutex cacheMtx;
     static uint64_t lastCacheUpdate = 0;
     static std::atomic<bool> isUpdating = false;
 
     uint64_t now = GetTickCount64();
+    
+    // Refresh PID periodically
     if (now - m_lastDwmScan > 10000 || m_dwmPid == 0) {
         m_dwmPid = GetDwmProcessId();
         m_lastDwmScan = now;
@@ -168,27 +175,26 @@ void InputGuardian::BoostDwmProcess() {
 
     if (m_dwmPid == 0) return;
 
-    static uint64_t lastBoostApply = 0;
-    if (now - lastBoostApply < 5000) return;
-    lastBoostApply = now;
-
-    // Async Update Trigger with Managed Thread
+    // Trigger update only every 60s or if empty
     if (!isUpdating && (now - lastCacheUpdate > 60000 || cachedThreads.empty())) {
         
-        // Join previous worker if it exists (Cleanup)
+        // Ensure previous worker is cleaned up
         if (m_worker.joinable()) {
             m_worker.join();
         }
 
         isUpdating = true;
-        DWORD targetPid = m_dwmPid; 
+        DWORD targetPid = m_dwmPid;
         
-        // Managed Worker Thread (Replaces detach)
-        m_worker = std::thread([targetPid]() {
+        // Capture 'this' to call BoostThread inside the worker
+        // Safety: Destructor joins m_worker, so 'this' is guaranteed valid
+        m_worker = std::thread([this, targetPid]() {
             std::vector<DWORD> newThreads;
             UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0));
+            
             if (hSnap.get() != INVALID_HANDLE_VALUE) {
                 THREADENTRY32 te = {sizeof(te)};
+                te.dwSize = sizeof(te); // Good practice
                 if (Thread32First(hSnap.get(), &te)) {
                     do {
                         if (te.th32OwnerProcessID == targetPid) {
@@ -196,6 +202,13 @@ void InputGuardian::BoostDwmProcess() {
                         }
                     } while (Thread32Next(hSnap.get(), &te));
                 }
+            }
+
+            // Apply boosts IMMEDIATELY in the background thread.
+            // Priority boost state is persistent; we don't need to re-apply it 
+            // every frame on the main thread, only when we find threads.
+            for (DWORD tid : newThreads) {
+                BoostThread(tid, "DWM");
             }
             
             {
@@ -206,9 +219,7 @@ void InputGuardian::BoostDwmProcess() {
             isUpdating = false;
         });
     }
-
-    std::lock_guard<std::mutex> lock(cacheMtx);
-    for (DWORD tid : cachedThreads) {
-        BoostThread(tid, "DWM");
-    }
+    
+    // Main thread does NOTHING. 
+    // Optimization: Removed synchronous loop that opened ~15 handles every 500ms.
 }

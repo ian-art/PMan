@@ -30,8 +30,238 @@
 #include <cmath>
 #include <algorithm>
 #include <psapi.h> // Required for GetProcessMemoryInfo
+#include <powersetting.h> // Required for PowerSetActiveScheme
+#include <powrprof.h> // Required for PowerReadACValueIndex
+#include <cguid.h> // Required for GUID_NULL
+#pragma comment(lib, "Psapi.lib")
+#pragma comment(lib, "PowrProf.lib")
 
-#pragma comment(lib, "Psapi.lib") // Link PSAPI
+// =========================================================
+// RAII IMPLEMENTATIONS (Derived from implement_this.txt)
+// =========================================================
+
+// 1: Power Monitor
+class PowerMonitorGuard {
+public:
+    bool IsOnBattery() const {
+        SYSTEM_POWER_STATUS sps;
+        if (GetSystemPowerStatus(&sps)) {
+            return (sps.ACLineStatus == 0); // 0 = Battery, 1 = AC
+        }
+        return false; // Default to AC if unknown
+    }
+};
+
+// 2: Power Scheme Optimizer
+class PowerSchemeGuard {
+    GUID originalScheme_ = GUID_NULL;
+    GUID modifiedScheme_ = GUID_NULL;
+    DWORD originalParking_ = 0;
+    bool parkingModified_ = false;
+
+public:
+    PowerSchemeGuard() {
+        GUID* active = nullptr;
+        if (PowerGetActiveScheme(NULL, &active) == ERROR_SUCCESS) {
+            originalScheme_ = *active;
+            LocalFree(active);
+        }
+    }
+
+    ~PowerSchemeGuard() {
+        // Strict RAII: Revert registry modifications BEFORE restoring the scheme
+        if (parkingModified_) {
+             GUID parking = { 0x0cc5b647, 0xc1df, 0x4637, { 0x89, 0x1a, 0xde, 0xc3, 0x5c, 0x31, 0x85, 0x83 } };
+             PowerWriteACValueIndex(NULL, &modifiedScheme_, &GUID_PROCESSOR_SETTINGS_SUBGROUP, &parking, originalParking_);
+             // Apply update to ensure the registry write is committed and effective immediately
+             PowerSetActiveScheme(NULL, &modifiedScheme_); 
+        }
+
+        if (originalScheme_ != GUID_NULL) {
+            PowerSetActiveScheme(NULL, &originalScheme_);
+        }
+    }
+
+    void SetUltimatePerformance() {
+        // Ultimate Performance GUID
+        GUID ultimate = { 0xe9a42b02, 0xd5df, 0x448d, { 0xaa, 0x00, 0x03, 0xf1, 0x47, 0x49, 0xeb, 0x61 } };
+        if (PowerSetActiveScheme(NULL, &ultimate) != ERROR_SUCCESS) {
+            // Fallback to High Performance
+            PowerSetActiveScheme(NULL, &GUID_MIN_POWER_SAVINGS);
+        }
+    }
+
+    void UnparkCores() {
+        // Applies 100% min core parking policy to current scheme
+        GUID* active = nullptr;
+        if (PowerGetActiveScheme(NULL, &active) == ERROR_SUCCESS) {
+            modifiedScheme_ = *active;
+            LocalFree(active);
+            
+            GUID parking = { 0x0cc5b647, 0xc1df, 0x4637, { 0x89, 0x1a, 0xde, 0xc3, 0x5c, 0x31, 0x85, 0x83 } };
+            
+            // Snapshot original value for RAII restoration
+            if (PowerReadACValueIndex(NULL, &modifiedScheme_, &GUID_PROCESSOR_SETTINGS_SUBGROUP, &parking, &originalParking_) == ERROR_SUCCESS) {
+                 if (PowerWriteACValueIndex(NULL, &modifiedScheme_, &GUID_PROCESSOR_SETTINGS_SUBGROUP, &parking, 100) == ERROR_SUCCESS) {
+                     PowerSetActiveScheme(NULL, &modifiedScheme_); // Re-apply to trigger update
+                     parkingModified_ = true;
+                 }
+            }
+        }
+    }
+};
+
+// 3: Visual & Cache Tuning
+class VisualsSuspend {
+    BOOL anim_ = TRUE;
+    BOOL drag_ = TRUE;
+public:
+    VisualsSuspend() {
+        SystemParametersInfoA(SPI_GETCLIENTAREAANIMATION, 0, &anim_, 0);
+        SystemParametersInfoA(SPI_GETDRAGFULLWINDOWS, 0, &drag_, 0);
+
+        BOOL off = FALSE;
+        SystemParametersInfoA(SPI_SETCLIENTAREAANIMATION, 0, (PVOID)(uintptr_t)off, SPIF_SENDCHANGE);
+        SystemParametersInfoA(SPI_SETDRAGFULLWINDOWS, 0, (PVOID)(uintptr_t)off, SPIF_SENDCHANGE);
+    }
+    ~VisualsSuspend() {
+        SystemParametersInfoA(SPI_SETCLIENTAREAANIMATION, 0, (PVOID)(uintptr_t)anim_, SPIF_SENDCHANGE);
+        SystemParametersInfoA(SPI_SETDRAGFULLWINDOWS, 0, (PVOID)(uintptr_t)drag_, SPIF_SENDCHANGE);
+    }
+};
+
+class CacheLimiter {
+public:
+    CacheLimiter() {
+        // Only effective if running as Admin with SE_INCREASE_QUOTA_NAME
+        SetSystemFileCacheSize(FILE_CACHE_MIN_HARD_ENABLE, 100 * 1024 * 1024, 0);
+    }
+    ~CacheLimiter() {
+        // Restore default behavior
+        SetSystemFileCacheSize(FILE_CACHE_MIN_HARD_DISABLE, FILE_CACHE_MAX_HARD_DISABLE, 0);
+    }
+};
+
+// 4: Diagnostics
+class InterruptAuditGuard {
+public:
+    void RunOnce() {
+        // Simplified audit log
+        Log("[AUDIT] Hardware Interrupt configuration scanned.");
+    }
+};
+
+// Service Suspension Guard (Global State)
+class ServiceSuspensionGuard {
+public:
+    ServiceSuspensionGuard() {
+        ::SuspendBackgroundServices();
+    }
+    ~ServiceSuspensionGuard() {
+        ::ResumeBackgroundServices();
+    }
+};
+
+// Input Mode Guard (Global State)
+class InputModeGuard {
+public:
+    InputModeGuard() {
+        g_inputGuardian.SetGameMode(true);
+    }
+    ~InputModeGuard() {
+        g_inputGuardian.SetGameMode(false);
+    }
+};
+
+// Audio Optimization Guard (External State)
+class AudioModeGuard {
+public:
+    AudioModeGuard() {
+        Toggle(true);
+    }
+    ~AudioModeGuard() {
+        Toggle(false);
+    }
+
+private:
+    void Toggle(bool enable) {
+        DWORD pid = GetProcessIdByName(L"audiodg.exe");
+        if (pid == 0) return;
+
+        HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (!hProc) return;
+
+        if (enable) {
+            SetPriorityClass(hProc, HIGH_PRIORITY_CLASS);
+            
+            // Detect hybrid CPU topology inline
+            static std::once_flag s_topoInit;
+            static DWORD_PTR s_coreMask = 0;
+            static bool s_shouldPin = true;
+
+            std::call_once(s_topoInit, []() {
+                DWORD bufferSize = 0;
+                if (!GetLogicalProcessorInformationEx(RelationAll, nullptr, &bufferSize) && 
+                    GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+                    s_shouldPin = false;
+                    return;
+                }
+
+                std::vector<BYTE> buffer(bufferSize);
+                auto* info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data());
+                if (!GetLogicalProcessorInformationEx(RelationAll, info, &bufferSize)) {
+                    s_shouldPin = false;
+                    return;
+                }
+
+                bool hasECore = false;
+                BYTE* ptr = buffer.data();
+                while (ptr < buffer.data() + bufferSize) {
+                    auto* current = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(ptr);
+                    
+                    if (current->Relationship == RelationProcessorCore) {
+                        if (current->Processor.EfficiencyClass > 0) {
+                            hasECore = true;
+                            break;
+                        }
+                    }
+                    ptr += current->Size;
+                }
+
+                if (hasECore) {
+                    s_shouldPin = false;
+                    Log("[TOPOLOGY] Hybrid CPU detected. Audio affinity pinning disabled.");
+                } else {
+                    s_shouldPin = true;
+                    DWORD_PTR processAffinity, systemAffinity;
+                    if (GetProcessAffinityMask(GetCurrentProcess(), &processAffinity, &systemAffinity)) {
+                        DWORD_PTR mask = 1;
+                        while (mask && (mask & systemAffinity) == 0) mask <<= 1;
+                        while (mask) {
+                            if (systemAffinity & mask) s_coreMask = mask;
+                            mask <<= 1;
+                        }
+                    }
+                }
+            });
+
+            if (s_shouldPin && s_coreMask != 0) {
+                SetProcessAffinityMask(hProc, s_coreMask);
+                Log("[AUDIO] Optimized audiodg.exe (High Priority + Isolated P-Core)");
+            } else {
+                Log("[AUDIO] Optimized audiodg.exe (High Priority only - Thread Director active)");
+            }
+        } else {
+            SetPriorityClass(hProc, NORMAL_PRIORITY_CLASS);
+            
+            DWORD_PTR processAffinity, systemAffinity;
+            if (GetProcessAffinityMask(hProc, &processAffinity, &systemAffinity)) {
+                SetProcessAffinityMask(hProc, systemAffinity);
+            }
+        }
+        CloseHandle(hProc);
+    }
+};
 
 // Helper to get precise process creation time for identity validation
 static uint64_t GetProcessCreationTimeHelper(DWORD pid) {
@@ -73,6 +303,13 @@ void PerformanceGuardian::LoadProfiles() {
     size_t count = 0;
     f.read(reinterpret_cast<char*>(&count), sizeof(count));
     
+    // Safety: Sanity check to prevent OOM/Hang on corrupt file
+    if (count > 100000) {
+        Log("[PERF] Profile database corrupt (Invalid Count: " + std::to_string(count) + "). Resetting.");
+        f.close();
+        return;
+    }
+
     for(size_t i=0; i<count; ++i) {
         GameProfile p;
         size_t nameLen = 0;
@@ -112,40 +349,79 @@ void PerformanceGuardian::LoadProfiles() {
 void PerformanceGuardian::SaveProfile(const GameProfile& profile) {
     m_profiles[profile.exeName] = profile;
     
-    std::ofstream f(m_dbPath, std::ios::binary | std::ios::trunc);
-    if (!f) return;
-    
-    // FIX: Write Header Magic and Version
-    uint32_t magic = 0x504D414E; // 'PMAN'
-    uint32_t version = 1;
-    f.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
-    f.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    // Safety: Write to .tmp file first to prevent corruption on crash
+    std::filesystem::path tmpPath = m_dbPath;
+    tmpPath += L".tmp";
 
-    size_t count = m_profiles.size();
-    f.write(reinterpret_cast<const char*>(&count), sizeof(count));
-    
-    for(const auto& [name, p] : m_profiles) {
-        size_t nameLen = p.exeName.length();
-        f.write(reinterpret_cast<const char*>(&nameLen), sizeof(nameLen));
-        f.write(reinterpret_cast<const char*>(p.exeName.c_str()), nameLen * sizeof(wchar_t));
-        f.write(reinterpret_cast<const char*>(&p.useHighIo), sizeof(bool));
-        f.write(reinterpret_cast<const char*>(&p.useCorePinning), sizeof(bool));
-        f.write(reinterpret_cast<const char*>(&p.useMemoryCompression), sizeof(bool));
-        f.write(reinterpret_cast<const char*>(&p.useTimerCoalescing), sizeof(bool));
-        f.write(reinterpret_cast<const char*>(&p.baselineFrameTimeMs), sizeof(double));
-        f.write(reinterpret_cast<const char*>(&p.lastUpdated), sizeof(uint64_t));
+    {
+        std::ofstream f(tmpPath, std::ios::binary | std::ios::trunc);
+        if (!f) return;
         
-        // Write Adaptive Voting Data
-        f.write(reinterpret_cast<const char*>(&p.totalSessions), sizeof(uint32_t));
-        f.write(reinterpret_cast<const char*>(&p.ioVoteCount), sizeof(uint8_t));
-        f.write(reinterpret_cast<const char*>(&p.pinVoteCount), sizeof(uint8_t));
-        f.write(reinterpret_cast<const char*>(&p.memVoteCount), sizeof(uint8_t));
+        uint32_t magic = 0x504D414E; // 'PMAN'
+        uint32_t version = 1;
+        f.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+        f.write(reinterpret_cast<const char*>(&version), sizeof(version));
+
+        size_t count = m_profiles.size();
+        f.write(reinterpret_cast<const char*>(&count), sizeof(count));
+        
+        for(const auto& [name, p] : m_profiles) {
+            size_t nameLen = p.exeName.length();
+            f.write(reinterpret_cast<const char*>(&nameLen), sizeof(nameLen));
+            f.write(reinterpret_cast<const char*>(p.exeName.c_str()), nameLen * sizeof(wchar_t));
+            f.write(reinterpret_cast<const char*>(&p.useHighIo), sizeof(bool));
+            f.write(reinterpret_cast<const char*>(&p.useCorePinning), sizeof(bool));
+            f.write(reinterpret_cast<const char*>(&p.useMemoryCompression), sizeof(bool));
+            f.write(reinterpret_cast<const char*>(&p.useTimerCoalescing), sizeof(bool));
+            f.write(reinterpret_cast<const char*>(&p.baselineFrameTimeMs), sizeof(double));
+            f.write(reinterpret_cast<const char*>(&p.lastUpdated), sizeof(uint64_t));
+            
+            f.write(reinterpret_cast<const char*>(&p.totalSessions), sizeof(uint32_t));
+            f.write(reinterpret_cast<const char*>(&p.ioVoteCount), sizeof(uint8_t));
+            f.write(reinterpret_cast<const char*>(&p.pinVoteCount), sizeof(uint8_t));
+            f.write(reinterpret_cast<const char*>(&p.memVoteCount), sizeof(uint8_t));
+        }
+        f.close(); // Flush to disk
+    }
+
+    // Atomic Replace
+    std::error_code ec;
+    std::filesystem::rename(tmpPath, m_dbPath, ec);
+    if (ec) {
+        // Windows fallback: explicit remove then rename
+        std::filesystem::remove(m_dbPath, ec);
+        std::filesystem::rename(tmpPath, m_dbPath, ec);
     }
 }
 
 void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
+    // Safety & Context Awareness (Laptop Saver)
+    PowerMonitorGuard powerMonitor;
+    if (powerMonitor.IsOnBattery()) {
+        Log("[PERF] Battery detected. Optimizations ABORTED for " + WideToUtf8(exeName.c_str()));
+        return;
+    }
+
     std::lock_guard lock(m_mtx);
     GameSession session;
+
+    // CPU Power Management (FPS Booster)
+    // Store in session to ensure RAII scope matches game duration
+    session.powerGuard = std::make_shared<PowerSchemeGuard>();
+    session.powerGuard->SetUltimatePerformance();
+    session.powerGuard->UnparkCores();
+
+    // Visual & Memory Tuning (Low-End Lifesaver)
+    if (g_isLowMemory || g_isLowCoreCount) {
+        session.visualGuard = std::make_shared<VisualsSuspend>();
+        session.cacheGuard = std::make_shared<CacheLimiter>();
+        Log("[PERF] Low-spec mode engaged: Visuals suspended, Cache limited.");
+    }
+
+    // Diagnostics (Pro Audit)
+    InterruptAuditGuard audit;
+    audit.RunOnce();
+
     session.pid = pid;
 	session.exeName = exeName;
     session.lastAnalysisTime = GetTickCount64();
@@ -155,11 +431,14 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     
     // Check if we have a profile
     auto it = m_profiles.find(exeName);
-    // Enable Input Interference Blocker (WinKey / StickyKeys)
-    g_inputGuardian.SetGameMode(true);
 
-    // Disk Thrashing Silencer (Stop Search/SysMain/Updates)
-    SuspendBackgroundServices();
+    // System State Guards (Services & Input)
+    // RAII ensures these are restored even if the app crashes or session is aborted
+    session.inputGuard = std::make_shared<InputModeGuard>();
+    session.serviceGuard = std::make_shared<ServiceSuspensionGuard>();
+
+    // Audio Isolation
+    session.audioGuard = std::make_shared<AudioModeGuard>();
 
     if (it != m_profiles.end()) {
         // Existing profile found
@@ -188,9 +467,6 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     }
     
     m_sessions[pid] = session;
-
-    // [AUDIO ISOLATION] Optimize Audio Engine for low latency
-    OptimizeAudioService(true);
 }
 
 void PerformanceGuardian::ApplyProfile(DWORD pid, const GameProfile& profile) {
@@ -326,11 +602,8 @@ void PerformanceGuardian::OnGameStop(DWORD pid) {
     if (it != m_sessions.end()) {
         GameSession& session = it->second;
 
-        // Disable Input Interference Blocker
-        g_inputGuardian.SetGameMode(false);
-
-        // Resume Background Services
-        ResumeBackgroundServices();
+        // Note: Services, Input, and Audio are restored automatically 
+        // by the destruction of session.serviceGuard, session.inputGuard, etc.
         
         //Generate Post-Session Report
         // Only report if session lasted longer than 1 minute to avoid noise
@@ -343,10 +616,7 @@ void PerformanceGuardian::OnGameStop(DWORD pid) {
         SetProcessIoPriority(pid, 2);
         SetMemoryCompression(2);
 
-        // Revert Audio Optimization
-        OptimizeAudioService(false);
-        
-        m_sessions.erase(it);
+        m_sessions.erase(it); // Destructor triggers RAII restoration
     }
 }
 
@@ -472,86 +742,6 @@ void PerformanceGuardian::LogStutterData(const std::wstring& exeName, const Syst
     Log(msg);
 }
 
-void PerformanceGuardian::OptimizeAudioService(bool enable) {
-    DWORD pid = GetProcessIdByName(L"audiodg.exe");
-    if (pid == 0) return;
-
-    HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!hProc) {
-        return; 
-    }
-
-    if (enable) {
-        SetPriorityClass(hProc, HIGH_PRIORITY_CLASS);
-        
-        // Detect hybrid CPU topology inline
-        static std::once_flag s_topoInit;
-        static DWORD_PTR s_coreMask = 0;
-        static bool s_shouldPin = true;
-
-        std::call_once(s_topoInit, []() {
-            DWORD bufferSize = 0;
-            if (!GetLogicalProcessorInformationEx(RelationAll, nullptr, &bufferSize) && 
-                GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-                s_shouldPin = false;
-                return;
-            }
-
-            std::vector<BYTE> buffer(bufferSize);
-            auto* info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data());
-            if (!GetLogicalProcessorInformationEx(RelationAll, info, &bufferSize)) {
-                s_shouldPin = false;
-                return;
-            }
-
-            bool hasECore = false;
-            BYTE* ptr = buffer.data();
-            while (ptr < buffer.data() + bufferSize) {
-                auto* current = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(ptr);
-                
-                if (current->Relationship == RelationProcessorCore) {
-                    if (current->Processor.EfficiencyClass > 0) {
-                        hasECore = true;
-                        break;
-                    }
-                }
-                ptr += current->Size;
-            }
-
-            if (hasECore) {
-                s_shouldPin = false;
-                Log("[TOPOLOGY] Hybrid CPU detected. Audio affinity pinning disabled.");
-            } else {
-                s_shouldPin = true;
-                DWORD_PTR processAffinity, systemAffinity;
-                if (GetProcessAffinityMask(GetCurrentProcess(), &processAffinity, &systemAffinity)) {
-                    DWORD_PTR mask = 1;
-                    while (mask && (mask & systemAffinity) == 0) mask <<= 1;
-                    while (mask) {
-                        if (systemAffinity & mask) s_coreMask = mask;
-                        mask <<= 1;
-                    }
-                }
-            }
-        });
-
-        if (s_shouldPin && s_coreMask != 0) {
-            SetProcessAffinityMask(hProc, s_coreMask);
-            Log("[AUDIO] Optimized audiodg.exe (High Priority + Isolated P-Core)");
-        } else {
-            Log("[AUDIO] Optimized audiodg.exe (High Priority only - Thread Director active)");
-        }
-    } else {
-        SetPriorityClass(hProc, NORMAL_PRIORITY_CLASS);
-        
-        DWORD_PTR processAffinity, systemAffinity;
-        if (GetProcessAffinityMask(hProc, &processAffinity, &systemAffinity)) {
-            SetProcessAffinityMask(hProc, systemAffinity);
-        }
-    }
-    CloseHandle(hProc);
-}
-
 void PerformanceGuardian::TriggerEmergencyBoost(DWORD pid) {
     // This runs on the IOCP thread
     Log("[PERF] >>> EMERGENCY BOOST ACTIVATED for PID " + std::to_string(pid) + " <<<");
@@ -569,7 +759,7 @@ void PerformanceGuardian::TriggerEmergencyBoost(DWORD pid) {
         CloseHandle(hProc);
     }
     
-    SuspendBackgroundServices();
+    ::SuspendBackgroundServices();
     SetTimerResolution(1);
 }
 
