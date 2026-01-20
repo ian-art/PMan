@@ -73,7 +73,8 @@ static bool HasActiveDependents(SC_HANDLE hSvc) {
 }
 
 void ServiceWatcher::ScanAndTrimManualServices() {
-    SC_HANDLE hSc = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_ENUMERATE_SERVICE | SC_MANAGER_CONNECT);
+    // RAII: Use ScHandle for automatic cleanup
+    ScHandle hSc(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_ENUMERATE_SERVICE | SC_MANAGER_CONNECT));
     if (!hSc) return;
 
     DWORD bytesNeeded = 0;
@@ -81,15 +82,15 @@ void ServiceWatcher::ScanAndTrimManualServices() {
     DWORD resumeHandle = 0;
     
     // Fix C6031: Check return (expect failure)
-    if (!EnumServicesStatusExW(hSc, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL, 
+    // Use .get() to access raw handle
+    if (!EnumServicesStatusExW(hSc.get(), SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL, 
         nullptr, 0, &bytesNeeded, &servicesReturned, &resumeHandle, nullptr) && 
         GetLastError() != ERROR_MORE_DATA) {
-        CloseServiceHandle(hSc);
-        return;
+        return; // hSc closes automatically
     }
 
     std::vector<BYTE> buffer(bytesNeeded);
-    if (EnumServicesStatusExW(hSc, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL, 
+    if (EnumServicesStatusExW(hSc.get(), SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL, 
         buffer.data(), bytesNeeded, &bytesNeeded, &servicesReturned, &resumeHandle, nullptr))
     {
         LPENUM_SERVICE_STATUS_PROCESSW services = reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buffer.data());
@@ -103,27 +104,23 @@ void ServiceWatcher::ScanAndTrimManualServices() {
             // 1. Safety: Check Central Critical Whitelist
             if (g_serviceManager.IsCriticalService(svcName)) continue;
 
-            SC_HANDLE hSvc = OpenServiceW(hSc, svcName.c_str(), SERVICE_QUERY_CONFIG | SERVICE_ENUMERATE_DEPENDENTS);
+            ScHandle hSvc(OpenServiceW(hSc.get(), svcName.c_str(), SERVICE_QUERY_CONFIG | SERVICE_ENUMERATE_DEPENDENTS));
             if (!hSvc) {
-                 // Log failure for debugging (Review Point 3)
-                 // Log("[WATCHER] Failed to open " + WideToUtf8(svcName.c_str()));
                  continue;
             }
 
-            // 2. Safety: Check Dependencies (Review Point A)
-            if (HasActiveDependents(hSvc)) {
-                CloseServiceHandle(hSvc);
-                continue;
+            // 2. Safety: Check Dependencies
+            if (HasActiveDependents(hSvc.get())) {
+                continue; // hSvc closes automatically
             }
 
             DWORD configSize = 0;
-            // Fix C6031: Check return (expect failure)
-            if (!QueryServiceConfigW(hSvc, nullptr, 0, &configSize) && 
+            if (!QueryServiceConfigW(hSvc.get(), nullptr, 0, &configSize) && 
                 GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
                 std::vector<BYTE> cfgBuf(configSize);
                 LPQUERY_SERVICE_CONFIGW config = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(cfgBuf.data());
                 
-                if (QueryServiceConfigW(hSvc, config, configSize, &configSize)) {
+                if (QueryServiceConfigW(hSvc.get(), config, configSize, &configSize)) {
                     
                     // 3. Logic: Manual Start?
                     if (config->dwStartType == SERVICE_DEMAND_START) {
@@ -141,15 +138,15 @@ void ServiceWatcher::ScanAndTrimManualServices() {
                     }
                 }
             }
-            CloseServiceHandle(hSvc);
+            // hSvc closes automatically here
         }
     }
-    CloseServiceHandle(hSc);
+    // hSc closes automatically here
 }
 
 bool ServiceWatcher::IsProcessIdle(DWORD pid) {
     if (pid == 0) return false;
-    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!hProc) return false;
 
     FILETIME ftCreation, ftExit, ftKernel, ftUser;
@@ -157,8 +154,8 @@ bool ServiceWatcher::IsProcessIdle(DWORD pid) {
     IO_COUNTERS io = {0};
 
     // Heuristic Improvement (Review Point B): Check IO + CPU
-    bool cpuInfo = GetProcessTimes(hProc, &ftCreation, &ftExit, &ftKernel, &ftUser);
-    bool ioInfo = GetProcessIoCounters(hProc, &io);
+    bool cpuInfo = GetProcessTimes(hProc.get(), &ftCreation, &ftExit, &ftKernel, &ftUser);
+    bool ioInfo = GetProcessIoCounters(hProc.get(), &io);
 
     if (cpuInfo && ioInfo) {
         uint64_t k = ((uint64_t)ftKernel.dwHighDateTime << 32) | ftKernel.dwLowDateTime;
@@ -172,6 +169,5 @@ bool ServiceWatcher::IsProcessIdle(DWORD pid) {
         }
     }
     
-    CloseHandle(hProc);
-    return isIdle;
+    return isIdle; // hProc closes automatically
 }
