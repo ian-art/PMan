@@ -228,10 +228,6 @@ void Log(const std::string& msg)
     // Managed async flush (No detached threads)
    // We use a static single-thread worker that joins the previous operation
    // to ensure we never have "fire and forget" zombies accessing dead globals.
-   static std::thread s_flushWorker;
-   static std::mutex s_workerMtx;
-
-   // Managed async flush (No detached threads)
    if (hViewer && IsWindowVisible(hViewer)) {
        std::lock_guard<std::mutex> lock(g_flushWorkerMtx);
        if (g_flushWorker.joinable()) g_flushWorker.join();
