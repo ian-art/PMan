@@ -512,9 +512,10 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
         uint64_t deltaTime = now - session.lastCpuTimestamp;
         
 		if (deltaTime > 0) {
-            // CORRECT FORMULA: CPU usage per frame, not total CPU time
-            double cpuTimePerFrame = (deltaCpu / 10000.0) / (static_cast<double>(deltaTime) / 16.67);  // ms of CPU per 16.67ms frame
-            double estimatedFrameTime = 16.67 * (cpuTimePerFrame / 100.0);  // Scale by CPU usage
+            // CORRECT FORMULA: CPU usage per frame (Percentage relative to one core)
+            // (CPU_Time_ms / Wall_Clock_ms) * 100
+            double cpuTimePerFrame = ((deltaCpu / 10000.0) / static_cast<double>(deltaTime)) * 100.0;
+            double estimatedFrameTime = 16.67 * (cpuTimePerFrame / 100.0);
             
             // If CPU usage is low (<50%), assume GPU-bound and cap at 33ms (30 FPS)
             if (cpuTimePerFrame < 50.0) {

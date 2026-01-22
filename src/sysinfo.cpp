@@ -869,7 +869,8 @@ void DetectOSCapabilities()
                         }
                         else
                         {
-                            Log("GPU Hardware Scheduling: ENABLED but API unsupported (old GPU/driver)");
+                            g_gpuSchedulingAvailable.store(false);
+                            Log("GPU Hardware Scheduling: REGISTRY ENABLED but Driver Unsupported (Basic Adapter/Old GPU)");
                         }
                     }
                 }
