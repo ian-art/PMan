@@ -32,6 +32,7 @@
 #include <intrin.h>
 #include <thread>
 #include <bitset> // Use bitset for C++17 compatibility
+#include <algorithm> // Required for SMBIOS scanning (std::search)
 
 // Forward declarations
 #if defined(_M_AMD64) || defined(_M_IX86)
@@ -485,9 +486,35 @@ void DetectHybridCoreSupport()
     }
 }
 
+// New Helper: Reads SMBIOS via Firmware API (Harder to spoof than Registry)
+static bool CheckSmbiosForVM() {
+    DWORD size = GetSystemFirmwareTable('RSMB', 0, nullptr, 0);
+    if (size == 0) return false;
+
+    std::vector<BYTE> smbios(size);
+    GetSystemFirmwareTable('RSMB', 0, smbios.data(), size);
+
+    // Naive scan for common hypervisor strings in the raw firmware block
+    const char* sigs[] = { "QEMU", "KVM", "VirtualBox", "VMware", "Parallels", "Xen" };
+
+    for (const char* sig : sigs) {
+        auto it = std::search(
+            smbios.begin(), smbios.end(),
+            sig, sig + strlen(sig)
+        );
+        if (it != smbios.end()) return true;
+    }
+    return false;
+}
+
 // [SECURITY] Secret VM Detection Helper (Enhanced)
 static bool IsKnownEmulator()
 {
+    // [ARM64 & x64] TIER 0: Hardware Firmware Analysis (New)
+    if (CheckSmbiosForVM()) {
+        return true;
+    }
+
 #if defined(_M_AMD64) || defined(_M_IX86)
     // --- TIER 1: CPUID Check (Fastest) ---
     // Only available on x86/x64
@@ -961,12 +988,13 @@ void DetectOSCapabilities()
 
 AffinityStrategy GetRecommendedStrategy()
 {
-    // [ARM64] Policy Override
-    // If we are emulated (Prism), force GameIsolation to keep emulator overhead on unpinned cores.
-    // If we are Native ARM64, we also prefer Isolation to keep the game on the big cores.
-    if (g_caps.isPrismEmulated || g_cpuInfo.vendor == CPUVendor::ARM64) {
+    // [ARM64] Policy Override - REMOVED
+    // We now trust the HybridPinning strategy for ARM64 because 
+    // DetectHybridCoreSupport correctly maps P-Cores (Class 1) and E-Cores (Class 0).
+    /* if (g_caps.isPrismEmulated || g_cpuInfo.vendor == CPUVendor::ARM64) {
         return AffinityStrategy::GameIsolation;
     }
+    */
 
     // 1. Hybrid Architecture (Intel 12th+) -> Always use P/E Logic
     if (g_caps.hasHybridCores) return AffinityStrategy::HybridPinning;

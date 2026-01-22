@@ -214,24 +214,43 @@ private:
                     return;
                 }
 
-                bool hasECore = false;
+                bool hasHybridElements = false;
                 BYTE* ptr = buffer.data();
+                bool isArm64 = (g_cpuInfo.vendor == CPUVendor::ARM64);
+
                 while (ptr < buffer.data() + bufferSize) {
                     auto* current = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(ptr);
-                    
+
                     if (current->Relationship == RelationProcessorCore) {
-                        if (current->Processor.EfficiencyClass > 0) {
-                            hasECore = true;
-                            break;
+                        // INTEL: Class 1+ = E-Core (Efficiency)
+                        // ARM64: Class 0  = E-Core (Little)
+                        if (isArm64) {
+                            if (current->Processor.EfficiencyClass == 0) hasHybridElements = true;
+                        } else {
+                            if (current->Processor.EfficiencyClass > 0) hasHybridElements = true;
                         }
                     }
                     ptr += current->Size;
                 }
 
-                if (hasECore) {
-                    s_shouldPin = false;
-                    Log("[TOPOLOGY] Hybrid CPU detected. Audio affinity pinning disabled.");
+                if (isArm64 && hasHybridElements) {
+                    s_shouldPin = true;
+                    // FORCE PINNING ON ARM64 to P-Cores
+                    s_coreMask = 0;
+                    if (!g_pCoreSets.empty()) {
+                        for (auto id : g_pCoreSets) {
+                            if (id < 64) s_coreMask |= (static_cast<DWORD_PTR>(1) << id);
+                        }
+                    } else {
+                        s_shouldPin = false; // Fallback
+                    }
+                    Log("[AUDIO] ARM64 Hybrid detected. Pinning Audio to P-Cores.");
+                } 
+                else if (hasHybridElements) {
+                    s_shouldPin = false; // INTEL behavior (Keep disabled)
+                    Log("[TOPOLOGY] Hybrid CPU (Intel) detected. Audio affinity pinning disabled.");
                 } else {
+                    // Standard single core logic
                     s_shouldPin = true;
                     DWORD_PTR processAffinity, systemAffinity;
                     if (GetProcessAffinityMask(GetCurrentProcess(), &processAffinity, &systemAffinity)) {
