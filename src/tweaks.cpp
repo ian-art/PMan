@@ -674,13 +674,22 @@ static void TrimBrowserWorkingSet(DWORD pid)
     }
     
     if (!shouldTrim) return;
+
+    // [SMART FIX] Only trim if system is actually starving (Free RAM < 2GB)
+    // This prevents "Alt-Tab" lag on systems that have plenty of memory available.
+    MEMORYSTATUSEX ms = { sizeof(ms) };
+    if (GlobalMemoryStatusEx(&ms)) {
+        if (ms.ullAvailPhys > 2147483648ULL) { // 2 GB
+            return; 
+        }
+    }
     
     HANDLE hProcess = OpenProcess(PROCESS_SET_QUOTA, FALSE, pid);
     if (hProcess)
     {
         if (SetProcessWorkingSetSize(hProcess, static_cast<SIZE_T>(-1), static_cast<SIZE_T>(-1)))
         {
-            Log("[WORKSET] Background browser PID " + std::to_string(pid) + " trimmed");
+            Log("[WORKSET] Background browser PID " + std::to_string(pid) + " trimmed (System under memory pressure)");
         }
         CloseHandle(hProcess);
     }
