@@ -28,7 +28,11 @@
 #include <mutex>
 #include <shellapi.h>
 #include <unordered_set> // Required for IsSystemCriticalProcess
+#include <taskschd.h>
+#include <comdef.h>
 #pragma comment(lib, "Version.lib") // Required for GetFileVersionInfo
+#pragma comment(lib, "taskschd.lib")
+#pragma comment(lib, "comsupp.lib")
 
 std::string WideToUtf8(const wchar_t* wstr)
 {
@@ -446,4 +450,60 @@ std::wstring GetCurrentExeVersion()
 void OpenUpdatePage()
 {
     ShellExecuteW(nullptr, L"open", GITHUB_RELEASES_URL, nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+// Task Silencer Implementation
+bool DisableScheduledTask(const std::wstring& taskPath)
+{
+    // Ensure COM is initialized for this thread
+    HRESULT hrInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    
+    ITaskService* pService = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_TaskScheduler, nullptr, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&pService);
+    if (FAILED(hr)) {
+        if (SUCCEEDED(hrInit)) CoUninitialize();
+        return false;
+    }
+
+    // Connect to local service
+    hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+    if (FAILED(hr)) {
+        pService->Release();
+        if (SUCCEEDED(hrInit)) CoUninitialize();
+        return false;
+    }
+
+    ITaskFolder* pRootFolder = nullptr;
+    hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
+    if (FAILED(hr)) {
+        pService->Release();
+        if (SUCCEEDED(hrInit)) CoUninitialize();
+        return false;
+    }
+
+    // Attempt to locate and disable the task
+    IRegisteredTask* pTask = nullptr;
+    hr = pRootFolder->GetTask(_bstr_t(taskPath.c_str()), &pTask);
+    
+    bool result = false;
+    if (SUCCEEDED(hr)) {
+        // Disable the task
+        hr = pTask->put_Enabled(VARIANT_FALSE);
+        if (SUCCEEDED(hr)) {
+            result = true;
+            Log("[TASK] Disabled telemetry task: " + WideToUtf8(taskPath.c_str()));
+        } else {
+            Log("[TASK] Failed to disable task: " + WideToUtf8(taskPath.c_str()) + " HR=" + std::to_string(hr));
+        }
+        pTask->Release();
+    } else {
+        // Task likely doesn't exist on this version of Windows
+        // Silent fail or debug log
+    }
+
+    pRootFolder->Release();
+    pService->Release();
+    if (SUCCEEDED(hrInit)) CoUninitialize();
+    
+    return result;
 }

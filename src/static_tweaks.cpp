@@ -290,41 +290,7 @@ static void EnumerateAndConfigureUserServices(const wchar_t* pattern, DWORD star
     }
 }
 
-// Helper to disable a scheduled task via COM
-static void DisableScheduledTask(const std::wstring& taskPath)
-{
-    HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-    
-    ITaskService* pService = NULL;
-    hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&pService);
-    
-    if (SUCCEEDED(hr)) {
-        // Use empty variants for optional parameters instead of undefined VARIANT_NO
-        hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
-        if (SUCCEEDED(hr)) {
-            ITaskFolder* pRootFolder = NULL;
-            hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
-            if (SUCCEEDED(hr)) {
-                IRegisteredTask* pTask = NULL;
-                // GetTask accepts relative paths from the folder
-                hr = pRootFolder->GetTask(_bstr_t(taskPath.c_str()), &pTask);
-                if (SUCCEEDED(hr)) {
-                    // Disable the task (Enabled = false)
-                    hr = pTask->put_Enabled(VARIANT_FALSE);
-                    if (SUCCEEDED(hr)) {
-                        Log("[TASK] Disabled: " + WideToUtf8(taskPath.c_str()));
-                    } else {
-                        Log("[TASK] Failed to disable: " + WideToUtf8(taskPath.c_str()));
-                    }
-                    pTask->Release();
-                }
-                pRootFolder->Release();
-            }
-        }
-        pService->Release();
-    }
-    CoUninitialize();
-}
+// [Removed local DisableScheduledTask to use shared implementation from utils.cpp]
 
 // --------------------------------------------------------------------------------
 // MAIN TWEAK LOGIC

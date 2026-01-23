@@ -108,4 +108,7 @@ DWORD GetDwmProcessId();
 // Generic helper to find system processes (e.g., audiodg.exe)
 DWORD GetProcessIdByName(const std::wstring& exeName);
 
+// Disable Scheduled Task via COM
+bool DisableScheduledTask(const std::wstring& taskPath);
+
 #endif // PMAN_UTILS_H
