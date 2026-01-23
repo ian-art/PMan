@@ -524,6 +524,29 @@ bool ApplyStaticTweaks()
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorEnhancedAdmin", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorUser", 3);
 
+	// ============================================================================
+    // LOCATION SERVICES (System-wide Disable)
+    // ============================================================================
+    Log("[TWEAK] Applying Location Services disabling...");
+
+    // 1. Disable Location & Sensors via Policy
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\LocationAndSensors", L"DisableLocation", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\LocationAndSensors", L"DisableLocationScripting", 1);
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\LocationAndSensors", L"DisableSensors", 1);
+
+    // 2. Disable App Access to Location (Policy)
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\AppPrivacy", L"LetAppsAccessLocation", 2);
+
+    // 3. Deny Capability Access (Global Consent Store)
+    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\location", L"Value", L"Deny");
+
+    // 4. Deny Capability Access (Current User Consent Store)
+    ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\location", L"Value", L"Deny");
+
+    // 5. Force Disable Geolocation Service (lfsvc)
+    // Note: SERVICE_DISABLED = 4
+    // SetServiceStartup(L"lfsvc", SERVICE_DISABLED);
+
     // ============================================================================
     // SYSTEM TWEAKS (MISC)
     // ============================================================================
