@@ -225,9 +225,13 @@ See the [LICENSE](LICENSE) file for the full license text.
 <summary><small>Notes</small></summary>
 
 <small>
-All these are AI-generated codes and AI-generated fixes, but everything is my core idea.  
-Tested and running on my Sony VPCCW21FX laptop without issues.  
-Further testing on other devices is required.
+All these are AI-generated codes and AI-generated fixes, but everything is my core idea.<br>
+Tested and running on my Sony VPCCW21FX laptop without issues.<br><br>
+
+Architect: `Ian Anthony R. Tancinco`<br>
+Engineers: `Gemini, GPT, Claude, Kimi, and others.`<br><br>
+
+`Further testing on other devices is required.`
 </small>
 
 </details>
