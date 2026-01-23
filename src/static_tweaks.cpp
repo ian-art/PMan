@@ -689,7 +689,7 @@ bool ApplyStaticTweaks()
     // Note: User-pattern services (ending in *) are handled separately.
     const std::vector<std::wstring> serviceList = {
         L"AJRouter", L"ALG", L"AppIDSvc", L"AppMgmt", L"AppReadiness", L"AppVClient", L"AppXSvc", L"Appinfo", 
-        L"AssignedAccessManagerSvc", L"AudioEndpointBuilder", L"AudioSrv", L"Audiosrv", L"AxInstSV", L"BDESVC", 
+        L"AssignedAccessManagerSvc", L"AxInstSV", L"BDESVC", 
         L"BFE", L"BITS", L"BTAGService", L"BrokerInfrastructure", L"Browser", L"BthAvctpSvc", L"BthHFSrv", 
         L"CDPSvc", L"COMSysApp", L"CertPropSvc", L"ClipSVC", L"CoreMessagingRegistrar", L"CryptSvc", L"CscService", 
         L"DPS", L"DcomLaunch", L"DcpSvc", L"DevQueryBroker", L"DeviceAssociationService", L"DeviceInstall", 
@@ -702,7 +702,7 @@ bool ApplyStaticTweaks()
         L"McpManagementService", L"MicrosoftEdgeElevationService", L"MixedRealityOpenXRSvc", L"MpsSvc", 
         L"MsKeyboardFilter", L"NaturalAuthentication", L"NcaSvc", L"NcbService", L"NcdAutoSetup", L"NetSetupSvc", 
         L"NetTcpPortSharing", L"Netlogon", L"Netman", L"NgcCtnrSvc", L"NgcSvc", L"NlaSvc", L"PNRPAutoReg", 
-        L"PNRPsvc", L"PcaSvc", L"PeerDistSvc", L"PerfHost", L"PhoneSvc", L"PlugPlay", L"PolicyAgent", L"Power", 
+        L"PNRPsvc", L"PcaSvc", L"PeerDistSvc", L"PerfHost", L"PhoneSvc", L"PolicyAgent",
         L"PrintNotify", L"ProfSvc", L"PushToInstall", L"QWAVE", L"RasAuto", L"RasMan", L"RemoteAccess", 
         L"RemoteRegistry", L"RetailDemo", L"RmSvc", L"RpcEptMapper", L"RpcLocator", L"RpcSs", L"SCPolicySvc", 
         L"SCardSvr", L"SDRSVC", L"SEMgrSvc", L"SENS", L"SNMPTRAP", L"SNMPTrap", L"SSDPSRV", L"SamSs", 
