@@ -20,9 +20,20 @@
 #ifndef PMAN_STATIC_TWEAKS_H
 #define PMAN_STATIC_TWEAKS_H
 
+struct TweakConfig {
+    bool network = true;      // TCP/IP, Throttling
+    bool services = true;     // Manual Services
+    bool privacy = true;      // Telemetry, Ads
+    bool explorer = true;     // UI Visuals
+    bool power = true;        // Power plans, Kernel
+    bool location = true;     // Location services
+    bool dvr = true;          // Xbox/GameBar
+    bool bloatware = false;   // UWP Removal (Risk flagged)
+};
+
 // Executes the list of one-time system optimizations.
 // Uses native Windows APIs to avoid AV detection (no cmd/reg.exe).
 // Returns true if tweaks were applied, false if aborted.
-bool ApplyStaticTweaks();
+bool ApplyStaticTweaks(const TweakConfig& config = TweakConfig());
 
 #endif // PMAN_STATIC_TWEAKS_H

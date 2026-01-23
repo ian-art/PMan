@@ -24,4 +24,9 @@
 void LoadConfig();
 bool CreateDefaultConfig(const std::filesystem::path& configPath);
 
+// Tweak Persistence
+struct TweakConfig; // Forward declaration
+void LoadTweakPreferences(TweakConfig& config);
+void SaveTweakPreferences(const TweakConfig& config);
+
 #endif // PMAN_CONFIG_H

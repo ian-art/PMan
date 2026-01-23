@@ -36,6 +36,7 @@
 #include "memory_optimizer.h"
 #include "network_monitor.h"
 #include "input_guardian.h"
+#include "gui_manager.h"
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -690,22 +691,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             OpenUpdatePage();
         }
         else if (wmId == ID_TRAY_APPLY_TWEAKS) {
-            int result = MessageBoxW(hwnd, 
-                L"This will apply a set of one-time system optimizations.\n\n"
-                L"Note: Reboot system for the changes to take effect.\n\n"
-                L"Continue?", 
-                L"Apply System Tweaks", MB_YESNO | MB_ICONQUESTION);
-
-            if (result == IDYES) {
-                // Use unified background worker instead of detach
-                std::lock_guard<std::mutex> lock(g_backgroundQueueMtx);
-                g_backgroundTasks.push_back([]{
-                    if (ApplyStaticTweaks()) {
-                        MessageBoxW(nullptr, L"System tweaks have been applied successfully.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
-                    }
-                });
-                g_backgroundCv.notify_one();
-            }
+            // Open the new GUI Window instead of the old message box
+            GuiManager::ShowTuneUpWindow();
         } 
         else if (wmId == ID_TRAY_REFRESH_GPU) {
             // Simulate Win+Ctrl+Shift+B to reset graphics driver
@@ -1270,9 +1257,16 @@ if (!taskExists)
              }
         }
 
+        // GUI Rendering Integration
+        if (GuiManager::IsWindowOpen()) {
+            GuiManager::RenderFrame();
+        }
+
         // Wait for messages with timeout - efficient polling that doesn't spin CPU
         // Use MsgWaitForMultipleObjects to stay responsive to inputs/shutdown while waiting
-        DWORD waitResult = MsgWaitForMultipleObjects(1, &g_hShutdownEvent, FALSE, 100, QS_ALLINPUT);
+        // Reduced timeout to 16ms (~60 FPS) only when GUI is open to ensure smooth rendering
+        DWORD waitTimeout = GuiManager::IsWindowOpen() ? 16 : 100;
+        DWORD waitResult = MsgWaitForMultipleObjects(1, &g_hShutdownEvent, FALSE, waitTimeout, QS_ALLINPUT);
 
         // [SAFETY] Fix C4189 & Prevent CPU spin if API fails
         if (waitResult == WAIT_FAILED) {
@@ -1327,6 +1321,8 @@ if (!taskExists)
     RidCleanup[0].usUsagePage = 0x01; RidCleanup[0].usUsage = 0x06; RidCleanup[0].dwFlags = RIDEV_REMOVE; RidCleanup[0].hwndTarget = nullptr;
     RidCleanup[1].usUsagePage = 0x01; RidCleanup[1].usUsage = 0x02; RidCleanup[1].dwFlags = RIDEV_REMOVE; RidCleanup[1].hwndTarget = nullptr;
     RegisterRawInputDevices(RidCleanup, 2, sizeof(RAWINPUTDEVICE));
+
+    GuiManager::Shutdown(); // Cleanup DX11/ImGui resources
 
 	UnregisterPowerNotifications();
     if (hwnd) DestroyWindow(hwnd);

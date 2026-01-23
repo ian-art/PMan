@@ -17,23 +17,26 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef VERSION_H
-#define VERSION_H
+#ifndef PMAN_GUI_MANAGER_H
+#define PMAN_GUI_MANAGER_H
 
-#define PMAN_VERSION_MAJOR 3
-#define PMAN_VERSION_MINOR 6
-#define PMAN_VERSION_PATCH 2
-#define PMAN_VERSION_BUILD 2026
+#include <windows.h>
 
-// Helper macros to turn numbers into strings
-#define STRINGIZE2(s) #s
-#define STRINGIZE(s) STRINGIZE2(s)
+namespace GuiManager {
+    // Initializes resources (if needed) and shows the configuration window.
+    // Safe to call repeatedly (will just focus the existing window).
+    void ShowTuneUpWindow();
 
-#define PMAN_FVERSION_STRING STRINGIZE(PMAN_VERSION_MAJOR) "." \
-                            STRINGIZE(PMAN_VERSION_MINOR) "." \
-                            STRINGIZE(PMAN_VERSION_PATCH)
-#define PMAN_PVERSION_STRING STRINGIZE(PMAN_VERSION_MAJOR) "."
+    // Returns true if the GUI window is currently open.
+    // Use this to determine if you should call RenderFrame().
+    bool IsWindowOpen();
 
-#define PMAN_FILE_VERSION_STRING PMAN_FVERSION_STRING "." STRINGIZE(PMAN_VERSION_BUILD)
-#define PMAN_PRODUCT_VERSION_STRING PMAN_PVERSION_STRING STRINGIZE(PMAN_VERSION_BUILD)
-#endif // VERSION_H
+    // Renders one frame of the GUI.
+    // Must be called inside the main application loop when IsWindowOpen() is true.
+    void RenderFrame();
+
+    // Cleans up DirectX and ImGui resources.
+    void Shutdown();
+}
+
+#endif // PMAN_GUI_MANAGER_H

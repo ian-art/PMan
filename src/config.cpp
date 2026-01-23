@@ -22,6 +22,7 @@
 #include "constants.h"
 #include "logger.h"
 #include "utils.h"
+#include "static_tweaks.h" 
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -689,4 +690,96 @@ void LoadConfig()
     { 
         Log(std::string("LoadConfig exception: ") + e.what()); 
     }
+}
+
+void LoadTweakPreferences(TweakConfig& config)
+{
+    std::filesystem::path path = GetConfigPath();
+    std::wifstream f(path);
+    if (!f) return;
+
+    std::wstring line;
+    bool inSection = false;
+
+    while (std::getline(f, line))
+    {
+        // Simple parser specifically for [tweaks_preference]
+        size_t first = line.find_first_not_of(L" \t\r\n");
+        if (first == std::wstring::npos) continue;
+        
+        std::wstring s = line.substr(first);
+        if (s.empty() || s[0] == L';') continue;
+
+        if (s.front() == L'[' && s.back() == L']') {
+            std::wstring sec = s.substr(1, s.size() - 2);
+            inSection = (sec == L"tweaks_preference");
+            continue;
+        }
+
+        if (inSection) {
+            size_t eq = s.find(L'=');
+            if (eq != std::wstring::npos) {
+                std::wstring key = s.substr(0, eq);
+                std::wstring val = s.substr(eq + 1);
+                
+                // Trim
+                while (!key.empty() && iswspace(key.back())) key.pop_back();
+                while (!val.empty() && iswspace(val.front())) val.erase(0, 1);
+                
+                bool bVal = (val == L"true" || val == L"1");
+
+                if (key == L"network") config.network = bVal;
+                else if (key == L"services") config.services = bVal;
+                else if (key == L"privacy") config.privacy = bVal;
+                else if (key == L"explorer") config.explorer = bVal;
+                else if (key == L"power") config.power = bVal;
+                else if (key == L"location") config.location = bVal;
+                else if (key == L"dvr") config.dvr = bVal;
+                else if (key == L"bloatware") config.bloatware = bVal;
+            }
+        }
+    }
+}
+
+void SaveTweakPreferences(const TweakConfig& config)
+{
+    // We append/update the [tweaks_preference] section.
+    // For simplicity in this non-destructive update, we will read all lines,
+    // filter out existing [tweaks_preference] section, and append the new one.
+    
+    std::filesystem::path path = GetConfigPath();
+    std::vector<std::wstring> lines;
+    
+    if (std::filesystem::exists(path)) {
+        std::wifstream f(path);
+        std::wstring line;
+        bool skip = false;
+        while (std::getline(f, line)) {
+            std::wstring trim = line; 
+            size_t first = trim.find_first_not_of(L" \t\r\n");
+            if (first != std::wstring::npos) {
+                trim = trim.substr(first);
+                if (trim == L"[tweaks_preference]") {
+                    skip = true;
+                } else if (trim.front() == L'[') {
+                    skip = false;
+                }
+            }
+            if (!skip) lines.push_back(line);
+        }
+        f.close();
+    }
+
+    std::wofstream out(path);
+    for (const auto& l : lines) out << l << L"\n";
+    
+    out << L"\n[tweaks_preference]\n";
+    out << L"network = " << (config.network ? L"true" : L"false") << L"\n";
+    out << L"services = " << (config.services ? L"true" : L"false") << L"\n";
+    out << L"privacy = " << (config.privacy ? L"true" : L"false") << L"\n";
+    out << L"explorer = " << (config.explorer ? L"true" : L"false") << L"\n";
+    out << L"power = " << (config.power ? L"true" : L"false") << L"\n";
+    out << L"location = " << (config.location ? L"true" : L"false") << L"\n";
+    out << L"dvr = " << (config.dvr ? L"true" : L"false") << L"\n";
+    out << L"bloatware = " << (config.bloatware ? L"true" : L"false") << L"\n";
 }

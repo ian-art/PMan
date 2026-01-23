@@ -296,7 +296,7 @@ static void EnumerateAndConfigureUserServices(const wchar_t* pattern, DWORD star
 // MAIN TWEAK LOGIC
 // --------------------------------------------------------------------------------
 
-bool ApplyStaticTweaks()
+bool ApplyStaticTweaks(const TweakConfig& config)
 {
     // 1. Auto-Create Restore Point
     Log("[SAFETY] Attempting to create System Restore point...");
@@ -321,33 +321,38 @@ bool ApplyStaticTweaks()
     // ============================================================================
     // NETWORK OPTIMIZATIONS
     // ============================================================================
-    Log("[TWEAK] Applying Network Optimizations...");
-    
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces", L"TcpAckFrequency", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces", L"TCPNoDelay", 1);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"NetworkThrottlingIndex", 0xFFFFFFFF);
+    if (config.network) {
+        Log("[TWEAK] Applying Network Optimizations...");
+        
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces", L"TcpAckFrequency", 1);
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces", L"TCPNoDelay", 1);
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"NetworkThrottlingIndex", 0xFFFFFFFF);
+    }
 
     // ============================================================================
     // SYSTEM RESPONSIVENESS
     // ============================================================================
-    Log("[TWEAK] Applying System Responsiveness tweaks...");
-    
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"SystemResponsiveness", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", L"GPU Priority", 8);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", L"Priority", 6);
-    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", L"Scheduling Category", L"High");
+    if (config.power) {
+        Log("[TWEAK] Applying System Responsiveness tweaks...");
+        
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"SystemResponsiveness", 0);
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", L"GPU Priority", 8);
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", L"Priority", 6);
+        ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", L"Scheduling Category", L"High");
 
-    // ============================================================================
-    // KERNEL & MEMORY
-    // ============================================================================
-    Log("[TWEAK] Applying Kernel & Memory settings...");
-    
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"LargeSystemCache", 0);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"DisablePagingExecutive", 1);
+        // ============================================================================
+        // KERNEL & MEMORY
+        // ============================================================================
+        Log("[TWEAK] Applying Kernel & Memory settings...");
+        
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"LargeSystemCache", 0);
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"DisablePagingExecutive", 1);
+    }
 
     // ============================================================================
     // PRIVACY & TELEMETRY
     // ============================================================================
+    if (config.privacy) {
     Log("[TWEAK] Applying Privacy & Telemetry settings...");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\UserProfileEngagement", L"ScoobeSystemSettingEnabled", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\AdvertisingInfo", L"Enabled", 0);
@@ -366,10 +371,12 @@ bool ApplyStaticTweaks()
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\AppCompat", L"DisableInventory", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\AppCompat", L"AITEnable", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Search", L"AllowSearchToUseLocation", 0);
+    }
 
     // ============================================================================
     // CONTENT DELIVERY / ADS / SUGGESTIONS
     // ============================================================================
+    if (config.privacy) {
     Log("[TWEAK] Applying Content Delivery & Ads blocking...");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", L"RotatingLockScreenEnabled", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", L"RotatingLockScreenOverlayEnabled", 0);
@@ -395,10 +402,12 @@ bool ApplyStaticTweaks()
     DeleteRegistryKey(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager\\SuggestedApps");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\CloudContent", L"DisableWindowsConsumerFeatures", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\CloudContent", L"DisableSoftLanding", 1);
+    }
 
     // ============================================================================
     // EXPLORER & UI BEHAVIOR
     // ============================================================================
+    if (config.explorer) {
     Log("[TWEAK] Applying Explorer & UI Behavior tweaks...");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"ShowSyncProviderNotifications", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"Hidden", 0);
@@ -467,10 +476,12 @@ bool ApplyStaticTweaks()
     DeleteRegistryKey(HKEY_CURRENT_USER, L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\Bags");
     DeleteRegistryKey(HKEY_CURRENT_USER, L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU");
     ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\Bags\\AllFolders\\Shell", L"FolderType", L"NotSpecified");
+    }
 
     // ============================================================================
     // PERFORMANCE & MEMORY MANAGEMENT
     // ============================================================================
+    if (config.power) {
     Log("[TWEAK] Applying Performance & Memory Management tweaks...");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"DisablePagingExecutive", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"LargeSystemCache", 1);
@@ -481,10 +492,12 @@ bool ApplyStaticTweaks()
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"SwapfileControl", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"SystemResponsiveness", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"NetworkThrottlingIndex", 4294967295);
+    }
     
     // ============================================================================
     // NETWORK & TCP/IP
     // ============================================================================
+    if (config.network) {
     Log("[TWEAK] Applying Network & TCP/IP tweaks...");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Tcpip6\\Parameters", L"DisabledComponents", 32);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters", L"DefaultTTL", 100);
@@ -495,10 +508,12 @@ bool ApplyStaticTweaks()
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"AutoShareServer", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Ndu", L"Start", 4);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"IRPStackSize", 30);
+    }
 
     // ============================================================================
     // GRAPHICS & DWM
     // ============================================================================
+    if (config.power) {
     Log("[TWEAK] Applying Graphics & DWM settings...");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\GraphicsDrivers", L"HwSchMode", 2);
 
@@ -510,10 +525,12 @@ bool ApplyStaticTweaks()
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Citrix", L"EnableVisualEffect", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Power\\PowerSettings\\54533251-82be-4824-96c1-47b60b740d00\\94d3a615-a899-4ac5-ae2b-e4d8f634367f", L"Attributes", 1);
     ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control", L"WaitToKillServiceTimeout", L"1000");
+    }
 
     // ============================================================================
     // SECURITY POLICIES
     // ============================================================================
+    if (config.privacy) {
     Log("[TWEAK] Applying Security Policies...");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\SecurityProviders\\WDigest", L"Negotiate", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\SecurityProviders\\WDigest", L"UseLogonCredential", 0);
@@ -523,10 +540,12 @@ bool ApplyStaticTweaks()
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorAdmin", 5);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorEnhancedAdmin", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorUser", 3);
+    }
 
 	// ============================================================================
     // LOCATION SERVICES (System-wide Disable)
     // ============================================================================
+    if (config.location) {
     Log("[TWEAK] Applying Location Services disabling...");
 
     // 1. Disable Location & Sensors via Policy
@@ -546,10 +565,12 @@ bool ApplyStaticTweaks()
     // 5. Force Disable Geolocation Service (lfsvc)
     // Note: SERVICE_DISABLED = 4
     // SetServiceStartup(L"lfsvc", SERVICE_DISABLED);
+    }
 
     // ============================================================================
     // SYSTEM TWEAKS (MISC)
     // ============================================================================
+    if (config.explorer) {
     Log("[TWEAK] Applying System Miscellaneous tweaks...");
     ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer", L"Max Cached Icons", L"8192");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", 0);
@@ -595,18 +616,22 @@ bool ApplyStaticTweaks()
     ConfigureRegistry(HKEY_CLASSES_ROOT, L"CLSID\\{018D5C66-4533-4307-9B53-224DE2ED1FE6}", L"System.IsPinnedToNameSpaceTree", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\CloudContent\\DisableWindowsConsumerFeatures", L"", 1);
 	ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32", L"", L"");
+    }
 
     // ============================================================================
     // NETWORK DISCIPLINE
     // ============================================================================
+    if (config.network) {
     Log("[TWEAK] Applying Network Discipline...");
     // Disable automatic discovery of network folders and printers (NoNetCrawling)
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"NoNetCrawling", 1);
+    }
 
     // ============================================================================
     // TELEMETRY TASKS
     // ============================================================================
-    Log("[TWEAK] Suppressing Telemetry Scheduled Tasks...");
+    if (config.privacy) {
+        Log("[TWEAK] Suppressing Telemetry Scheduled Tasks...");
     const std::vector<std::wstring> telemetryTasks = {
         L"Microsoft\\Windows\\Application Experience\\Microsoft Compatibility Appraiser",
         L"Microsoft\\Windows\\Application Experience\\ProgramDataUpdater",
@@ -622,10 +647,12 @@ bool ApplyStaticTweaks()
     for (const auto& task : telemetryTasks) {
         DisableScheduledTask(task);
     }
+    }
 
     // ============================================================================
     // POLICY & PERSISTENCE (AV-SAFE)
     // ============================================================================
+    if (config.privacy) {
     Log("[TWEAK] Applying Policy & Persistence...");
 
     // 1. Update Deferral (Not Disabling)
@@ -638,19 +665,23 @@ bool ApplyStaticTweaks()
     // 2. Delivery Optimization Limits
     // DODownloadMode = 0 (HTTP Only, no P2P). Reduces background upload/download bandwidth.
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\DeliveryOptimization", L"DODownloadMode", 0);
+    }
     
     // 3. Power Profile Tuning (Unhide Advanced Settings for User Tuning)
+    if (config.power) {
     // Processor Idle Demotion Threshold
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Power\\PowerSettings\\54533251-82be-4824-96c1-47b60b740d00\\4b92d758-5a24-4851-a470-815d78aee119", L"Attributes", 2);
     // Processor Idle Promote Threshold
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Power\\PowerSettings\\54533251-82be-4824-96c1-47b60b740d00\\7b224883-b3cc-4d79-819f-8374152cbe7c", L"Attributes", 2);
     // Latency Sensitivity Hint (Unhide)
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Power\\PowerSettings\\54533251-82be-4824-96c1-47b60b740d00\\619b7505-003b-4e82-b7a6-4dd29c300971", L"Attributes", 2);
+    }
 
     // ============================================================================
     // UWP / BACKGROUND TASKS
     // ============================================================================
-    Log("[TWEAK] Applying UWP & Background Tasks cleanup...");
+    if (config.bloatware) {
+	Log("[TWEAK] Applying UWP & Background Tasks cleanup...");
     DeleteRegistryKey(HKEY_CLASSES_ROOT, L"Extensions\\ContractId\\Windows.BackgroundTasks\\PackageId\\46928bounde.EclipseManager_2.2.4.51_neutral__a5h4egax66k6y");
     DeleteRegistryKey(HKEY_CLASSES_ROOT, L"Extensions\\ContractId\\Windows.BackgroundTasks\\PackageId\\ActiproSoftwareLLC.562882FEEB491_2.6.18.18_neutral__24pqs290vpjk0");
     DeleteRegistryKey(HKEY_CLASSES_ROOT, L"Extensions\\ContractId\\Windows.BackgroundTasks\\PackageId\\Microsoft.MicrosoftOfficeHub_17.7909.7600.0_x64__8wekyb3d8bbwe");
@@ -659,19 +690,23 @@ bool ApplyStaticTweaks()
     DeleteRegistryKey(HKEY_CLASSES_ROOT, L"Extensions\\ContractId\\Windows.BackgroundTasks\\PackageId\\Microsoft.XboxGameCallableUI_1000.16299.15.0_neutral_neutral_cw5n1h2txyewy");
     ConfigureRegistry(HKEY_CLASSES_ROOT, L"CLSID\\{018D5C66-4533-4307-9B53-224DE2ED1FE6}\\ShellFolder", L"Attributes", 0x903a0004);
     ConfigureRegistry(HKEY_CLASSES_ROOT, L"Wow6432Node\\CLSID\\{018D5C66-4533-4307-9B53-224DE2ED1FE6}\\ShellFolder", L"Attributes", 0x903a0004);
+    }
 
     // ============================================================================
     // GAME DVR & XBOX
     // ============================================================================
+    if (config.dvr) {
     Log("[TWEAK] Applying Game DVR & Xbox disabling...");
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR", L"AppCaptureEnabled", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"System\\GameConfigStore", L"GameDVR_Enabled", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\GameDVR", L"AllowGameDVR", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\PolicyManager\\default\\ApplicationManagement\\AllowGameDVR", L"value", 0);
+    }
 
     // ============================================================================
     // FILE ASSOCIATIONS (HTA)
     // ============================================================================
+    if (config.explorer) {
     Log("[TWEAK] Applying File Associations...");
     ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.hta\\OpenWithProgids", L"htafile", L"");
 
@@ -679,10 +714,12 @@ bool ApplyStaticTweaks()
     // REMOVE PIN TO QUICKACCES IN RECYCLEBIN
     // ============================================================================
     ConfigureRegistryString(HKEY_CURRENT_USER, L"Software\\Classes\\Folder\\shell\\pintohome", L"AppliesTo", L"System.ParsingName:<>\"::{645FF040-5081-101B-9F08-00AA002F954E}\"");
+    }
 
 	// ============================================================================
 	// WINDOWS SERVICES CONFIGURATION
 	// ============================================================================
+    if (config.services) {
 	Log("[TWEAK] Configuring Windows Services (Set to Manual)...");
 
     // List of services to set to DEMAND_START (Manual).
@@ -763,6 +800,7 @@ bool ApplyStaticTweaks()
         // Strict adherence to "Minimal" spec: All services set to Manual, no exceptions.
 		EnumerateAndConfigureUserServices(pattern, SERVICE_DEMAND_START);
 	}
+    }
 
 	Log("[TWEAK] System optimizations applied successfully.");
     Log("*********************************");
