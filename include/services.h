@@ -92,6 +92,9 @@ public:
     
     // Suspend with granular bypass control
     bool SuspendService(const std::wstring& serviceName, BypassMode mode = BypassMode::None);
+
+    // Permanently reconfigure service to Manual start and stop it
+    bool DisableServicePermanent(const std::wstring& serviceName);
     
     bool ResumeService(const std::wstring& serviceName);
 

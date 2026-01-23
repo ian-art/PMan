@@ -742,6 +742,43 @@ bool WindowsServiceManager::SuspendService(const std::wstring& serviceName, Bypa
     return false;
 }
 
+bool WindowsServiceManager::DisableServicePermanent(const std::wstring& serviceName)
+{
+    // Service Killer Implementation
+    std::lock_guard lock(m_mutex);
+
+    // RAII Handle for Service
+    ScHandle hSvc(OpenServiceW(m_scManager.get(), serviceName.c_str(), 
+        SERVICE_CHANGE_CONFIG | SERVICE_STOP | SERVICE_QUERY_STATUS));
+
+    if (!hSvc) {
+        Log("[SERVICE] Disable failed: Could not open " + WideToUtf8(serviceName.c_str()));
+        return false;
+    }
+
+    // 1. Reconfigure to Manual Start (SERVICE_DEMAND_START)
+    if (!ChangeServiceConfigW(hSvc.get(), SERVICE_NO_CHANGE, SERVICE_DEMAND_START, 
+        SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr)) {
+        Log("[SERVICE] Failed to change config for " + WideToUtf8(serviceName.c_str()) + 
+            ": " + std::to_string(GetLastError()));
+        return false;
+    }
+
+    // 2. Stop the service if running
+    SERVICE_STATUS status;
+    if (QueryServiceStatus(hSvc.get(), &status) && status.dwCurrentState != SERVICE_STOPPED) {
+        if (ControlService(hSvc.get(), SERVICE_CONTROL_STOP, &status)) {
+            Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " set to MANUAL and STOPPED.");
+            return true;
+        }
+    } else {
+        Log("[SERVICE] " + WideToUtf8(serviceName.c_str()) + " set to MANUAL (Already stopped).");
+        return true;
+    }
+
+    return true;
+}
+
 // Helper to process service resumption without lock recursion
 static bool ResumeServiceState(WindowsServiceManager::ServiceState& state, const std::wstring& serviceName)
 {
