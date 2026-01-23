@@ -136,7 +136,7 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 
 | Category     | Details                               |
 | ------------ | ------------------------------------- |
-| Language     | C++17                                 |
+| Language     | C++20                                 |
 | Architecture | Event‑Driven (ETW + IOCP + WinEvents) |
 | Dependencies | Native Win32 API only                 |
 | Libraries    | `ntdll.lib`, `tdh.lib`                |
