@@ -218,6 +218,15 @@ This project is licensed under the **GNU General Public License v3.0** (GPL-3.0)
 
 See the [LICENSE](LICENSE) file for the full license text.
 
+## Third-Party Components
+
+This project includes the following third-party software:
+
+- **Dear ImGui**
+  - Copyright (c) 2014–2026 Omar Cornut
+  - License: MIT
+  - https://github.com/ocornut/imgui
+
 **VirusTotal**
 `e573a3ec40b681f7d9ef89b75d6166a43a931c0454a3b2952ab0cd8794641876`
 
