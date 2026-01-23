@@ -19,6 +19,8 @@
  
 #include <windows.h> // Include Windows FIRST
 #include <objbase.h>
+#include <wbemidl.h> // WMI Interface
+#include <comdef.h>
 #include "restore.h"
 #include "logger.h"
 #include "globals.h" 
@@ -29,6 +31,8 @@
 #include <fstream>
 #include <filesystem>
 #include <powrprof.h>
+
+#pragma comment(lib, "wbemuuid.lib") // Link WMI
 #pragma comment(lib, "PowrProf.lib")
 #pragma comment(lib, "Ole32.lib") 
 
@@ -92,6 +96,99 @@ static void MarkRestorePointAsCreated()
     }
 }
 
+// Native WMI implementation to Enable System Restore without spawning PowerShell
+static bool EnableSystemRestoreWMI()
+{
+    HRESULT hr;
+    
+    // 1. Initialize COM (Assume already init by Main, but safe to re-init)
+    // CoInitializeEx(0, COINIT_MULTITHREADED); // Handled by caller/main
+
+    // 2. Setup WMI Security
+    hr = CoInitializeSecurity(
+        NULL, -1, NULL, NULL,
+        RPC_C_AUTHN_LEVEL_DEFAULT, 
+        RPC_C_IMP_LEVEL_IMPERSONATE, 
+        NULL, EOAC_NONE, NULL);
+    
+    // RPC_E_TOO_LATE is fine (security already set)
+    if (FAILED(hr) && hr != RPC_E_TOO_LATE) return false;
+
+    // 3. Connect to WMI (Root\Default contains SystemRestore class)
+    IWbemLocator* pLoc = NULL;
+    hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
+    if (FAILED(hr)) return false;
+
+    IWbemServices* pSvc = NULL;
+    hr = pLoc->ConnectServer(
+        _bstr_t(L"ROOT\\DEFAULT"), 
+        NULL, NULL, 0, NULL, 0, 0, &pSvc);
+
+    pLoc->Release();
+    if (FAILED(hr)) return false;
+
+    // 4. Set Proxy Blanket (Security on the connection)
+    hr = CoSetProxyBlanket(
+        pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL, 
+        RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
+
+    if (FAILED(hr)) { pSvc->Release(); return false; }
+
+    // 5. Execute "Enable" Method on SystemRestore Class
+    // Method Signature: uint32 Enable(String Drive)
+    _bstr_t className(L"SystemRestore");
+    _bstr_t methodName(L"Enable");
+
+    // Get Class Object to find method definition
+    IWbemClassObject* pClass = NULL;
+    hr = pSvc->GetObject(className, 0, NULL, &pClass, NULL);
+    if (FAILED(hr)) { pSvc->Release(); return false; }
+
+    // Get Method Input Parameters signature
+    IWbemClassObject* pInParamsDefinition = NULL;
+    hr = pClass->GetMethod(methodName, 0, &pInParamsDefinition, NULL);
+    pClass->Release();
+    if (FAILED(hr)) { pSvc->Release(); return false; }
+
+    // Create Instance of Input Parameters
+    IWbemClassObject* pClassInstance = NULL;
+    hr = pInParamsDefinition->SpawnInstance(0, &pClassInstance);
+    pInParamsDefinition->Release();
+    if (FAILED(hr)) { pSvc->Release(); return false; }
+
+    // Set "Drive" Parameter to "C:\" (System Drive)
+    // We assume C:\ for simplicity, or fetch GetSystemDirectory
+    wchar_t sysPath[MAX_PATH];
+    GetSystemDirectoryW(sysPath, MAX_PATH);
+    sysPath[3] = 0; // Truncate to "C:\"
+
+    VARIANT varCommand;
+    varCommand.vt = VT_BSTR;
+    varCommand.bstrVal = _bstr_t(sysPath);
+    hr = pClassInstance->Put(L"Drive", 0, &varCommand, 0);
+
+    if (FAILED(hr)) {
+        pClassInstance->Release();
+        pSvc->Release();
+        return false;
+    }
+
+    // Execute Method
+    IWbemClassObject* pOutParams = NULL;
+    hr = pSvc->ExecMethod(className, methodName, 0, NULL, pClassInstance, &pOutParams, NULL);
+
+    // Cleanup
+    bool success = SUCCEEDED(hr);
+    if (pOutParams) pOutParams->Release();
+    pClassInstance->Release();
+    pSvc->Release();
+
+    if (success) Log("[BACKUP] System Protection enabled via WMI (AV-Safe)");
+    else Log("[BACKUP] Failed to enable System Protection via WMI: 0x" + std::to_string(hr));
+
+    return success;
+}
+
 bool CreateRestorePoint()
 {
     // Fix: Ensure System Restore Service (srservice) is enabled and running
@@ -121,6 +218,15 @@ bool CreateRestorePoint()
                 CloseServiceHandle(hSvc);
             }
             CloseServiceHandle(hSCM);
+        }
+    }
+
+    // Force-Enable System Protection
+    {
+        if (EnableSystemRestoreWMI()) {
+             // Success - proceed immediately
+        } else {
+             Log("[BACKUP] Warning: Could not enforce System Protection. Restore point creation may fail silently.");
         }
     }
 
