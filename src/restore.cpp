@@ -612,7 +612,11 @@ void LaunchRegistryGuard(DWORD originalVal)
     GUID* pStartupScheme = nullptr;
     if (PowerGetActiveScheme(nullptr, &pStartupScheme) == ERROR_SUCCESS)
     {
-        StringFromGUID2(*pStartupScheme, state.powerSchemeGuid, 64);
+        // Fix C6031: Validate GUID string conversion
+        if (StringFromGUID2(*pStartupScheme, state.powerSchemeGuid, 64) == 0)
+        {
+            state.powerSchemeGuid[0] = L'\0'; // Ensure valid state on failure
+        }
         LocalFree(pStartupScheme);
     }
 

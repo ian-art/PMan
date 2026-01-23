@@ -748,7 +748,8 @@ void DetectOSCapabilities()
                 // Logic: Even = Native, Odd = VM
                 // We use TickCount to make it look like a random dynamic ID
                 bool isVm = IsKnownEmulator();
-                uint32_t secretId = GetTickCount(); 
+                // Fix C28159: Use 64-bit tick count to avoid 49-day overflow warnings
+                uint32_t secretId = static_cast<uint32_t>(GetTickCount64()); 
                 
                 // Force Parity
                 if (isVm) {
