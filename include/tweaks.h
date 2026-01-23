@@ -41,6 +41,9 @@ void SetTimerCoalescingControl(int mode);
 // Tiered Optimization (Tier 1: Core, Tier 2: Worker, Tier 3: Launcher)
 void ApplyTieredOptimization(DWORD pid, int mode, bool isGameChild);
 
+// Apply Anti-Bloat Registry Policies
+void ApplyPrivacyPolicies();
+
 // Memory pressure check
 bool IsUnderMemoryPressure();
 

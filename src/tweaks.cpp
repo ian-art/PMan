@@ -1316,3 +1316,19 @@ void ApplyTieredOptimization(DWORD pid, int mode, bool isGameChild)
     
     CloseHandle(hProcess);
 }
+
+void ApplyPrivacyPolicies()
+{
+    // [Roadmap Phase 4] Bloat Blocker - Policy Keys
+    // 1. Disable Windows Consumer Features (Candy Crush, etc.)
+    RegWriteDwordCached(HKEY_LOCAL_MACHINE, 
+        L"SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent", 
+        L"DisableWindowsConsumerFeatures", 1);
+
+    // 2. Restrict Telemetry (AllowTelemetry = 0)
+    RegWriteDwordCached(HKEY_LOCAL_MACHINE, 
+        L"SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection", 
+        L"AllowTelemetry", 0);
+
+    Log("[TWEAK] Privacy policies applied (Consumer Features Disabled, Telemetry Restricted).");
+}
