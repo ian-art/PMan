@@ -529,7 +529,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             // Pause Idle Optimization (prevent CPU limiting during background tasks)
             bool idlePaused = g_pauseIdle.load();
             AppendMenuW(hControlMenu, MF_STRING | (idlePaused ? MF_CHECKED : 0), ID_TRAY_PAUSE_IDLE, L"Passive Mode");
-
+			AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_APPLY_TWEAKS, L"TuneUp System");
             AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_REFRESH_GPU, L"Refresh GPU");
