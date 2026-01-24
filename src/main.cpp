@@ -51,6 +51,8 @@
 #include <mutex>
 #include <condition_variable>
 #include <functional>
+#include <dwmapi.h>   // Required for DWM Dark Mode
+#include <uxtheme.h>  // Required for Theme definitions
 
 #pragma comment(lib, "PowrProf.lib") 
 #pragma comment(lib, "Advapi32.lib")
@@ -61,6 +63,8 @@
 #pragma comment(lib, "Pdh.lib") // For BITS monitoring
 #pragma comment(lib, "Gdi32.lib") // Required for CreateFontW/DeleteObject
 #pragma comment(lib, "Comctl32.lib") // Required for TaskDialog
+#pragma comment(lib, "Dwmapi.lib") // DWM
+#pragma comment(lib, "Uxtheme.lib") // UxTheme
 
 // Force Linker to embed Manifest for Visual Styles (Required for TaskDialog)
 #pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
@@ -72,6 +76,72 @@ HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
 static GUID* g_pSleepScheme = nullptr;
 static uint64_t g_resumeStabilizationTime = 0; // Replaces detached sleep thread;
+
+// --- Dark Mode Definitions (Undocumented/Semi-Documented) ---
+enum PreferredAppMode {
+    AppMode_Default = 0,
+    AppMode_AllowDark = 1,
+    AppMode_ForceDark = 2,
+    AppMode_ForceLight = 3,
+    AppMode_Max = 4
+};
+
+// Typedefs for uxtheme.dll functions
+using fnSetPreferredAppMode = PreferredAppMode(WINAPI*)(PreferredAppMode appMode);
+using fnAllowDarkModeForWindow = BOOL (WINAPI*)(HWND hWnd, BOOL allow);
+using fnFlushMenuThemes = void(WINAPI*)();
+
+// --- Dark Mode Helper ---
+static fnAllowDarkModeForWindow g_AllowDarkModeForWindow = nullptr;
+
+static void InitDarkMode() {
+    HMODULE hUxTheme = LoadLibraryExW(L"uxtheme.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!hUxTheme) return;
+
+    auto SetPreferredAppMode =
+        reinterpret_cast<fnSetPreferredAppMode>(GetProcAddress(hUxTheme, MAKEINTRESOURCEA(135)));
+
+    g_AllowDarkModeForWindow =
+        reinterpret_cast<fnAllowDarkModeForWindow>(GetProcAddress(hUxTheme, MAKEINTRESOURCEA(133)));
+
+    if (SetPreferredAppMode) {
+        SetPreferredAppMode(AppMode_AllowDark); // FOLLOW SYSTEM
+    }
+
+    FreeLibrary(hUxTheme);
+}
+
+// --- Refresh Menu Theme Helper ---
+static void RefreshMenuTheme() {
+    // Ordinal 136 is FlushMenuThemes
+    HMODULE hUxTheme = LoadLibraryExW(L"uxtheme.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (hUxTheme) {
+        auto FlushMenuThemes = reinterpret_cast<fnFlushMenuThemes>(GetProcAddress(hUxTheme, MAKEINTRESOURCEA(136)));
+        if (FlushMenuThemes) {
+            FlushMenuThemes();
+        }
+        FreeLibrary(hUxTheme);
+    }
+}
+
+// --- Detect if Windows is in Dark Mode ---
+static bool IsSystemInDarkMode() {
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, 
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 
+        0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        
+        DWORD value = 0;
+        DWORD size = sizeof(value);
+        if (RegQueryValueExW(hKey, L"AppsUseLightTheme", nullptr, nullptr, 
+            (LPBYTE)&value, &size) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            return (value == 0); // 0 = Dark Mode, 1 = Light Mode
+        }
+        RegCloseKey(hKey);
+    }
+    return false; // Default to Light Mode if detection fails
+}
 
 // Removed LaunchProcessAsync (Dead Code / Unsafe Detach)
 // All process launches now use synchronous CreateProcessW or the unified background worker.
@@ -222,6 +292,11 @@ public:
         g_hLogWindow = CreateWindowW(L"PManLogViewer", L"Priority Manager - Live Log",
             WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
             hOwner, nullptr, g_hInst, nullptr);
+
+        // Apply Dark Mode to Title Bar
+        BOOL value = TRUE;
+        DwmSetWindowAttribute(g_hLogWindow, DWMWA_USE_IMMERSIVE_DARK_MODE, &value, sizeof(value));
+
         ShowWindow(g_hLogWindow, SW_SHOW);
 		// [FIX] Force flush buffered logs to disk immediately when Viewer opens.
         // This ensures the viewer has a file to read even if no new logs occur.
@@ -446,12 +521,42 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         if (!g_nid.hIcon) g_nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
         wcscpy_s(g_nid.szTip, L"Priority Manager");
         Shell_NotifyIconW(NIM_ADD, &g_nid);
+        
+        // [DARK MODE] Enable Dark Mode for hidden window title bar (Follow System Theme)
+        {
+            const BOOL useDarkMode = IsSystemInDarkMode() ? TRUE : FALSE;
+		DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &useDarkMode, sizeof(useDarkMode));
+
+		if (g_AllowDarkModeForWindow) {
+			g_AllowDarkModeForWindow(hwnd, useDarkMode);
+		}
+
+		SetWindowTheme(hwnd,
+			useDarkMode ? L"DarkMode_Explorer" : L"Explorer",
+			nullptr);
+
+        }
+        return 0;
+
+    // [DARK MODE] Refresh Menu Themes if system theme changes
+    case WM_THEMECHANGED:
+    case WM_SETTINGCHANGE:
+        RefreshMenuTheme();
+        // Re-apply dark mode to hidden window
+        {
+            BOOL useDarkMode = IsSystemInDarkMode() ? TRUE : FALSE;
+            DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &useDarkMode, sizeof(useDarkMode));
+        }
         return 0;
 
     case WM_TRAYICON:
 		if (lParam == WM_RBUTTONUP || lParam == WM_LBUTTONUP)
         {
             SetForegroundWindow(hwnd);
+            
+            // Apply Dark Mode to owner window before creating menu
+            BOOL useDarkMode = IsSystemInDarkMode() ? TRUE : FALSE;
+            DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &useDarkMode, sizeof(useDarkMode));
             
             // Detect best available editor (Priority: Notepad++ -> VS Code -> Sublime)
             std::wstring editorPath, editorName;
@@ -460,6 +565,24 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             else if ((editorPath = GetRegisteredAppPath(L"sublime_text.exe")) != L"") editorName = L" [Sublime]";
 
             HMENU hMenu = CreatePopupMenu();
+
+			/* useDarkMode already declared earlier in WM_TRAYICON scope */
+			if (g_AllowDarkModeForWindow) {
+				g_AllowDarkModeForWindow(hwnd, useDarkMode);
+			}
+
+			SetWindowTheme(hwnd,
+				useDarkMode ? L"DarkMode_Explorer" : L"Explorer",
+				nullptr);
+
+            // Enable dark mode rendering for the menu itself
+            if (IsSystemInDarkMode()) {
+                MENUINFO mi = { sizeof(MENUINFO) };
+                mi.fMask = MIM_STYLE | MIM_APPLYTOSUBMENUS;
+                mi.dwStyle = MNS_CHECKORBMP | MNS_AUTODISMISS;
+                SetMenuInfo(hMenu, &mi);
+            }
+            
             bool paused = g_userPaused.load();
 
             // 1. Dashboards Submenu
@@ -530,7 +653,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
 
             POINT pt; GetCursorPos(&pt);
-            TrackPopupMenu(hMenu, TPM_BOTTOMALIGN | TPM_RIGHTALIGN, pt.x, pt.y, 0, hwnd, nullptr);
+            TrackPopupMenuEx(
+				hMenu,
+				TPM_BOTTOMALIGN | TPM_RIGHTALIGN | TPM_NOANIMATION,
+				pt.x,
+				pt.y,
+				hwnd,
+				nullptr
+			);
             
             DestroyMenu(hControlMenu);
             DestroyMenu(hConfigMenu);
@@ -696,7 +826,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 int wmain(int argc, wchar_t* argv[])
 {
 	try {
-		
+	
+    // [DARK MODE] Initialize System Dark Mode support for Win32 Controls
+    InitDarkMode();
+    
     // Initialize Telemetry-Safe Logger
     InitLogger();
 
