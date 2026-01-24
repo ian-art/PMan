@@ -24,6 +24,8 @@
 
 #include <d3d11.h>
 #include <tchar.h>
+#include <string>
+#include <filesystem>
 
 #include "imgui.h"
 #include "imgui_impl_win32.h"
@@ -60,6 +62,10 @@ namespace GuiManager {
     };
 
     static TweakConfig g_config;
+
+    // Fonts
+    static ImFont* g_pFontRegular = nullptr;
+    static ImFont* g_pFontTitle   = nullptr;
 
     // ============================================================================================
     // Forward declarations
@@ -158,6 +164,25 @@ namespace GuiManager {
 
         ApplyModern3DStyle();
 
+        // Load System Fonts (Segoe UI)
+        char winFolder[MAX_PATH];
+        if (GetWindowsDirectoryA(winFolder, MAX_PATH)) {
+            std::string fontPath = std::string(winFolder) + "\\Fonts\\segoeui.ttf";
+            std::string boldPath = std::string(winFolder) + "\\Fonts\\segoeb.ttf"; // Segoe UI Bold
+
+            ImGuiIO& io = ImGui::GetIO();
+            
+            // Main Font (18px)
+            if (std::filesystem::exists(fontPath)) {
+                g_pFontRegular = io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 18.0f);
+            }
+            
+            // Title Font (32px)
+            if (std::filesystem::exists(boldPath)) {
+                g_pFontTitle = io.Fonts->AddFontFromFileTTF(boldPath.c_str(), 32.0f);
+            }
+        }
+
         ImGui_ImplWin32_Init(g_hwnd);
         ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
 
@@ -219,6 +244,9 @@ namespace GuiManager {
             ImGuiWindowFlags_NoSavedSettings
         );
 
+        // Apply Regular Font Global
+        if (g_pFontRegular) ImGui::PushFont(g_pFontRegular);
+
         // ----------------------------------------------------------------------------------------
         // DRAGGABLE HEADER AREA
         // ----------------------------------------------------------------------------------------
@@ -242,18 +270,19 @@ namespace GuiManager {
         // CENTERED TITLE
         // ----------------------------------------------------------------------------------------
         const char* title = "PMAN TWEAKS";
-        float titleScale = 2.2f;
+        
+        // Use loaded Title Font if available, otherwise fallback to scaling
+        if (g_pFontTitle) ImGui::PushFont(g_pFontTitle);
+        else ImGui::SetWindowFontScale(2.2f);
 
-        ImGui::SetWindowFontScale(titleScale);
         ImVec2 textSize = ImGui::CalcTextSize(title);
-        ImGui::SetWindowFontScale(1.0f);
-
         float centerX = (ImGui::GetWindowWidth() - textSize.x) * 0.5f;
-        ImGui::SetCursorPos(ImVec2(centerX, 20));
+        ImGui::SetCursorPos(ImVec2(centerX, 20)); // Vertically centered in header
 
-        ImGui::SetWindowFontScale(titleScale);
         ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "%s", title);
-        ImGui::SetWindowFontScale(1.0f);
+
+        if (g_pFontTitle) ImGui::PopFont();
+        else ImGui::SetWindowFontScale(1.0f);
 
         ImGui::SetCursorPosY(headerHeight);
         ImGui::Separator();
@@ -351,6 +380,8 @@ namespace GuiManager {
             g_isOpen = false;
             ShowWindow(g_hwnd, SW_HIDE);
         }
+
+        if (g_pFontRegular) ImGui::PopFont(); // Pop Main Font
 
         ImGui::End();
 
