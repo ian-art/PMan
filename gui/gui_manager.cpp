@@ -366,7 +366,7 @@ namespace GuiManager {
                 SaveTweakPreferences(g_config);
                 MessageBoxW(
                     g_hwnd,
-                    L"Selected optimizations applied.\nRestart recommended.",
+                    L"Your selected optimizations have been applied.",
                     L"Success",
                     MB_OK | MB_ICONINFORMATION
                 );

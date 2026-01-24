@@ -299,18 +299,31 @@ static void EnumerateAndConfigureUserServices(const wchar_t* pattern, DWORD star
 bool ApplyStaticTweaks(const TweakConfig& config)
 {
     // 1. Auto-Create Restore Point
-    Log("[SAFETY] Attempting to create System Restore point...");
-    if (!CreateRestorePoint()) {
-        int result = MessageBoxW(nullptr, 
-            L"PMan failed to create an automatic System Restore point.\n\n"
-            L"It is HIGHLY RECOMMENDED that you create one manually before proceeding.\n\n"
-            L"Do you want to continue anyway?", 
-            L"Safety Warning", MB_YESNO | MB_ICONWARNING | MB_TOPMOST);
-        
-        if (result == IDNO) {
-            Log("[SAFETY] User aborted tweaks due to failed restore point.");
-            return false;
+    static bool s_sessionRestorePointCreated = false;
+
+    if (!s_sessionRestorePointCreated)
+    {
+        Log("[SAFETY] Attempting to create System Restore point...");
+
+        // Visual indication that the app is busy (prevents "is it broken?" panic)
+        HCURSOR hOriginalCursor = SetCursor(LoadCursor(nullptr, IDC_WAIT));
+        bool rpSuccess = CreateRestorePoint();
+        SetCursor(hOriginalCursor); // Restore cursor
+
+        if (!rpSuccess) {
+            int result = MessageBoxW(nullptr, 
+                L"PMan failed to create an automatic System Restore point.\n\n"
+                L"It is HIGHLY RECOMMENDED that you create one manually before proceeding.\n\n"
+                L"Do you want to continue anyway?", 
+                L"Safety Warning", MB_YESNO | MB_ICONWARNING | MB_TOPMOST);
+            
+            if (result == IDNO) {
+                Log("[SAFETY] User aborted tweaks due to failed restore point.");
+                return false;
+            }
         }
+        // Mark as done so we don't freeze the UI on subsequent applies
+        s_sessionRestorePointCreated = true;
     }
 
     // 2. Registry Backup

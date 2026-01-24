@@ -281,9 +281,10 @@ bool CreateRestorePoint()
 
     RESTOREPOINTINFOW rpInfo = {};
     rpInfo.dwEventType      = BEGIN_SYSTEM_CHANGE;
-    rpInfo.dwRestorePtType = APPLICATION_INSTALL;
+    // Use MODIFY_SETTINGS (12) to avoid "Install:" prefix
+    rpInfo.dwRestorePtType = MODIFY_SETTINGS; 
     rpInfo.llSequenceNumber = 0;
-    wcscpy_s(rpInfo.szDescription, L"Priority Manager First Run");
+    wcscpy_s(rpInfo.szDescription, L"PMan System Tweaks");
 
     STATEMGRSTATUS smStatus = {};
 
