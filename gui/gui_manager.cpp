@@ -21,6 +21,7 @@
 #include "static_tweaks.h"
 #include "config.h"
 #include "logger.h"
+#include "utils.h" // For GetCurrentExeVersion
 
 #include <d3d11.h>
 #include <dwmapi.h> // Required for transparency
@@ -51,6 +52,57 @@ namespace GuiManager {
     static HWND g_hwnd = nullptr;
     static bool g_isInitialized = false;
     static bool g_isOpen = false;
+    
+    enum class GuiMode { TuneUp, About, Help, LogViewer };
+    static GuiMode g_activeMode = GuiMode::TuneUp;
+
+    // Log Viewer State
+    static std::string g_logBuffer;
+    static bool g_logAutoScroll = true;
+    static uint64_t g_lastLogCheck = 0;
+    static std::streampos g_logLastPos = 0;
+	static size_t g_logPrevSize = 0;
+
+    static void UpdateLogContent() {
+        uint64_t now = GetTickCount64();
+        if (now - g_lastLogCheck < 500) return; // Check every 500ms
+        g_lastLogCheck = now;
+
+        std::filesystem::path logPath = GetLogPath() / L"log.txt";
+        HANDLE hFile = CreateFileW(logPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        
+        if (hFile == INVALID_HANDLE_VALUE) return;
+
+        LARGE_INTEGER size;
+        GetFileSizeEx(hFile, &size);
+
+        if (size.QuadPart < g_logLastPos) {
+            g_logLastPos = 0; // File was truncated/reset
+            g_logBuffer.clear();
+        }
+
+        if (size.QuadPart > g_logLastPos) {
+            DWORD bytesToRead = (DWORD)(size.QuadPart - g_logLastPos);
+            // Limit read to last 64KB if opened for the first time
+            if (bytesToRead > 65536 && g_logLastPos == 0) {
+                g_logLastPos = size.QuadPart - 65536;
+                bytesToRead = 65536;
+            }
+
+            std::vector<char> buffer(bytesToRead + 1);
+            LARGE_INTEGER move; move.QuadPart = g_logLastPos;
+            SetFilePointerEx(hFile, move, nullptr, FILE_BEGIN);
+            
+            DWORD bytesRead = 0;
+            if (ReadFile(hFile, buffer.data(), bytesToRead, &bytesRead, nullptr) && bytesRead > 0) {
+                buffer[bytesRead] = '\0';
+                g_logBuffer.append(buffer.data());
+                g_logLastPos += bytesRead;
+            }
+        }
+        CloseHandle(hFile);
+    }
 
     static WNDCLASSEXW g_wc = {
         sizeof(WNDCLASSEXW),
@@ -198,11 +250,42 @@ namespace GuiManager {
 
     void ShowTuneUpWindow() {
         if (!g_isInitialized) Init();
+        g_activeMode = GuiMode::TuneUp;
         g_isOpen = true;
         ShowWindow(g_hwnd, SW_SHOW);
         SetForegroundWindow(g_hwnd);
     }
 
+    void ShowAboutWindow() {
+        if (!g_isInitialized) Init();
+        g_activeMode = GuiMode::About;
+        g_isOpen = true;
+        ShowWindow(g_hwnd, SW_SHOW);
+        SetForegroundWindow(g_hwnd);
+    }
+
+    void ShowHelpWindow() {
+        if (!g_isInitialized) Init();
+        g_activeMode = GuiMode::Help;
+        g_isOpen = true;
+        ShowWindow(g_hwnd, SW_SHOW);
+        SetForegroundWindow(g_hwnd);
+    }
+
+	void ShowLogWindow() {
+        if (!g_isInitialized) Init();
+        g_activeMode = GuiMode::LogViewer;
+        g_isOpen = true;
+        // [FIX] Force write buffered logs to disk so the viewer can read them
+        FlushLogger();
+        // Reset state on open
+        g_logLastPos = 0; 
+        g_logBuffer.clear();
+        UpdateLogContent(); // Immediate read
+        ShowWindow(g_hwnd, SW_SHOW);
+        SetForegroundWindow(g_hwnd);
+    }
+	
     bool IsWindowOpen() {
         return g_isOpen;
     }
@@ -276,6 +359,9 @@ namespace GuiManager {
         // CENTERED TITLE
         // ----------------------------------------------------------------------------------------
         const char* title = "PMAN TWEAKS";
+        if (g_activeMode == GuiMode::About) title = "ABOUT";
+        else if (g_activeMode == GuiMode::Help) title = "HELP";
+        else if (g_activeMode == GuiMode::LogViewer) title = "PMAN LIVE LOG";
         
         // Use loaded Title Font if available, otherwise fallback to scaling
         if (g_pFontTitle) ImGui::PushFont(g_pFontTitle);
@@ -298,67 +384,159 @@ namespace GuiManager {
         // ----------------------------------------------------------------------------------------
         ImGui::BeginChild("Content", ImVec2(0, -70), false);
 
-        if (ImGui::BeginTabBar("TweakTabs")) {
+        if (g_activeMode == GuiMode::TuneUp)
+        {
+            if (ImGui::BeginTabBar("TweakTabs")) {
 
-            if (ImGui::BeginTabItem("Recommended")) {
-                BeginCard("rec", {0.12f, 0.16f, 0.14f, 1.0f});
+                if (ImGui::BeginTabItem("Recommended")) {
+                    BeginCard("rec", {0.12f, 0.16f, 0.14f, 1.0f});
 
-                ImGui::Checkbox("Network Optimizations", &g_config.network);
-                HelpMarker("Improves TCP/IP and latency behavior.");
+                    ImGui::Checkbox("Network Optimizations", &g_config.network);
+                    HelpMarker("Improves TCP/IP and latency behavior.");
 
-                ImGui::Checkbox("Privacy & Telemetry", &g_config.privacy);
-                HelpMarker("Disables diagnostics and tracking.");
+                    ImGui::Checkbox("Privacy & Telemetry", &g_config.privacy);
+                    HelpMarker("Disables diagnostics and tracking.");
 
-                ImGui::Checkbox("Visual Effects", &g_config.explorer);
-                HelpMarker("Reduces UI overhead.");
+                    ImGui::Checkbox("Visual Effects", &g_config.explorer);
+                    HelpMarker("Reduces UI overhead.");
 
-                ImGui::Checkbox("Power Plan Tuning", &g_config.power);
-                HelpMarker("Optimizes power behavior.");
+                    ImGui::Checkbox("Power Plan Tuning", &g_config.power);
+                    HelpMarker("Optimizes power behavior.");
 
-                EndCard();
-                ImGui::EndTabItem();
+                    EndCard();
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Functional")) {
+                    BeginCard("func", {0.14f, 0.14f, 0.18f, 1.0f});
+
+                    ImGui::Checkbox("Set Services to Manual", &g_config.services);
+                    HelpMarker("Sets non-critical services to Manual.");
+
+                    ImGui::Checkbox("Disable Location Services", &g_config.location);
+                    HelpMarker("Globally disables Windows location APIs.");
+
+                    ImGui::Checkbox("Disable GameDVR / Xbox", &g_config.dvr);
+                    HelpMarker("Disables background recording.");
+
+                    EndCard();
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Aggressive")) {
+                    BeginCard("agg", {0.18f, 0.10f, 0.10f, 1.0f});
+
+                    ImGui::Checkbox("Remove UWP Bloatware", &g_config.bloatware);
+                    HelpMarker("Permanent removal of bundled apps.");
+
+                    EndCard();
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Future")) {
+                    BeginCard("future", {0.10f, 0.10f, 0.14f, 1.0f});
+
+                    ImGui::TextDisabled("Reserved for future expansion:");
+                    ImGui::BulletText("Kernel scheduling controls");
+                    ImGui::BulletText("Advanced memory management");
+                    ImGui::BulletText("Per-app CPU affinity");
+                    ImGui::BulletText("I/O prioritization");
+
+                    EndCard();
+                    ImGui::EndTabItem();
+                }
+
+                ImGui::EndTabBar();
             }
+        }
+        else if (g_activeMode == GuiMode::About)
+        {
+            ImGui::Spacing(); ImGui::Spacing();
+            
+            // Centered About Text
+            std::string ver = WideToUtf8(GetCurrentExeVersion().c_str());
+            std::string verText = "Priority Manager v" + ver;
+            
+            auto CenterText = [](const char* text) {
+                float winWidth = ImGui::GetWindowSize().x;
+                float textWidth = ImGui::CalcTextSize(text).x;
+                ImGui::SetCursorPosX((winWidth - textWidth) * 0.5f);
+                ImGui::Text("%s", text);
+            };
 
-            if (ImGui::BeginTabItem("Functional")) {
-                BeginCard("func", {0.14f, 0.14f, 0.18f, 1.0f});
+            if (g_pFontTitle) ImGui::PushFont(g_pFontTitle);
+            CenterText(verText.c_str());
+            if (g_pFontTitle) ImGui::PopFont();
+            
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
+            CenterText("By Ian Anthony R. Tancinco");
+            ImGui::PopStyleColor();
 
-                ImGui::Checkbox("Set Services to Manual", &g_config.services);
-                HelpMarker("Sets non-critical services to Manual.");
+            ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
 
-                ImGui::Checkbox("Disable Location Services", &g_config.location);
-                HelpMarker("Globally disables Windows location APIs.");
+            ImGui::TextWrapped("Automated Windows Priority & Affinity Manager designed for high-performance low-latency gaming.");
+            ImGui::Spacing();
+            ImGui::TextWrapped("Copyright (c) 2025-2026 Ian Anthony R. Tancinco. All rights reserved.");
+        }
+        else if (g_activeMode == GuiMode::Help)
+        {
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Command Line Usage:");
+            ImGui::Separator();
+            
+            if (ImGui::BeginChild("HelpScroll")) {
+                ImGui::Text("pman.exe [OPTIONS]");
+                ImGui::Spacing();
+                
+                struct Opt { const char* cmd; const char* desc; };
+                Opt options[] = {
+                    {"--help, -h, /?", "Show this help message"},
+                    {"--uninstall", "Stop instances and remove startup task"},
+                    {"--silent, /S", "Run operations without message boxes"},
+                    {"--paused", "Start in paused mode"},
+                    {"--guard", "(Internal) Registry safety guard"}
+                };
 
-                ImGui::Checkbox("Disable GameDVR / Xbox", &g_config.dvr);
-                HelpMarker("Disables background recording.");
-
-                EndCard();
-                ImGui::EndTabItem();
+                for (const auto& opt : options) {
+                    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "%s", opt.cmd);
+                    ImGui::SameLine(200);
+                    ImGui::Text("%s", opt.desc);
+                }
+                ImGui::EndChild();
             }
+        }
+        else if (g_activeMode == GuiMode::LogViewer)
+        {
+            UpdateLogContent();
 
-            if (ImGui::BeginTabItem("Aggressive")) {
-                BeginCard("agg", {0.18f, 0.10f, 0.10f, 1.0f});
+            if (ImGui::Button("Clear Log")) { g_logBuffer.clear(); }
+            ImGui::SameLine();
+            ImGui::Checkbox("Auto-scroll", &g_logAutoScroll);
+            ImGui::SameLine();
+            ImGui::TextDisabled("%d bytes", (int)g_logBuffer.size());
 
-                ImGui::Checkbox("Remove UWP Bloatware", &g_config.bloatware);
-                HelpMarker("Permanent removal of bundled apps.");
+            ImGui::Separator();
 
-                EndCard();
-                ImGui::EndTabItem();
+            ImGui::BeginChild("LogRegion", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+            
+            ImGui::PushFont(g_pFontRegular);
+            
+            if (g_logAutoScroll) {
+                // Auto-scroll mode: non-interactive, just display
+                ImGui::TextUnformatted(g_logBuffer.c_str());
+                ImGui::SetScrollHereY(1.0f);
+            } else {
+                // Manual mode: selectable/copyable
+                ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
+                ImGuiInputTextFlags flags = ImGuiInputTextFlags_ReadOnly;
+                ImVec2 size = ImGui::GetContentRegionAvail();
+                ImGui::InputTextMultiline("##log", &g_logBuffer[0], g_logBuffer.size() + 1, 
+                    size, flags);
+                ImGui::PopStyleColor();
             }
-
-            if (ImGui::BeginTabItem("Future")) {
-                BeginCard("future", {0.10f, 0.10f, 0.14f, 1.0f});
-
-                ImGui::TextDisabled("Reserved for future expansion:");
-                ImGui::BulletText("Kernel scheduling controls");
-                ImGui::BulletText("Advanced memory management");
-                ImGui::BulletText("Per-app CPU affinity");
-                ImGui::BulletText("I/O prioritization");
-
-                EndCard();
-                ImGui::EndTabItem();
-            }
-
-            ImGui::EndTabBar();
+            
+            ImGui::PopFont();
+            ImGui::EndChild();
         }
 
         ImGui::EndChild();
@@ -367,24 +545,37 @@ namespace GuiManager {
         // ----------------------------------------------------------------------------------------
         // FOOTER
         // ----------------------------------------------------------------------------------------
-        if (ImGui::Button("Apply", ImVec2(120, 36))) {
-            if (ApplyStaticTweaks(g_config)) {
-                SaveTweakPreferences(g_config);
-                MessageBoxW(
-                    g_hwnd,
-                    L"Your selected optimizations have been applied.",
-                    L"Success",
-                    MB_OK | MB_ICONINFORMATION
-                );
+        if (g_activeMode == GuiMode::TuneUp)
+        {
+            if (ImGui::Button("Apply", ImVec2(120, 36))) {
+                if (ApplyStaticTweaks(g_config)) {
+                    SaveTweakPreferences(g_config);
+                    MessageBoxW(
+                        g_hwnd,
+                        L"Your selected optimizations have been applied.",
+                        L"Success",
+                        MB_OK | MB_ICONINFORMATION
+                    );
+                }
+                g_isOpen = false;
+                ShowWindow(g_hwnd, SW_HIDE);
             }
-            g_isOpen = false;
-            ShowWindow(g_hwnd, SW_HIDE);
-        }
 
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 36))) {
-            g_isOpen = false;
-            ShowWindow(g_hwnd, SW_HIDE);
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 36))) {
+                g_isOpen = false;
+                ShowWindow(g_hwnd, SW_HIDE);
+            }
+        }
+        else
+        {
+            // Single Close Button for Info windows
+            float width = 120.0f;
+            ImGui::SetCursorPosX((ImGui::GetWindowWidth() - width) * 0.5f);
+            if (ImGui::Button("Close", ImVec2(width, 36))) {
+                g_isOpen = false;
+                ShowWindow(g_hwnd, SW_HIDE);
+            }
         }
 
         if (g_pFontRegular) ImGui::PopFont(); // Pop Main Font

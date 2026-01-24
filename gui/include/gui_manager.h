@@ -26,6 +26,9 @@ namespace GuiManager {
     // Initializes resources (if needed) and shows the configuration window.
     // Safe to call repeatedly (will just focus the existing window).
     void ShowTuneUpWindow();
+    void ShowAboutWindow();
+    void ShowHelpWindow();
+    void ShowLogWindow();
 
     // Returns true if the GUI window is currently open.
     // Use this to determine if you should call RenderFrame().

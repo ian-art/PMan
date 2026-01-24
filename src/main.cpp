@@ -425,50 +425,6 @@ int RunMainProgram(int argc, wchar_t** argv);
 
 static NOTIFYICONDATAW g_nid = {};
 
-// Helper for enhanced modern dialogs (Vista+)
-static int ShowRichDialog(HWND hwnd, const std::wstring& title, const std::wstring& header, 
-                          const std::wstring& content, PCWSTR icon, int buttons = TDCBF_OK_BUTTON)
-{
-    // 1. Try Modern TaskDialog (Vista+) via Dynamic Loading
-    // Using a block scope ensures we don't skip initializations if we fall through
-    {
-        // Use LoadLibrary instead of static linking to avoid "Ordinal 344" errors on older/incompatible systems
-        HMODULE hComctl32 = LoadLibraryExW(L"Comctl32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-        if (hComctl32) 
-        {
-            // Define prototype manually to avoid linking dependency on Comctl32.lib
-            typedef HRESULT (WINAPI *P_TaskDialog)(HWND, HINSTANCE, PCWSTR, PCWSTR, PCWSTR, int, PCWSTR, int*);
-            P_TaskDialog pTaskDialog = (P_TaskDialog)GetProcAddress(hComctl32, "TaskDialog");
-
-            if (pTaskDialog) 
-            {
-                int pressed = 0;
-                HRESULT hr = pTaskDialog(hwnd, g_hInst, title.c_str(), header.c_str(), content.c_str(), 
-                                        buttons, icon, &pressed);
-                
-                FreeLibrary(hComctl32);
-                
-                if (SUCCEEDED(hr)) {
-                    return pressed;
-                }
-            }
-            else
-            {
-                FreeLibrary(hComctl32);
-            }
-        }
-    }
-
-    // 2. Fallback to MessageBoxW (Legacy / Safety)
-    UINT uType = (buttons & TDCBF_YES_BUTTON) ? MB_YESNO : MB_OK;
-    if (icon == TD_ERROR_ICON) uType |= MB_ICONERROR;
-    else if (icon == TD_WARNING_ICON) uType |= MB_ICONWARNING;
-    else uType |= MB_ICONINFORMATION;
-    
-    std::wstring fullMsg = header + L"\n\n" + content;
-    return MessageBoxW(hwnd, fullMsg.c_str(), title.c_str(), uType);
-}
-
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     // Re-add icon if Explorer restarts (TaskbarCreated message)
@@ -590,7 +546,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         
         // --- New Handlers ---
         if (wmId == ID_TRAY_LIVE_LOG) {
-            LogViewer::Show(hwnd);
+            GuiManager::ShowLogWindow();
         }
         else if (wmId == ID_TRAY_OPEN_DIR) {
             ShellExecuteW(nullptr, L"open", GetLogPath().c_str(), nullptr, nullptr, SW_SHOW);
@@ -660,32 +616,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             DestroyWindow(hwnd);
         } 
         else if (wmId == ID_TRAY_ABOUT) {
-            std::wstring version = GetCurrentExeVersion();
-            std::wstring header = L"Priority Manager " + version;
-            std::wstring content = L"Copyright \251 2025-2026 Ian Anthony R. Tancinco\n\n"
-                                   L"Automated Windows Priority & Affinity Manager\n"
-                                   L"Designed for high-performance low-latency gaming.";
-            
-            ShowRichDialog(hwnd, L"About Priority Manager", header, content, TD_INFORMATION_ICON);
+            GuiManager::ShowAboutWindow();
         }
-		else if (wmId == ID_TRAY_SUPPORT) {
+        else if (wmId == ID_TRAY_SUPPORT) {
             ShellExecuteW(nullptr, L"open", SUPPORT_URL, nullptr, nullptr, SW_SHOWNORMAL);
         }
         else if (wmId == ID_TRAY_HELP_USAGE) {
-            std::wstring version = GetCurrentExeVersion();
-            std::wstring msg;
-            msg.reserve(512);
-            msg += L"Priority Manager (pman) v" + version + L"\n";
-            msg += L"by Ian Anthony R. Tancinco\n\n";
-            msg += L"Usage: pman.exe [OPTIONS]\n\n";
-            msg += L"Options:\n";
-            msg += L"  --help, -h, /?      Show this help message\n";
-            msg += L"  --uninstall         Stop instances and remove startup task\n";
-            msg += L"  --silent, /S         Run operations without message boxes\n";
-            msg += L"  --guard             (Internal) Registry safety guard\n\n";
-            msg += L"Automated Windows Priority & Affinity Manager";
-            
-            ShowRichDialog(hwnd, L"Priority Manager Help", L"Command Line Usage", msg, TD_INFORMATION_ICON);
+            GuiManager::ShowHelpWindow();
         }
         else if (wmId == ID_TRAY_UPDATE) {
             OpenUpdatePage();
@@ -768,9 +705,6 @@ int wmain(int argc, wchar_t* argv[])
 
 	// 1. Initialize Global Instance Handle (Required for Tray Icon)
     g_hInst = GetModuleHandle(nullptr);
-
-    // Register UI Classes
-    LogViewer::Register(g_hInst);
 
     // Register system-wide message for Taskbar recreation detection
     g_wmTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
