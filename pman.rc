@@ -27,7 +27,7 @@ BEGIN
             VALUE "InternalName", "pman\0"
             VALUE "LegalCopyright", "Copyright \251 2025-2026 Ian Anthony Tancinco\0"
             VALUE "OriginalFilename", "pman.exe\0"
-            VALUE "ProductName", "Microsoft Windows\0"
+            VALUE "ProductName", "Priority Manager\0"
             VALUE "ProductVersion", PMAN_PRODUCT_VERSION_STRING
         END
 
@@ -39,7 +39,7 @@ BEGIN
             VALUE "InternalName", "pman\0"
             VALUE "LegalCopyright", "Copyright \251 2025-2026 Ian Anthony Tancinco\0"
             VALUE "OriginalFilename", "pman.exe\0"
-            VALUE "ProductName", "Microsoft Windows\0"
+            VALUE "ProductName", "Priority Manager\0"
             VALUE "ProductVersion", PMAN_PRODUCT_VERSION_STRING
         END
     END
