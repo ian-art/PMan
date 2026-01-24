@@ -23,6 +23,7 @@
 #include "logger.h"
 
 #include <d3d11.h>
+#include <dwmapi.h> // Required for transparency
 #include <tchar.h>
 #include <string>
 #include <filesystem>
@@ -32,6 +33,7 @@
 #include "imgui_impl_dx11.h"
 
 #pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dwmapi.lib")
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
     HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -149,6 +151,10 @@ namespace GuiManager {
             g_wc.hInstance,
             nullptr
         );
+
+        // [FIX] Enable transparent framebuffer for rounded corners
+        MARGINS margins = {-1};
+        DwmExtendFrameIntoClientArea(g_hwnd, &margins);
 
         if (!CreateDeviceD3D(g_hwnd)) {
             CleanupDeviceD3D();
@@ -389,7 +395,8 @@ namespace GuiManager {
         // PRESENT
         // ----------------------------------------------------------------------------------------
         ImGui::Render();
-        const float clearColor[4] = {0.05f, 0.05f, 0.07f, 1.0f};
+        // [FIX] Clear to transparent (0,0,0,0) so DWM can render the desktop behind the corners
+        const float clearColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clearColor);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
