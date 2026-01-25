@@ -246,7 +246,16 @@ bool WindowsServiceManager::CaptureSessionSnapshot()
         return false;
     }
 
-    // Eligibility Filter - Only process RUNNING services
+    // [FIX] Pass 1: Identify PIDs that host CRITICAL services (The "Taint" Check)
+    // Because of SvcHost Collapse, we must NEVER touch a process if it touches a critical service.
+    std::unordered_set<DWORD> taintedPids;
+    for (DWORD i = 0; i < servicesReturned; i++) {
+        if (IsHardExcluded(services[i].lpServiceName)) {
+            taintedPids.insert(services[i].ServiceStatusProcess.dwProcessId);
+        }
+    }
+
+    // Pass 2: Eligibility Filter - Only process RUNNING services that are NOT tainted
     for (DWORD i = 0; i < servicesReturned; i++) {
         std::wstring name = services[i].lpServiceName;
         DWORD currentState = services[i].ServiceStatusProcess.dwCurrentState;
@@ -258,7 +267,13 @@ bool WindowsServiceManager::CaptureSessionSnapshot()
         // "PID is valid"
         if (pid == 0) continue;
 
-        // "Service is not excluded by policy"
+        // [SAFETY] Critical Fix: If this PID hosts a critical service (DNS, DHCP, Audio), skip it entirely.
+        if (taintedPids.count(pid)) {
+            // Log("[SERVICE] Skipped mixed-process PID " + std::to_string(pid) + " (Hosted Critical Service)");
+            continue;
+        }
+
+        // Standard exclusion check (still needed for standalone services)
         if (IsHardExcluded(name)) continue;
 
         ServiceSessionEntry entry;

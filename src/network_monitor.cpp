@@ -195,8 +195,11 @@ void NetworkMonitor::UpdateNetworkActivityMap() {
         // Analyze Storms if Network is Unstable
         if (g_networkState.load() == NetworkState::Unstable) {
             for (const auto& [pid, count] : synSentCounts) {
-                // Threshold: >5 pending connections implies a retry storm
-                if (count > 5) {
+                // [FIX] Relaxed Threshold: >5 is too low for Game Launchers/P2P/Browsers.
+                // Modern browsers can easily have 20+ SYN_SENT during page loads or downloads.
+                // Only throttle if it looks like a malicious flood (>50).
+                if (count > 50) {
+                    Log("[NET] Massive Connection Storm detected (PID " + std::to_string(pid) + " count: " + std::to_string(count) + ")");
                     g_throttleManager.TriggerCooldown(pid);
                 }
             }
