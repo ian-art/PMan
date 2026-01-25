@@ -244,13 +244,14 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
                     }
                 }
 
-                // Gentler trim logic
-                SIZE_T targetSize = (pmc.WorkingSetSize > 200 * 1024 * 1024) ? 
-                    static_cast<SIZE_T>(pmc.WorkingSetSize * 0.8) : pmc.WorkingSetSize;
-
-                if (SetProcessWorkingSetSize(hProc, targetSize, pmc.WorkingSetSize)) {
+                // [FIX] "Memory Straightjacket" Removed.
+                // Setting MaxWorkingSet to CurrentUsage prevents allocation and causes Hard Fault loops.
+                // We now use the standard EmptyWorkingSet usage (-1, -1) which safely trims 
+                // unused pages without capping future growth.
+                if (SetProcessWorkingSetSize(hProc, static_cast<SIZE_T>(-1), static_cast<SIZE_T>(-1))) {
                     trimmedCount++;
-                    totalFreedBytes += (pmc.WorkingSetSize - targetSize);
+                    // Estimate freed (OS decides actual amount, but we log the potential)
+                    totalFreedBytes += (pmc.WorkingSetSize - (2 * 1024 * 1024)); 
                 }
                 
                 m_processTracker[pid].lastTrimTime = now;
@@ -269,7 +270,12 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
 
         // Only purge if we freed significant RAM (>100MB) AND cooldown expired
         if (timeSincePurge > PURGE_COOLDOWN_SEC && totalFreedBytes > (100 * 1024 * 1024)) {
-            FlushStandbyList();
+            // [FIX] Disable Standby List Purge.
+            // Purging the Standby List deletes file cache (icons, DLLs), causing 
+            // immediate micro-stutters when the user opens Start Menu or switches apps.
+            // Modern Windows (10/11) manages Standby memory correctly; empty RAM is wasted RAM.
+            // FlushStandbyList(); <--- COMMENTED OUT TO FIX LAG
+            Log("[MEMOPT] Trim complete. Standby List Purge skipped to preserve responsiveness.");
             m_lastPurgeTime = now;
         }
     }
