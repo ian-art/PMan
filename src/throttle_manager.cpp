@@ -221,8 +221,11 @@ void ThrottleManager::ApplyPriorityToProcess(DWORD pid, bool enableThrottle) {
         // ENGAGE: Background Mode
         SetPriorityClass(hProc, IDLE_PRIORITY_CLASS);
         
-        // Set I/O Priority to Very Low (0)
-        SetProcessIoPriority(pid, 0); 
+        // [FIX] IO Starvation Prevention
+        // Setting IO Priority to 0 (Very Low) can cause priority inversion lockups
+        // if the throttled process holds a resource (like a file handle or mutex).
+        // We use 1 (Low) instead of 0 (Very Low) to ensure it makes forward progress.
+        SetProcessIoPriority(pid, 1); 
     } else {
         // DISENGAGE: Restore to Original Priority (Compliance: Source 1)
         DWORD restorePri = BELOW_NORMAL_PRIORITY_CLASS; // Default fallback
