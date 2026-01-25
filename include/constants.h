@@ -31,8 +31,9 @@ static constexpr wchar_t IGNORED_PROCESSES_FILENAME[] = L"ignore_processes.txt";
 static constexpr int CONFIG_VERSION = 2; // Increment when config structure changes
 
 // Registry Values
-static constexpr DWORD   VAL_GAME   = 0x28;
-static constexpr DWORD   VAL_BROWSER= 0x26;
+static constexpr DWORD   VAL_GAME       = 0x28; // Short Fixed, High Boost (Gaming)
+static constexpr DWORD   VAL_BROWSER    = 0x26; // Short Variable, High Boost (Desktop/Browser)
+static constexpr DWORD   VAL_BACKGROUND = 0x18; // Long Fixed, No Boost (Deep Idle/Maintenance)
 static constexpr DWORD   IOCP_SHUTDOWN_KEY = 0xFFFFFFFF;
 
 // Tray Icon

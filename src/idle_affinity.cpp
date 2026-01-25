@@ -136,18 +136,40 @@ bool IdleAffinityManager::IsSafeToPark()
     return true;
 }
 
+// Add Power Plan Switching for Idle
 void IdleAffinityManager::OnIdleStateChanged(bool isIdle)
 {
     bool wasIdle = m_isIdle.exchange(isIdle);
     if (wasIdle == isIdle) return; // No change
 
+    static GUID* s_pPreIdleScheme = nullptr;
+
     if (isIdle) {
         if (IsSafeToPark()) {
             Log("[IDLE-PARK] System idle detected. Parking background processes...");
             ApplyIdleAffinity();
+
+            // Switch to Power Saver on Idle (Save Battery)
+            // Only do this if we aren't already in a specific mode (like Game Mode)
+            if (s_pPreIdleScheme == nullptr) {
+                if (PowerGetActiveScheme(NULL, &s_pPreIdleScheme) == ERROR_SUCCESS) {
+                    if (PowerSetActiveScheme(NULL, &GUID_MAX_POWER_SAVINGS) == ERROR_SUCCESS) {
+                        Log("[POWER] Idle detected: Switched to Power Saver plan.");
+                    }
+                }
+            }
         }
     } else {
         RestoreAllAffinity();
+        
+        // Restore Original Plan on User Return
+        if (s_pPreIdleScheme != nullptr) {
+            PowerSetActiveScheme(NULL, s_pPreIdleScheme);
+            LocalFree(s_pPreIdleScheme);
+            s_pPreIdleScheme = nullptr;
+            Log("[POWER] User returned: Restored original power plan.");
+        }
+
         Log("[IDLE-PARK] Activity detected. Restored process affinity.");
     }
 }

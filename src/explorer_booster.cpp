@@ -21,6 +21,7 @@
 #include "logger.h"
 #include "globals.h" // For g_idleRevertEnabled etc.
 #include "tweaks.h" // For SetProcessIoPriority
+#include "constants.h" // [FIX] Required for VAL_BACKGROUND
 #include <tlhelp32.h>
 #include <psapi.h>
 
@@ -382,6 +383,12 @@ void ExplorerBooster::ApplyBoosts(DWORD pid, ExplorerBoostState state) {
     if (m_config.preventShellPaging) {
         EnforceMemoryGuard(pid);
     }
+
+    // Switch Processor Scheduling to "Background Services" (0x18)
+    // This allows maintenance tasks (Updates/Indexing) to finish faster while user is away.
+    // Only apply once per idle session (check pid against a flag or just let the cache handle it).
+    // Note: SetPrioritySeparation has internal caching, so calling it here is safe.
+    SetPrioritySeparation(VAL_BACKGROUND);
     
     it->second.state = state;
 }
@@ -467,6 +474,10 @@ void ExplorerBooster::RevertBoosts(DWORD pid) {
 
     // 3. Release Memory Guard
     ReleaseMemoryGuard(pid);
+
+    // Revert Processor Scheduling to "Programs" (0x26)
+    // Ensures snappy UI response immediately upon user return.
+    SetPrioritySeparation(VAL_BROWSER);
 
     it->second.state = ExplorerBoostState::Default;
 }
