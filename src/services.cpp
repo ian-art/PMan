@@ -184,25 +184,26 @@ bool WindowsServiceManager::IsHardExcluded(const std::wstring& serviceName, DWOR
 // Hard Exclusions (Non-Negotiable)
 bool WindowsServiceManager::IsHardExcluded(const std::wstring& serviceName) const
 {
+    // [FIX] Use lowercase-only set to prevent case-sensitivity bypass
     static const std::unordered_set<std::wstring> HARD_EXCLUSIONS = {
         // RPC / DCOM / MMCSS
-        L"RpcSs", L"DcomLaunch", L"RpcEptMapper", L"MmCss",
+        L"rpcss", L"dcomlaunch", L"rpceptmapper", L"mmcss",
         // Audio & Input
-        L"Audiosrv", L"AudioEndpointBuilder", L"TabletInputService", L"hidserv",
+        L"audiosrv", L"audioendpointbuilder", L"tabletinputservice", L"hidserv",
         // Power & Thermal
-        L"Power",
+        L"power",
         // Core Networking
-        L"NlaSvc", L"nsi", L"Dhcp", L"Dnscache", L"netprofm",
+        L"nlasvc", L"nsi", L"dhcp", L"dnscache", L"netprofm",
         // SCM Critical
-        L"PlugPlay", L"KeyIso", L"SamSs", L"LSM"
+        L"plugplay", L"keyiso", L"samss", L"lsm"
     };
 
-    if (HARD_EXCLUSIONS.count(serviceName)) return true;
-
-    // Substring checks for Driver/GPU services
     std::wstring lowerName = serviceName;
     std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::towlower);
 
+    if (HARD_EXCLUSIONS.count(lowerName)) return true;
+
+    // Substring checks for Driver/GPU services
     if (lowerName.find(L"nvidia") != std::wstring::npos || 
         lowerName.find(L"amd") != std::wstring::npos || 
         lowerName.find(L"intel") != std::wstring::npos) {
@@ -522,7 +523,9 @@ bool WindowsServiceManager::ApplySessionOptimizations(DWORD_PTR targetAffinityMa
         }
         // Handle closes automatically
     } else {
-        Log("[SERVICE] Failed to open service process " + std::to_string(entry.pid));
+        // [FIX] Process is gone or protected. Treat as "soft skip" to prevent destroying the whole session.
+        Log("[SERVICE] Warning: Skipped PID " + std::to_string(entry.pid) + " (Gone/Access Denied). Continuing...");
+        success = true; // Prevent rollback
     }
 
         // "Failure at any point -> immediate rollback of all services"
