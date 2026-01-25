@@ -625,6 +625,8 @@ bool ApplyStaticTweaks(const TweakConfig& config)
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\WindowsUpdate\\UX\\Settings", L"FlightSettingsMaxPauseDays", 730);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\Windows Search", L"BingSearchEnabled", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Search", L"BingSearchEnabled", 0);
+    // Disable non-policy Bing Search and CrossDeviceResume (Timeline)
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Search", L"BingSearchEnabled", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\PushNotifications", L"NoTileApplicationNotification", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Sensor\\Overrides\\{BFA794E4-F964-4FDB-90F6-51056BFE4B44}", L"SensorPermissionState", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\lfsvc\\Service\\Configuration", L"Status", 0);
