@@ -254,6 +254,9 @@ private:
                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
 			SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
 
+            // [VISUAL] Apply Explorer Theme to Edit Control (Dark Scrollbars)
+            SetWindowTheme(hEdit, L"Explorer", nullptr);
+
             // Fix: Increase text limit from default 32KB to Max (approx 2GB) to prevent truncation
             SendMessageW(hEdit, EM_LIMITTEXT, 0, 0);
 

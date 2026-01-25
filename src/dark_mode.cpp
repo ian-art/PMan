@@ -118,6 +118,9 @@ namespace DarkMode {
 
         // 3. Common Controls Theme (Triggers WM_THEMECHANGED)
         SetWindowTheme(hWnd, useDarkMode ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+
+        // 4. Force Frame Refresh (Future-Proofing for DWM)
+        SetWindowPos(hWnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     }
 
     void ApplyToMenu(HMENU hMenu) {
