@@ -377,6 +377,8 @@ bool ApplyStaticTweaks(const TweakConfig& config)
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Policies\\Microsoft\\Windows\\CloudContent", L"DisableTailoredExperiencesWithDiagnosticData", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\AdvertisingInfo", L"DisabledByGroupPolicy", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\Windows Error Reporting", L"Disabled", 1);
+    // Kill Cross-Device Resume background agent
+    ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\CrossDeviceResume\\Configuration", L"IsResumeAllowed", 0);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Microsoft\\Siuf\\Rules", L"NumberOfSIUFInPeriod", 0);
     DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\Microsoft\\Siuf\\Rules", L"PeriodInNanoSeconds");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Siuf\\Rules", L"NumberOfSIUFInPeriod", 0);
@@ -505,6 +507,15 @@ bool ApplyStaticTweaks(const TweakConfig& config)
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"SwapfileControl", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"SystemResponsiveness", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"NetworkThrottlingIndex", 4294967295);
+
+    // SvcHost Collapse: Force service grouping by raising split threshold to Total RAM
+    MEMORYSTATUSEX statex = { sizeof(statex) };
+    if (GlobalMemoryStatusEx(&statex)) {
+        // Formula: Total Physical RAM in KB
+        DWORD totalRamKB = static_cast<DWORD>(statex.ullTotalPhys / 1024);
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control", L"SvcHostSplitThresholdInKB", totalRamKB);
+        Log("[TWEAK] SvcHost Collapse applied. Threshold set to: " + std::to_string(totalRamKB) + " KB");
+    }
     }
     
     // ============================================================================
@@ -654,7 +665,16 @@ bool ApplyStaticTweaks(const TweakConfig& config)
         L"Microsoft\\Windows\\DiskDiagnostic\\Microsoft-Windows-DiskDiagnosticDataCollector",
         L"Microsoft\\Windows\\Feedback\\Siuf\\DmClient",
         L"Microsoft\\Windows\\Feedback\\Siuf\\DmClientOnScenarioDownload",
-        L"Microsoft\\Windows\\Windows Error Reporting\\QueueReporting"
+        L"Microsoft\\Windows\\Windows Error Reporting\\QueueReporting",
+        
+        // Dead Zone Triggers
+        L"Microsoft\\Windows\\Maps\\MapsUpdateTask",
+        L"Microsoft\\Windows\\Maps\\MapsToastTask",
+
+        // Application Experience (The "Mare" & "Pca" group)
+        L"Microsoft\\Windows\\Application Experience\\MareBackup",
+        L"Microsoft\\Windows\\Application Experience\\StartupAppTask",
+        L"Microsoft\\Windows\\Application Experience\\PcaPatchDbTask"
     };
 
     for (const auto& task : telemetryTasks) {
@@ -743,7 +763,7 @@ bool ApplyStaticTweaks(const TweakConfig& config)
         L"BFE", L"BITS", L"BTAGService", L"BrokerInfrastructure", L"Browser", L"BthAvctpSvc", L"BthHFSrv", 
         L"CDPSvc", L"COMSysApp", L"CertPropSvc", L"ClipSVC", L"CoreMessagingRegistrar", L"CryptSvc", L"CscService", 
         L"DPS", L"DcomLaunch", L"DcpSvc", L"DevQueryBroker", L"DeviceAssociationService", L"DeviceInstall", 
-        L"Dhcp", L"DiagTrack", L"DialogBlockingService", L"DispBrokerDesktopSvc", L"DisplayEnhancementService", 
+        L"Dhcp", /* L"DiagTrack" (Disabled below), */ L"DialogBlockingService", L"DispBrokerDesktopSvc", L"DisplayEnhancementService", 
         L"DmEnrollmentSvc", L"Dnscache", L"EFS", L"EapHost", L"EntAppSvc", L"EventLog", L"EventSystem", 
         L"FDResPub", L"Fax", L"FontCache", L"FrameServer", L"FrameServerMonitor", L"GraphicsPerfSvc", 
         L"HomeGroupListener", L"HomeGroupProvider", L"HvHost", L"IEEtwCollectorService", L"IKEEXT", 
@@ -768,7 +788,7 @@ bool ApplyStaticTweaks(const TweakConfig& config)
         L"WinDefend", L"WinHttpAutoProxySvc", L"WinRM", L"Winmgmt", L"WpcMonSvc", L"WpnService", 
         L"XblAuthManager", L"XblGameSave", L"XboxGipSvc", L"XboxNetApiSvc", L"autotimesvc", L"bthserv", 
         L"camsvc", L"cloudidsvc", L"dcsvc", L"defragsvc", L"diagnosticshub.standardcollector.service", 
-        L"diagsvc", L"dmwappushservice", L"dot3svc", L"edgeupdate", L"edgeupdatem", L"embeddedmode", L"fdPHost", 
+        L"diagsvc", /* L"dmwappushservice" (Disabled below), */ L"dot3svc", L"edgeupdate", L"edgeupdatem", L"embeddedmode", L"fdPHost", 
         L"fhsvc", L"gpsvc", L"hidserv", L"icssvc", L"iphlpsvc", L"lfsvc", L"lltdsvc", L"lmhosts", L"mpssvc", 
         L"msiserver", L"netprofm", L"nsi", L"p2pimsvc", L"p2psvc", L"perceptionsimulation", L"pla", L"seclogon", 
         L"shpamsvc", L"smphost", L"spectrum", L"sppsvc", L"ssh-agent", L"svsvc", L"swprv", L"tiledatamodelsvc", 
@@ -781,6 +801,15 @@ bool ApplyStaticTweaks(const TweakConfig& config)
     // Apply Manual start (SERVICE_DEMAND_START) to standard services
     for (const auto& svc : serviceList) {
         SetServiceStartup(svc.c_str(), SERVICE_DEMAND_START);
+    }
+
+    // Dead Zone: Explicitly disable specific telemetry/tracking services
+    const std::vector<std::wstring> disabledServices = {
+        L"DiagTrack",           // Connected User Experiences and Telemetry
+        L"dmwappushservice"     // WAP Push Message Routing Service
+    };
+    for (const auto& svc : disabledServices) {
+        SetServiceStartup(svc.c_str(), SERVICE_DISABLED);
     }
 
 	// --- Pattern-based per-user service handling (Manual) ---
