@@ -109,6 +109,9 @@ extern std::atomic<bool> g_sessionLocked;
 extern std::atomic<DWORD> g_lockedGamePid;
 extern std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime;
 
+// Prevent system sleep
+extern std::atomic<bool> g_keepAwake;
+
 // Config Storage
 #define g_setMtx           (PManContext::Get().conf.setMtx)
 #define g_games            (PManContext::Get().conf.games)

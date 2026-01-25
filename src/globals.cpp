@@ -59,6 +59,9 @@ std::atomic<bool> g_sessionLocked{false};
 std::atomic<DWORD> g_lockedGamePid{0};
 std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime{0};
 
+// Prevent system sleep
+std::atomic<bool> g_keepAwake{false};
+
 // Config Storage
 // Sets and g_setMtx moved to PManContext.conf
 

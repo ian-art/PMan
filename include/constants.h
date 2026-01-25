@@ -51,6 +51,8 @@ static constexpr UINT    ID_TRAY_STARTUP_PASSIVE  = 1010;
 static constexpr UINT    ID_TRAY_HELP_USAGE       = 1011;
 static constexpr UINT    ID_TRAY_REFRESH_GPU      = 1012;
 static constexpr UINT    ID_TRAY_PAUSE_IDLE       = 1013;
+static constexpr UINT    ID_TRAY_KEEP_AWAKE       = 1014;
+
 
 // Inter-thread communication for Real-Time Logging
 static constexpr UINT    WM_LOG_UPDATED       = WM_USER + 20;

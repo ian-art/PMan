@@ -519,6 +519,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_APPLY_TWEAKS, L"TuneUp System");
             AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
+			bool awake = g_keepAwake.load();
+            AppendMenuW(hControlMenu, MF_STRING | (awake ? MF_CHECKED : 0), ID_TRAY_KEEP_AWAKE, L"Keep System Awake");
+            AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_REFRESH_GPU, L"Refresh GPU");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hControlMenu, L"Controls");
 
@@ -708,6 +711,23 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             if (p) {
                 g_idleAffinityMgr.OnIdleStateChanged(false); 
             }
+        }
+        else if (wmId == ID_TRAY_KEEP_AWAKE) {
+            bool k = !g_keepAwake.load();
+            g_keepAwake.store(k);
+            
+            if (k) {
+                // Prevent Sleep (System) and Screen Off (Display)
+                SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+                Log("[USER] Keep Awake ENABLED (System Sleep & Display Off blocked).");
+                wcscpy_s(g_nid.szTip, L"Priority Manager (Awake)");
+            } else {
+                // Clear flags, allow OS to sleep normally
+                SetThreadExecutionState(ES_CONTINUOUS);
+                Log("[USER] Keep Awake DISABLED (System power settings restored).");
+                wcscpy_s(g_nid.szTip, L"Priority Manager");
+            }
+            Shell_NotifyIconW(NIM_MODIFY, &g_nid);
         }
         return 0;
     } // End of WM_COMMAND Block
