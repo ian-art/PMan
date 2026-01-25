@@ -258,6 +258,8 @@ static void EnumerateAndConfigureUserServices(const wchar_t* pattern, DWORD star
 
     // Loop to handle the race condition where service count changes between size check and data retrieval
     while (true) {
+        // [FIX] Always reset resumeHandle when retrying; otherwise we miss the first N services
+        resumeHandle = 0;
         if (EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL,
             buffer.data(), static_cast<DWORD>(buffer.size()), &bytesNeeded,
             &servicesReturned, &resumeHandle, nullptr)) {
