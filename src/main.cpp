@@ -54,6 +54,7 @@
 #include <functional>
 #include <dwmapi.h>   // Required for DWM Dark Mode
 #include <uxtheme.h>  // Required for Theme definitions
+#include <array>
 
 #pragma comment(lib, "PowrProf.lib") 
 #pragma comment(lib, "Advapi32.lib")
@@ -74,6 +75,22 @@
 HINSTANCE g_hInst = nullptr;
 static NOTIFYICONDATAW g_nid = {}; // Defined early for visibility
 static UINT g_wmTaskbarCreated = 0;
+
+// --- Tray Animation Globals ---
+#define TRAY_TIMER_ID 1
+#define IDI_TRAY_FRAME_1 201
+#define IDI_TRAY_FRAME_2 202
+#define IDI_TRAY_FRAME_3 203
+#define IDI_TRAY_FRAME_4 204
+#define IDI_TRAY_FRAME_5 205
+#define IDI_TRAY_FRAME_6 206
+#define IDI_TRAY_FRAME_7 207
+#define IDI_TRAY_FRAME_8 208
+
+constexpr UINT TRAY_FRAME_COUNT = 8;
+static std::array<HICON, TRAY_FRAME_COUNT> g_trayFrames{};
+static size_t g_currentFrame = 0;
+// -----------------------------
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
 static GUID* g_pSleepScheme = nullptr;
@@ -483,22 +500,49 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     switch (uMsg)
     {
     case WM_CREATE:
+        // Load Animation Frames
+        g_trayFrames = {
+            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_1)),
+            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_2)),
+            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_3)),
+            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_4)),
+            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_5)),
+            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_6)),
+            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_7)),
+            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_8))
+        };
+
         g_nid.cbSize = sizeof(NOTIFYICONDATAW);
         g_nid.hWnd = hwnd;
         g_nid.uID = ID_TRAY_APP_ICON;
         g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         g_nid.uCallbackMessage = WM_TRAYICON;
-        g_nid.hIcon = LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(101)); 
-        if (!g_nid.hIcon) g_nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
-        // Initialize tooltip
+        // Set initial frame (0) or fallback
+        g_nid.hIcon = g_trayFrames[0] ? g_trayFrames[0] : LoadIcon(nullptr, IDI_APPLICATION);
+        
         Shell_NotifyIconW(NIM_ADD, &g_nid);
         UpdateTrayTooltip(); // Set initial text
         
+        // Start Animation Timer (150ms)
+        SetTimer(hwnd, TRAY_TIMER_ID, 150, nullptr);
+
         // [DARK MODE] Apply Centralized Dark Mode
         DarkMode::ApplyToWindow(hwnd);
         return 0;
 
     // [DARK MODE] Refresh Menu Themes if system theme changes
+    case WM_TIMER:
+        if (wParam == TRAY_TIMER_ID)
+        {
+            g_currentFrame = (g_currentFrame + 1) % TRAY_FRAME_COUNT;
+            if (g_trayFrames[g_currentFrame]) 
+            {
+                g_nid.hIcon = g_trayFrames[g_currentFrame];
+                Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+            }
+        }
+        return 0;
+
     case WM_THEMECHANGED:
     case WM_SETTINGCHANGE:
         DarkMode::RefreshTheme();      // Flushes the Windows menu theme cache
@@ -778,6 +822,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return TRUE;
 
     case WM_DESTROY:
+        KillTimer(hwnd, TRAY_TIMER_ID);
         Shell_NotifyIconW(NIM_DELETE, &g_nid);
         PostQuitMessage(0);
         return 0;
