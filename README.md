@@ -5,7 +5,7 @@
 ### A zero-latency Windows performance daemon for games and productivity
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue)
-![Language](https://img.shields.io/badge/Language-C%2B%2B17-orange)
+![Language](https://img.shields.io/badge/Language-C%2B%2B20-orange)
 ![Architecture](https://img.shields.io/badge/Architecture-Event--Driven-success)
 ![Privileges](https://img.shields.io/badge/Privileges-Administrator-red)
 
