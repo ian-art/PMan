@@ -72,6 +72,7 @@
 
 // GLOBAL VARIABLE
 HINSTANCE g_hInst = nullptr;
+static NOTIFYICONDATAW g_nid = {}; // Defined early for visibility
 static UINT g_wmTaskbarCreated = 0;
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
@@ -432,10 +433,43 @@ static int GetStartupMode(const std::wstring& taskName)
 
 // [MOVED] Registry Guard implementation moved to restore.cpp
 
+// Helper to update Tray Icon Tooltip with real-time status
+static void UpdateTrayTooltip()
+{
+    std::wstring tip = L"Priority Manager";
+
+    // 1. Protection Status
+    if (g_userPaused.load()) {
+        tip += L"\n\U0001F7E1 Status: PAUSED";
+    } else {
+        tip += L"\n\U0001F7E2 Status: Active";
+    }
+
+    // 2. Passive Mode (Idle Optimization Paused)
+    if (g_pauseIdle.load()) {
+        tip += L"\n\u2696 Passive: ON";
+    }
+
+    // 3. Awake Status
+    if (g_keepAwake.load()) {
+        tip += L"\n\u2600 Keep Awake: ON";
+    }
+
+    // 3. Current Mode (Optional - requires exposing g_lastMode in globals.h)
+    // For now, we show if we are in a special state
+    if (g_sessionLocked.load()) {
+         tip += L"\n\u1F3AE Mode: Gaming";
+    }
+
+    // Safety: Truncate to 127 chars to prevent buffer overflow (szTip limit)
+    if (tip.length() > 127) tip = tip.substr(0, 127);
+
+    wcsncpy_s(g_nid.szTip, tip.c_str(), _TRUNCATE);
+    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+}
+
 // Forward declaration for main program logic
 int RunMainProgram(int argc, wchar_t** argv);
-
-static NOTIFYICONDATAW g_nid = {};
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -456,8 +490,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         g_nid.uCallbackMessage = WM_TRAYICON;
         g_nid.hIcon = LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(101)); 
         if (!g_nid.hIcon) g_nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
-        wcscpy_s(g_nid.szTip, L"Priority Manager");
+        // Initialize tooltip
         Shell_NotifyIconW(NIM_ADD, &g_nid);
+        UpdateTrayTooltip(); // Set initial text
         
         // [DARK MODE] Apply Centralized Dark Mode
         DarkMode::ApplyToWindow(hwnd);
@@ -696,16 +731,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         else if (wmId == ID_TRAY_PAUSE) {
             bool p = !g_userPaused.load();
             g_userPaused.store(p);
-            wcscpy_s(g_nid.szTip, p ? L"Priority Manager (Paused)" : L"Priority Manager");
-            Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+
+            UpdateTrayTooltip(); // Refresh Tooltip
+
             Log(p ? "[USER] Protection PAUSED." : "[USER] Protection RESUMED.");
             if (!p) g_reloadNow.store(true);
         }
         else if (wmId == ID_TRAY_PAUSE_IDLE) {
             bool p = !g_pauseIdle.load();
             g_pauseIdle.store(p);
+
+            UpdateTrayTooltip(); // Refresh tooltip immediately
+
             Log(p ? "[USER] Idle Optimization PAUSED (CPU Limiting Disabled)." : "[USER] Idle Optimization RESUMED.");
-            
+
             // Immediate effect: If we just paused, force the Idle Manager to think we are active
             // This restores all parked cores instantly.
             if (p) {
@@ -715,19 +754,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         else if (wmId == ID_TRAY_KEEP_AWAKE) {
             bool k = !g_keepAwake.load();
             g_keepAwake.store(k);
-            
+
             if (k) {
                 // Prevent Sleep (System) and Screen Off (Display)
                 SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
                 Log("[USER] Keep Awake ENABLED (System Sleep & Display Off blocked).");
-                wcscpy_s(g_nid.szTip, L"Priority Manager (Awake)");
             } else {
                 // Clear flags, allow OS to sleep normally
                 SetThreadExecutionState(ES_CONTINUOUS);
                 Log("[USER] Keep Awake DISABLED (System power settings restored).");
-                wcscpy_s(g_nid.szTip, L"Priority Manager");
             }
-            Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+            UpdateTrayTooltip(); // Refresh Tooltip
         }
         return 0;
     } // End of WM_COMMAND Block
