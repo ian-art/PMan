@@ -351,6 +351,28 @@ void ExplorerBooster::ApplyBoosts(DWORD pid, ExplorerBoostState state) {
     HANDLE hProc = it->second.handle.get();
     bool logSuccess = m_config.debugLogging; // Only detailed logs if debug is on
 
+    // [FIX] DWM Safety: Verify identity via Name to prevent ID collisions
+    wchar_t pName[MAX_PATH];
+    DWORD pSize = MAX_PATH;
+    bool isDwm = false;
+    if (QueryFullProcessImageNameW(hProc, 0, pName, &pSize)) {
+        wchar_t* name = wcsrchr(pName, L'\\');
+        if (name) name++; else name = pName;
+        if (_wcsicmp(name, L"dwm.exe") == 0) isDwm = true;
+    } else if (pid == GetDwmProcessId()) {
+        isDwm = true; // Fallback
+    }
+
+    if (isDwm) {
+        if (m_config.boostDwm) {
+             // Safe: HIGH Priority (Not Realtime). No other tweaks allowed.
+             SetPriorityClass(hProc, HIGH_PRIORITY_CLASS);
+             if (logSuccess) Log("[EXPLORER] DWM Boosted (Safe Mode: High Priority Only)");
+        }
+        it->second.state = state;
+        return; // <--- CRITICAL: Return early to skip IO/Power/Memory hacks
+    }
+
     // 1. Disable Power Throttling (EcoQoS)
     if (m_config.disablePowerThrottling) {
         // [ARM64] Runtime check for EcoQoS support (Build 21354+)
@@ -402,7 +424,8 @@ void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
     if (!m_config.preventShellPaging) return;
 
     // FIX: Exclude DWM from memory trimming to prevent composition glitches
-    if (pid == GetDwmProcessId()) return;
+    DWORD dwmPid = GetDwmProcessId();
+    if (dwmPid != 0 && pid == dwmPid) return;
     
     // Only enforce when memory pressure exists ===
     MEMORYSTATUSEX ms = { sizeof(ms) };
@@ -416,10 +439,19 @@ void ExplorerBooster::EnforceMemoryGuard(DWORD pid) {
     auto it = m_instances.find(pid);
     if (it == m_instances.end()) return;
 
-    // FIX: Do not apply arbitrary memory caps to DWM (redundant but safe)
+    // FIX: Exclude DWM from memory trimming (Name Verified)
+    // PID check is insufficient if Registry is stale.
     if (pid == GetDwmProcessId()) return;
 
     HANDLE hProcess = it->second.handle.get();
+    
+    wchar_t pName[MAX_PATH];
+    DWORD pSize = MAX_PATH;
+    if (QueryFullProcessImageNameW(hProcess, 0, pName, &pSize)) {
+        wchar_t* name = wcsrchr(pName, L'\\');
+        if (name) name++; else name = pName;
+        if (_wcsicmp(name, L"dwm.exe") == 0) return;
+    }
 
     // Elastic limits (soft cap, not hard) ===
     // Set a reasonable floor to prevent aggressive trimming, but allow Windows to exceed max when needed
@@ -461,6 +493,19 @@ void ExplorerBooster::RevertBoosts(DWORD pid) {
     if (it == m_instances.end() || !it->second.handle) return;
 
     HANDLE hProc = it->second.handle.get();
+
+    // [FIX] DWM Safety: Do not touch DWM during revert (Keep High Priority if set)
+    // Checking name again is safest to prevent handle reuse issues
+    wchar_t pName[MAX_PATH];
+    DWORD pSize = MAX_PATH;
+    if (QueryFullProcessImageNameW(hProc, 0, pName, &pSize)) {
+        wchar_t* name = wcsrchr(pName, L'\\');
+        if (name) name++; else name = pName;
+        if (_wcsicmp(name, L"dwm.exe") == 0) {
+            it->second.state = ExplorerBoostState::Default;
+            return;
+        }
+    }
 
     // 1. Re-enable Power Throttling (Default behavior)
     if (m_config.disablePowerThrottling) {
