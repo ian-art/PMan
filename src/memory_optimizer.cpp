@@ -188,10 +188,10 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
         DWORD pid = pids[i];
         if (pid == 0 || pid == myPid || pid == foregroundPid) continue;
 
-		// [OPTIMIZATION] Skip known protected system PIDs to avoid OpenProcess overhead
-        // 0=Idle, 4=System. 
-        // We assume PIDs < 1000 are mostly services/system that we shouldn't trim aggressively.
-        if (pid < 1000 && pid != 0 && pid != 4) continue;
+		// [SAFETY] Do not rely on PID heuristics (pid < 1000). 
+        // Only skip strictly known kernel PIDs here. 
+        // Real system processes are filtered via IsSystemCriticalProcess() later to prevent BSODs.
+        if (pid == 0 || pid == 4) continue;
 
         // Check internal cooldown
         if (m_processTracker.count(pid)) {
@@ -244,14 +244,14 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
                     }
                 }
 
-                // [FIX] "Memory Straightjacket" Removed.
-                // Setting MaxWorkingSet to CurrentUsage prevents allocation and causes Hard Fault loops.
-                // We now use the standard EmptyWorkingSet usage (-1, -1) which safely trims 
-                // unused pages without capping future growth.
-                if (SetProcessWorkingSetSize(hProc, static_cast<SIZE_T>(-1), static_cast<SIZE_T>(-1))) {
+                // [FIX] Use "Soft Trim" via Quota Limits.
+                // Flags = 0 (QUOTA_LIMITS_HARDWS_MIN_DISABLE) allows the OS to reclaim 
+                // unused pages without forcing a full flush to disk (Hard Fault Storm).
+                // Min=4KB, Max=256MB (Soft limits, expandable).
+                if (SetProcessWorkingSetSizeEx(hProc, 4096, 256 * 1024 * 1024, 0)) {
                     trimmedCount++;
                     // Estimate freed (OS decides actual amount, but we log the potential)
-                    totalFreedBytes += (pmc.WorkingSetSize - (2 * 1024 * 1024)); 
+                    totalFreedBytes += (pmc.WorkingSetSize > (4 * 1024 * 1024) ? pmc.WorkingSetSize - (4 * 1024 * 1024) : 0);
                 }
                 
                 m_processTracker[pid].lastTrimTime = now;

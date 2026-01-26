@@ -118,10 +118,15 @@ void ExplorerBooster::OnTick() {
         // Exponential backoff: if we haven't seen activity for a long time, scan less frequently
         uint32_t effectiveInterval = (now - m_lastUserActivityMs.load() > 60000) ? 30000 : scanInterval;
 
-        if (now - m_lastScanMs > effectiveInterval) {
-            // FIX: Offload snapshot to background thread to prevent UI micro-stutters
+        // Atomic flag to prevent thread explosion if scanning hangs
+        static std::atomic<bool> s_isScanning{ false };
+
+        if (now - m_lastScanMs > effectiveInterval && !s_isScanning.load()) {
+            // FIX: Offload snapshot to background thread safely
+            s_isScanning = true;
             std::thread([this] {
                 ScanShellProcesses(); 
+                s_isScanning = false;
             }).detach();
             m_lastScanMs = now;
         }
