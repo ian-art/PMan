@@ -62,6 +62,17 @@ static ProcessNetClass ClassifyProcessActivity(DWORD pid, const std::wstring& ex
         return ProcessNetClass::SystemCritical;
     }
 
+    // [MAINTENANCE] Do not throttle Windows Update/Installer components
+    // These processes are designed to run when the user is away (Idle Mode).
+    // If the user has disabled these services, these processes won't be running, 
+    // and this check will simply be skipped (PMan respects user configuration).
+    if (exeName == L"tiworker.exe" || exeName == L"mousocoreworker.exe" || 
+        exeName == L"usocoreworker.exe" || exeName == L"wuauclt.exe" || 
+        exeName == L"trustedinstaller.exe" || exeName == L"msiexec.exe")
+    {
+        return ProcessNetClass::SystemCritical;
+    }
+
     // 3. Heuristic Classification
     if (exeName == L"discord.exe" || exeName == L"teams.exe" || exeName == L"zoom.exe" || 
         exeName == L"obs64.exe" || exeName == L"obs.exe") 
