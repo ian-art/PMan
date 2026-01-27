@@ -100,6 +100,7 @@ static UINT g_wmTaskbarCreated = 0;
 static std::vector<HICON> g_framesNormal;
 static std::vector<HICON> g_framesPaused;
 static std::vector<HICON> g_framesCustom; // Custom loaded frames
+static std::vector<HICON> g_framesCustomPaused; // Custom PAUSED frames
 static std::vector<HICON>* g_activeFrames = nullptr; // Pointer to the currently active set
 static std::wstring g_currentThemeName = L"Default";
 static size_t g_currentFrame = 0;
@@ -693,14 +694,48 @@ static void UpdateTrayTooltip()
 int RunMainProgram(int argc, wchar_t** argv);
 
 // --- Custom Tray Animation Helpers ---
+static void EnsureCustomFolderAndReadme() {
+    try {
+        std::filesystem::path baseDir = GetLogPath() / L"custom_icoanimation";
+        
+        // 1. Create directory if missing
+        if (!std::filesystem::exists(baseDir)) {
+            std::filesystem::create_directories(baseDir);
+        }
+
+        // 2. Create README if missing (ALWAYS check, even if dir existed)
+        std::filesystem::path readmePath = baseDir / L"README.txt";
+        if (!std::filesystem::exists(readmePath)) {
+            std::ofstream readme(readmePath);
+            if (readme.is_open()) {
+                readme << "PMan Custom Tray Animations\n"
+                       << "===========================\n\n"
+                       << "How to install a theme:\n"
+                       << "1. Create a folder with your theme name (e.g. 'Matrix') inside this folder.\n"
+                       << "2. Add 8 icons for the ACTIVE animation named:\n"
+                       << "   frame_01.ico, frame_02.ico ... frame_08.ico\n"
+                       << "3. (Optional) Add 8 icons for the PAUSED animation named:\n"
+                       << "   p_frame_01.ico, p_frame_02.ico ... p_frame_08.ico\n\n"
+                       << "Note:\n"
+                       << "- If paused icons (p_*) are missing, PMan will use the active icons for the paused state.\n";
+                readme.close();
+            }
+        }
+    } catch (...) {}
+}
+
 static std::vector<std::wstring> ScanAnimationThemes() {
+    EnsureCustomFolderAndReadme(); 
     std::vector<std::wstring> themes;
     try {
         std::filesystem::path baseDir = GetLogPath() / L"custom_icoanimation";
         if (std::filesystem::exists(baseDir)) {
             for (const auto& entry : std::filesystem::directory_iterator(baseDir)) {
                 if (entry.is_directory()) {
-                    themes.push_back(entry.path().filename().wstring());
+                    // Validate: Only list themes that have at least the first frame
+                    if (std::filesystem::exists(entry.path() / L"frame_01.ico")) {
+                        themes.push_back(entry.path().filename().wstring());
+                    }
                 }
             }
         }
@@ -712,28 +747,53 @@ static void SetCustomTheme(const std::wstring& themeName) {
     // Cleanup previous custom icons
     for (HICON h : g_framesCustom) DestroyIcon(h);
     g_framesCustom.clear();
+    for (HICON h : g_framesCustomPaused) DestroyIcon(h);
+    g_framesCustomPaused.clear();
 
     if (themeName == L"Default") {
         g_currentThemeName = L"Default";
-        if (!g_userPaused.load()) g_activeFrames = &g_framesNormal;
+        g_activeFrames = g_userPaused.load() ? &g_framesPaused : &g_framesNormal;
     } else {
         std::filesystem::path themePath = GetLogPath() / L"custom_icoanimation" / themeName;
-        // Load frames frame_01.ico to frame_08.ico
+        
+        // 1. Load Normal Frames
         for (int i = 1; i <= 8; ++i) {
             wchar_t filename[32];
             swprintf_s(filename, L"frame_%02d.ico", i);
-            std::filesystem::path iconPath = themePath / filename;
-            
-            HICON hIcon = (HICON)LoadImageW(nullptr, iconPath.c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION | LR_DEFAULTSIZE);
+            HICON hIcon = (HICON)LoadImageW(nullptr, (themePath / filename).c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION | LR_DEFAULTSIZE);
             if (hIcon) g_framesCustom.push_back(hIcon);
+        }
+
+        // 2. Load Paused Frames (p_*)
+        bool foundPaused = false;
+        for (int i = 1; i <= 8; ++i) {
+            wchar_t filename[32];
+            swprintf_s(filename, L"p_frame_%02d.ico", i);
+            HICON hIcon = (HICON)LoadImageW(nullptr, (themePath / filename).c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION | LR_DEFAULTSIZE);
+            if (hIcon) {
+                g_framesCustomPaused.push_back(hIcon);
+                foundPaused = true;
+            }
+        }
+
+        // 3. Fallback: If no specific paused icons, reuse normal icons (reload to get distinct handles)
+        if (!foundPaused || g_framesCustomPaused.empty()) {
+            for (HICON h : g_framesCustomPaused) DestroyIcon(h); // Cleanup partials
+            g_framesCustomPaused.clear();
+            for (int i = 1; i <= 8; ++i) {
+                wchar_t filename[32];
+                swprintf_s(filename, L"frame_%02d.ico", i);
+                HICON hIcon = (HICON)LoadImageW(nullptr, (themePath / filename).c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION | LR_DEFAULTSIZE);
+                if (hIcon) g_framesCustomPaused.push_back(hIcon);
+            }
         }
 
         if (!g_framesCustom.empty()) {
             g_currentThemeName = themeName;
-            if (!g_userPaused.load()) g_activeFrames = &g_framesCustom;
+            g_activeFrames = g_userPaused.load() ? &g_framesCustomPaused : &g_framesCustom;
         } else {
-            g_currentThemeName = L"Default"; // Fallback if folder empty or invalid
-            if (!g_userPaused.load()) g_activeFrames = &g_framesNormal;
+            g_currentThemeName = L"Default";
+            g_activeFrames = g_userPaused.load() ? &g_framesPaused : &g_framesNormal;
         }
     }
 
@@ -756,6 +816,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     switch (uMsg)
     {
     case WM_CREATE:
+        // Ensure custom folder structure exists immediately on startup
+        EnsureCustomFolderAndReadme();
+
         // 1. Load Normal Frames
         for (int i = 0; i < 8; i++) {
             g_framesNormal.push_back(LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_1 + i)));
@@ -1063,11 +1126,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             g_userPaused.store(p);
 
             // --- ANIMATION STATE SWITCH ---
-            // 1. Swap the pointer
-            if (p) {
-                g_activeFrames = &g_framesPaused;
-            } else {
-                g_activeFrames = (!g_framesCustom.empty()) ? &g_framesCustom : &g_framesNormal;
+            // 1. Swap the pointer based on Theme
+            if (p) { // Paused
+                if (g_currentThemeName == L"Default") g_activeFrames = &g_framesPaused;
+                else g_activeFrames = &g_framesCustomPaused;
+            } else { // Resumed
+                if (g_currentThemeName == L"Default") g_activeFrames = &g_framesNormal;
+                else g_activeFrames = &g_framesCustom;
             }
             
             // 2. Reset index to start fresh immediately
@@ -1128,6 +1193,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         // Cleanup Custom Icons
         for (HICON h : g_framesCustom) DestroyIcon(h);
         g_framesCustom.clear();
+        for (HICON h : g_framesCustomPaused) DestroyIcon(h);
+        g_framesCustomPaused.clear();
 
         KillTimer(hwnd, TRAY_TIMER_ID);
         Shell_NotifyIconW(NIM_DELETE, &g_nid);
