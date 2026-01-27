@@ -861,4 +861,3 @@ void SaveIconTheme(const std::wstring& theme)
     std::wofstream out(path);
     for (const auto& l : lines) out << l << L"\n";
 }
-

@@ -676,4 +676,3 @@ void LaunchRegistryGuard(DWORD originalVal)
             std::to_string(GetLastError()));
     }
 }
-
