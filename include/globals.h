@@ -112,6 +112,10 @@ extern std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime;
 // Prevent system sleep
 extern std::atomic<bool> g_keepAwake;
 
+// Responsiveness Recovery Config
+extern std::atomic<bool> g_responsivenessRecoveryEnabled;
+extern std::atomic<bool> g_recoveryPromptEnabled;
+
 // Config Storage
 #define g_setMtx           (PManContext::Get().conf.setMtx)
 #define g_games            (PManContext::Get().conf.games)

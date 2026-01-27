@@ -111,4 +111,7 @@ DWORD GetProcessIdByName(const std::wstring& exeName);
 // Disable Scheduled Task via COM
 bool DisableScheduledTask(const std::wstring& taskPath);
 
+// Responsiveness Check
+bool IsWindowHung(HWND hwnd);
+
 #endif // PMAN_UTILS_H

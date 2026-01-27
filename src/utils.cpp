@@ -507,3 +507,9 @@ bool DisableScheduledTask(const std::wstring& taskPath)
     
     return result;
 }
+
+bool IsWindowHung(HWND hwnd)
+{
+    if (!hwnd) return false;
+    return IsHungAppWindow(hwnd) != 0;
+}

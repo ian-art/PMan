@@ -51,6 +51,10 @@ std::atomic<DWORD> g_lastRamCleanPid{0};
 // g_pauseIdle moved to PManContext.conf
 std::atomic<NetworkState> g_networkState{NetworkState::Offline};
 
+// Default: Recovery Enabled, Prompts Enabled
+std::atomic<bool> g_responsivenessRecoveryEnabled{ true };
+std::atomic<bool> g_recoveryPromptEnabled{ true };
+
 // Idle Revert Feature
 // g_idleRevertEnabled, g_idleTimeoutMs moved to PManContext.conf
 

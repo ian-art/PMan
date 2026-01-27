@@ -188,6 +188,8 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
                                    bool suspendUpdates,
                                    bool idleRevert,
                                    uint32_t idleTimeoutMs,
+                                   bool responsivenessRecovery,
+                                   bool recoveryPrompt,
                                    const ExplorerConfig& explorerConfig)
 {
     std::ostringstream buffer;
@@ -246,6 +248,10 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
     globalContent << "; and no game is currently running.\n";
 	globalContent << "idle_revert_enabled = " << (idleRevert ? "true" : "false") << "\n";
     globalContent << "idle_timeout = " << timeoutStr << "\n\n";
+
+    globalContent << "; Hung App Recovery\n";
+    globalContent << "responsiveness_recovery = " << (responsivenessRecovery ? "true" : "false") << "\n";
+    globalContent << "recovery_prompt = " << (recoveryPrompt ? "true" : "false") << "\n\n";
     
     buffer << BuildConfigSection("global", globalContent.str());
 
@@ -349,6 +355,8 @@ bool CreateDefaultConfig(const std::filesystem::path& configPath)
             false,   // suspendUpdates
             false,   // idleRevert
             300000,  // idleTimeoutMs
+            true,    // responsivenessRecovery
+            true,    // recoveryPrompt
             defaultExplorer
         );
         
@@ -512,6 +520,10 @@ void LoadConfig()
                             }
                         }
                     }
+                    // Responsiveness Recovery
+                    else if (key == L"responsiveness_recovery") g_responsivenessRecoveryEnabled.store(ParseBool(value));
+                    else if (key == L"recovery_prompt") g_recoveryPromptEnabled.store(ParseBool(value));
+
                     // Idle Affinity Configuration
                     else if (key == L"enabled" && sect == GLOBAL) idleAffinityEnabled = ParseBool(value); // Context-aware check needed if sections overlap
                     // To avoid section ambiguity, we rely on the specific keys below which are unique to idle_affinity in standard config
@@ -617,6 +629,8 @@ void LoadConfig()
                                   g_suspendUpdatesDuringGames.load(),
                                   g_idleRevertEnabled.load(),
                                   g_idleTimeoutMs.load(),
+                                  g_responsivenessRecoveryEnabled.load(),
+                                  g_recoveryPromptEnabled.load(),
                                   explorerConfig);
             
             // Re-parse the upgraded file (prevent stack overflow with depth limit)

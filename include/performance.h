@@ -155,6 +155,9 @@ public:
     // Emergency response
     void TriggerEmergencyBoost(DWORD pid);
 
+    // Is gaming boost active?
+    bool HasActiveSessions();
+
 private:
     // Background Service Management
     void SuspendBackgroundServices();

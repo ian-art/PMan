@@ -783,6 +783,11 @@ void PerformanceGuardian::TriggerEmergencyBoost(DWORD pid) {
     SetTimerResolution(1);
 }
 
+bool PerformanceGuardian::HasActiveSessions() {
+    std::lock_guard lock(m_mtx);
+    return !m_sessions.empty();
+}
+
 void PerformanceGuardian::UpdateLearning(GameSession& session) {
     if (!session.learningMode || session.testPhase > 4) return;
     

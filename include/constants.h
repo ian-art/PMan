@@ -28,7 +28,7 @@
 static constexpr wchar_t CONFIG_FILENAME[] = L"config.ini";
 static constexpr wchar_t CUSTOM_LAUNCHERS_FILENAME[] = L"custom_launchers.txt";
 static constexpr wchar_t IGNORED_PROCESSES_FILENAME[] = L"ignore_processes.txt";
-static constexpr int CONFIG_VERSION = 2; // Increment when config structure changes
+static constexpr int CONFIG_VERSION = 3; // Increment when config structure changes
 
 // Registry Values
 static constexpr DWORD   VAL_GAME       = 0x28; // Short Fixed, High Boost (Gaming)
@@ -181,7 +181,7 @@ static constexpr const char* DEFAULT_CONFIG = R"(; Priority Manager Configuratio
 ;   Browsers: 0x26 - Optimized for multitasking responsiveness
 
 [meta]
-version=1
+version=3
 
 [global]
 ; Ignore non-interactive processes (services, scheduled tasks, SYSTEM processes)
@@ -208,6 +208,15 @@ suspend_updates_during_games = false
 ; no suffix = minutes: 5 (minutes)
 idle_revert_enabled = true
 idle_timeout = 5m
+
+; Hung App Recovery
+; Automatically detect and boost hung applications to restore responsiveness.
+; Automatically disabled when a game is running.
+responsiveness_recovery = true
+
+; Show a popup asking to restart the app if it stays hung for >15 seconds.
+; If false, PMAN will just attempt to boost it silently.
+recovery_prompt = true
 
 [games]
 ; Add your game executables here (one per line)
