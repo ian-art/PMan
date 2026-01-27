@@ -99,7 +99,9 @@ static UINT g_wmTaskbarCreated = 0;
 
 static std::vector<HICON> g_framesNormal;
 static std::vector<HICON> g_framesPaused;
+static std::vector<HICON> g_framesCustom; // Custom loaded frames
 static std::vector<HICON>* g_activeFrames = nullptr; // Pointer to the currently active set
+static std::wstring g_currentThemeName = L"Default";
 static size_t g_currentFrame = 0;
 // -----------------------------
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
@@ -690,6 +692,58 @@ static void UpdateTrayTooltip()
 // Forward declaration for main program logic
 int RunMainProgram(int argc, wchar_t** argv);
 
+// --- Custom Tray Animation Helpers ---
+static std::vector<std::wstring> ScanAnimationThemes() {
+    std::vector<std::wstring> themes;
+    try {
+        std::filesystem::path baseDir = GetLogPath() / L"custom_icoanimation";
+        if (std::filesystem::exists(baseDir)) {
+            for (const auto& entry : std::filesystem::directory_iterator(baseDir)) {
+                if (entry.is_directory()) {
+                    themes.push_back(entry.path().filename().wstring());
+                }
+            }
+        }
+    } catch (...) {}
+    return themes;
+}
+
+static void SetCustomTheme(const std::wstring& themeName) {
+    // Cleanup previous custom icons
+    for (HICON h : g_framesCustom) DestroyIcon(h);
+    g_framesCustom.clear();
+
+    if (themeName == L"Default") {
+        g_currentThemeName = L"Default";
+        if (!g_userPaused.load()) g_activeFrames = &g_framesNormal;
+    } else {
+        std::filesystem::path themePath = GetLogPath() / L"custom_icoanimation" / themeName;
+        // Load frames frame_01.ico to frame_08.ico
+        for (int i = 1; i <= 8; ++i) {
+            wchar_t filename[32];
+            swprintf_s(filename, L"frame_%02d.ico", i);
+            std::filesystem::path iconPath = themePath / filename;
+            
+            HICON hIcon = (HICON)LoadImageW(nullptr, iconPath.c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION | LR_DEFAULTSIZE);
+            if (hIcon) g_framesCustom.push_back(hIcon);
+        }
+
+        if (!g_framesCustom.empty()) {
+            g_currentThemeName = themeName;
+            if (!g_userPaused.load()) g_activeFrames = &g_framesCustom;
+        } else {
+            g_currentThemeName = L"Default"; // Fallback if folder empty or invalid
+            if (!g_userPaused.load()) g_activeFrames = &g_framesNormal;
+        }
+    }
+
+    g_currentFrame = 0;
+    if (g_activeFrames && !g_activeFrames->empty()) {
+        g_nid.hIcon = (*g_activeFrames)[0];
+        Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+    }
+}
+
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     // Re-add icon if Explorer restarts (TaskbarCreated message)
@@ -783,6 +837,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_OPEN_DIR, L"Open Log Folder");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hDashMenu, L"Monitor & Logs");
 
+            // --- Theme Selection Submenu ---
+            HMENU hThemeMenu = CreatePopupMenu();
+            AppendMenuW(hThemeMenu, MF_STRING | (g_currentThemeName == L"Default" ? MF_CHECKED : 0), ID_TRAY_THEME_BASE, L"Default (Embedded)");
+            
+            std::vector<std::wstring> themes = ScanAnimationThemes();
+            int themeId = ID_TRAY_THEME_BASE + 1;
+            for (const auto& theme : themes) {
+                bool isSelected = (g_currentThemeName == theme);
+                AppendMenuW(hThemeMenu, MF_STRING | (isSelected ? MF_CHECKED : 0), themeId++, theme.c_str());
+            }
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hThemeMenu, L"Icon Theme");
+
 			// 2. Configuration Submenu
             HMENU hConfigMenu = CreatePopupMenu();
             AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, (L"Edit Config (config.ini)" + editorName).c_str());
@@ -860,6 +926,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             DestroyMenu(hControlMenu);
             DestroyMenu(hConfigMenu);
             DestroyMenu(hDashMenu);
+            DestroyMenu(hThemeMenu);
             DestroyMenu(hHelpMenu);
             DestroyMenu(hMenu);
         }
@@ -868,6 +935,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     case WM_COMMAND:
     {
         DWORD wmId = LOWORD(wParam);
+        
+        // --- Theme Handler ---
+        if (wmId >= ID_TRAY_THEME_BASE && wmId < ID_TRAY_THEME_BASE + 100) {
+            if (wmId == ID_TRAY_THEME_BASE) {
+                SetCustomTheme(L"Default");
+            } else {
+                std::vector<std::wstring> themes = ScanAnimationThemes();
+                int index = wmId - (ID_TRAY_THEME_BASE + 1);
+                if (index >= 0 && index < themes.size()) {
+                    SetCustomTheme(themes[index]);
+                }
+            }
+        }
         
         // --- New Handlers ---
         if (wmId == ID_TRAY_LIVE_LOG) {
@@ -984,7 +1064,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
             // --- ANIMATION STATE SWITCH ---
             // 1. Swap the pointer
-            g_activeFrames = p ? &g_framesPaused : &g_framesNormal;
+            if (p) {
+                g_activeFrames = &g_framesPaused;
+            } else {
+                g_activeFrames = (!g_framesCustom.empty()) ? &g_framesCustom : &g_framesNormal;
+            }
             
             // 2. Reset index to start fresh immediately
             g_currentFrame = 0;
@@ -1041,6 +1125,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return TRUE;
 
     case WM_DESTROY:
+        // Cleanup Custom Icons
+        for (HICON h : g_framesCustom) DestroyIcon(h);
+        g_framesCustom.clear();
+
         KillTimer(hwnd, TRAY_TIMER_ID);
         Shell_NotifyIconW(NIM_DELETE, &g_nid);
         PostQuitMessage(0);

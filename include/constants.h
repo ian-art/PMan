@@ -67,6 +67,9 @@ static constexpr UINT    ID_TRAY_EDIT_IGNORED   = 2006;
 static constexpr UINT    ID_TRAY_EDIT_LAUNCHERS = 2007;
 static constexpr UINT    ID_TRAY_EDIT_VIDEO_PLAYERS = 2008;
 
+// Custom Tray Animation
+static constexpr UINT    ID_TRAY_THEME_BASE         = 3000;
+
 // PAYPAL
 static constexpr wchar_t SUPPORT_URL[] = L"https://paypal.me/ianart/100";
 
