@@ -28,5 +28,6 @@ bool CreateDefaultConfig(const std::filesystem::path& configPath);
 struct TweakConfig; // Forward declaration
 void LoadTweakPreferences(TweakConfig& config);
 void SaveTweakPreferences(const TweakConfig& config);
+void SaveIconTheme(const std::wstring& theme);
 
 #endif // PMAN_CONFIG_H

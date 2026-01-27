@@ -190,7 +190,8 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
                                    uint32_t idleTimeoutMs,
                                    bool responsivenessRecovery,
                                    bool recoveryPrompt,
-                                   const ExplorerConfig& explorerConfig)
+                                   const ExplorerConfig& explorerConfig,
+                                   const std::wstring& iconTheme)
 {
     std::ostringstream buffer;
     
@@ -251,7 +252,8 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
 
     globalContent << "; Hung App Recovery\n";
     globalContent << "responsiveness_recovery = " << (responsivenessRecovery ? "true" : "false") << "\n";
-    globalContent << "recovery_prompt = " << (recoveryPrompt ? "true" : "false") << "\n\n";
+    globalContent << "recovery_prompt = " << (recoveryPrompt ? "true" : "false") << "\n";
+    globalContent << "icon_theme = " << WideToUtf8(iconTheme.c_str()) << "\n\n";
     
     buffer << BuildConfigSection("global", globalContent.str());
 
@@ -357,7 +359,8 @@ bool CreateDefaultConfig(const std::filesystem::path& configPath)
             300000,  // idleTimeoutMs
             true,    // responsivenessRecovery
             true,    // recoveryPrompt
-            defaultExplorer
+            defaultExplorer,
+            L"Default"
         );
         
         Log("Created default config at: " + WideToUtf8(configPath.c_str()));
@@ -405,6 +408,7 @@ void LoadConfig()
 		LoadIgnoredProcesses(ignoredProcesses);
         LoadCustomLaunchers(customLaunchers);
         bool lockPolicy = false;
+        std::wstring iconTheme = L"Default";
         
         if (!std::filesystem::exists(configPath))
         {
@@ -529,6 +533,7 @@ void LoadConfig()
                     // To avoid section ambiguity, we rely on the specific keys below which are unique to idle_affinity in standard config
                     else if (key == L"reserved_cores") idleReservedCores = std::stoi(value);
                     else if (key == L"min_ram_gb") idleMinRam = std::stoi(value);
+                    else if (key == L"icon_theme") iconTheme = value;
 				}
                 continue;
             }
@@ -631,7 +636,8 @@ void LoadConfig()
                                   g_idleTimeoutMs.load(),
                                   g_responsivenessRecoveryEnabled.load(),
                                   g_recoveryPromptEnabled.load(),
-                                  explorerConfig);
+                                  explorerConfig,
+                                  iconTheme);
             
             // Re-parse the upgraded file (prevent stack overflow with depth limit)
             static thread_local int upgradeDepth = 0;
@@ -654,6 +660,7 @@ void LoadConfig()
             g_browserWindows = std::move(browserWindows);
             g_customLaunchers = std::move(customLaunchers);
             g_ignoredProcesses = std::move(ignoredProcesses);
+            g_iconTheme = iconTheme;
         }
         
 		g_ignoreNonInteractive.store(ignoreNonInteractive);
@@ -797,3 +804,61 @@ void SaveTweakPreferences(const TweakConfig& config)
     out << L"dvr = " << (config.dvr ? L"true" : L"false") << L"\n";
     out << L"bloatware = " << (config.bloatware ? L"true" : L"false") << L"\n";
 }
+
+void SaveIconTheme(const std::wstring& theme)
+{
+    {
+        std::unique_lock lg(g_setMtx);
+        g_iconTheme = theme;
+    }
+
+    std::filesystem::path path = GetConfigPath();
+    std::vector<std::wstring> lines;
+    std::wifstream f(path);
+    if (f) {
+        std::wstring line;
+        while (std::getline(f, line)) lines.push_back(line);
+        f.close();
+    }
+
+    bool inGlobal = false;
+    bool updated = false;
+
+    for (auto& line : lines) {
+        std::wstring trim = line;
+        while (!trim.empty() && iswspace(trim.front())) trim.erase(0, 1);
+        
+        if (trim.find(L"[global]") == 0) {
+            inGlobal = true;
+            continue;
+        }
+        if (!trim.empty() && trim.front() == L'[') inGlobal = false;
+
+        if (inGlobal && trim.find(L"icon_theme") == 0) {
+             line = L"icon_theme = " + theme;
+             updated = true;
+             break;
+        }
+    }
+
+    if (!updated) {
+         for (auto it = lines.begin(); it != lines.end(); ++it) {
+            std::wstring trim = *it;
+            while (!trim.empty() && iswspace(trim.front())) trim.erase(0, 1);
+            if (trim.find(L"[global]") == 0) {
+                lines.insert(it + 1, L"icon_theme = " + theme);
+                updated = true;
+                break;
+            }
+         }
+    }
+    
+    if (!updated) {
+         lines.push_back(L"[global]");
+         lines.push_back(L"icon_theme = " + theme);
+    }
+
+    std::wofstream out(path);
+    for (const auto& l : lines) out << l << L"\n";
+}
+

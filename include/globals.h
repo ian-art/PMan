@@ -112,6 +112,8 @@ extern std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime;
 // Prevent system sleep
 extern std::atomic<bool> g_keepAwake;
 
+extern std::wstring g_iconTheme;
+
 // Responsiveness Recovery Config
 extern std::atomic<bool> g_responsivenessRecoveryEnabled;
 extern std::atomic<bool> g_recoveryPromptEnabled;

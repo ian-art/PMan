@@ -102,7 +102,7 @@ static std::vector<HICON> g_framesPaused;
 static std::vector<HICON> g_framesCustom; // Custom loaded frames
 static std::vector<HICON> g_framesCustomPaused; // Custom PAUSED frames
 static std::vector<HICON>* g_activeFrames = nullptr; // Pointer to the currently active set
-static std::wstring g_currentThemeName = L"Default";
+// g_currentThemeName replaced by g_iconTheme (globals.h)
 static size_t g_currentFrame = 0;
 // -----------------------------
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
@@ -751,7 +751,7 @@ static void SetCustomTheme(const std::wstring& themeName) {
     g_framesCustomPaused.clear();
 
     if (themeName == L"Default") {
-        g_currentThemeName = L"Default";
+        g_iconTheme = L"Default";
         g_activeFrames = g_userPaused.load() ? &g_framesPaused : &g_framesNormal;
     } else {
         std::filesystem::path themePath = GetLogPath() / L"custom_icoanimation" / themeName;
@@ -789,10 +789,10 @@ static void SetCustomTheme(const std::wstring& themeName) {
         }
 
         if (!g_framesCustom.empty()) {
-            g_currentThemeName = themeName;
+            g_iconTheme = themeName;
             g_activeFrames = g_userPaused.load() ? &g_framesCustomPaused : &g_framesCustom;
         } else {
-            g_currentThemeName = L"Default";
+            g_iconTheme = L"Default";
             g_activeFrames = g_userPaused.load() ? &g_framesPaused : &g_framesNormal;
         }
     }
@@ -830,7 +830,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         }
 
         // 3. Set Initial State
-        g_activeFrames = &g_framesNormal;
+        if (g_iconTheme != L"Default") {
+            SetCustomTheme(g_iconTheme);
+        } else {
+            g_activeFrames = &g_framesNormal;
+        }
 
         g_nid.cbSize = sizeof(NOTIFYICONDATAW);
         g_nid.hWnd = hwnd;
@@ -902,12 +906,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
             // --- Theme Selection Submenu ---
             HMENU hThemeMenu = CreatePopupMenu();
-            AppendMenuW(hThemeMenu, MF_STRING | (g_currentThemeName == L"Default" ? MF_CHECKED : 0), ID_TRAY_THEME_BASE, L"Default (Embedded)");
+            AppendMenuW(hThemeMenu, MF_STRING | (g_iconTheme == L"Default" ? MF_CHECKED : 0), ID_TRAY_THEME_BASE, L"Default (Embedded)");
             
             std::vector<std::wstring> themes = ScanAnimationThemes();
             int themeId = ID_TRAY_THEME_BASE + 1;
             for (const auto& theme : themes) {
-                bool isSelected = (g_currentThemeName == theme);
+                bool isSelected = (g_iconTheme == theme);
                 AppendMenuW(hThemeMenu, MF_STRING | (isSelected ? MF_CHECKED : 0), themeId++, theme.c_str());
             }
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hThemeMenu, L"Icon Theme");
@@ -1001,15 +1005,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         
         // --- Theme Handler ---
         if (wmId >= ID_TRAY_THEME_BASE && wmId < ID_TRAY_THEME_BASE + 100) {
-            if (wmId == ID_TRAY_THEME_BASE) {
-                SetCustomTheme(L"Default");
-            } else {
+            std::wstring newTheme = L"Default";
+            if (wmId != ID_TRAY_THEME_BASE) {
                 std::vector<std::wstring> themes = ScanAnimationThemes();
                 int index = wmId - (ID_TRAY_THEME_BASE + 1);
                 if (index >= 0 && index < themes.size()) {
-                    SetCustomTheme(themes[index]);
+                    newTheme = themes[index];
                 }
             }
+            SetCustomTheme(newTheme);
+            SaveIconTheme(newTheme);
         }
         
         // --- New Handlers ---
@@ -1128,10 +1133,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             // --- ANIMATION STATE SWITCH ---
             // 1. Swap the pointer based on Theme
             if (p) { // Paused
-                if (g_currentThemeName == L"Default") g_activeFrames = &g_framesPaused;
+                if (g_iconTheme == L"Default") g_activeFrames = &g_framesPaused;
                 else g_activeFrames = &g_framesCustomPaused;
             } else { // Resumed
-                if (g_currentThemeName == L"Default") g_activeFrames = &g_framesNormal;
+                if (g_iconTheme == L"Default") g_activeFrames = &g_framesNormal;
                 else g_activeFrames = &g_framesCustom;
             }
             
