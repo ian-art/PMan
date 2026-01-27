@@ -87,8 +87,19 @@ static UINT g_wmTaskbarCreated = 0;
 #define IDI_TRAY_FRAME_7 207
 #define IDI_TRAY_FRAME_8 208
 
-constexpr UINT TRAY_FRAME_COUNT = 8;
-static std::array<HICON, TRAY_FRAME_COUNT> g_trayFrames{};
+// --- Tray Animation Globals ---
+#define IDI_TRAY_ORANGE_FRAME_1 209
+#define IDI_TRAY_ORANGE_FRAME_2 210
+#define IDI_TRAY_ORANGE_FRAME_3 211
+#define IDI_TRAY_ORANGE_FRAME_4 212
+#define IDI_TRAY_ORANGE_FRAME_5 213
+#define IDI_TRAY_ORANGE_FRAME_6 214
+#define IDI_TRAY_ORANGE_FRAME_7 215
+#define IDI_TRAY_ORANGE_FRAME_8 216
+
+static std::vector<HICON> g_framesNormal;
+static std::vector<HICON> g_framesPaused;
+static std::vector<HICON>* g_activeFrames = nullptr; // Pointer to the currently active set
 static size_t g_currentFrame = 0;
 // -----------------------------
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
@@ -691,25 +702,31 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     switch (uMsg)
     {
     case WM_CREATE:
-        // Load Animation Frames
-        g_trayFrames = {
-            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_1)),
-            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_2)),
-            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_3)),
-            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_4)),
-            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_5)),
-            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_6)),
-            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_7)),
-            LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_8))
-        };
+        // 1. Load Normal Frames
+        for (int i = 0; i < 8; i++) {
+            g_framesNormal.push_back(LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_1 + i)));
+        }
+
+        // 2. Load Paused (Orange) Frames
+        for (int i = 0; i < 8; i++) {
+            g_framesPaused.push_back(LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_ORANGE_FRAME_1 + i)));
+        }
+
+        // 3. Set Initial State
+        g_activeFrames = &g_framesNormal;
 
         g_nid.cbSize = sizeof(NOTIFYICONDATAW);
         g_nid.hWnd = hwnd;
         g_nid.uID = ID_TRAY_APP_ICON;
         g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         g_nid.uCallbackMessage = WM_TRAYICON;
-        // Set initial frame (0) or fallback
-        g_nid.hIcon = g_trayFrames[0] ? g_trayFrames[0] : LoadIcon(nullptr, IDI_APPLICATION);
+        
+        // Initial Icon
+        if (!g_activeFrames->empty()) {
+            g_nid.hIcon = (*g_activeFrames)[0];
+        } else {
+            g_nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+        }
         
         Shell_NotifyIconW(NIM_ADD, &g_nid);
         UpdateTrayTooltip(); // Set initial text
@@ -723,14 +740,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
     // [DARK MODE] Refresh Menu Themes if system theme changes
     case WM_TIMER:
-        if (wParam == TRAY_TIMER_ID)
+        if (wParam == TRAY_TIMER_ID && g_activeFrames && !g_activeFrames->empty())
         {
-            g_currentFrame = (g_currentFrame + 1) % TRAY_FRAME_COUNT;
-            if (g_trayFrames[g_currentFrame]) 
-            {
-                g_nid.hIcon = g_trayFrames[g_currentFrame];
-                Shell_NotifyIconW(NIM_MODIFY, &g_nid);
-            }
+            // Simple cyclic animation on the active set
+            g_currentFrame = (g_currentFrame + 1) % g_activeFrames->size();
+            g_nid.hIcon = (*g_activeFrames)[g_currentFrame];
+            Shell_NotifyIconW(NIM_MODIFY, &g_nid);
         }
         return 0;
 
@@ -967,8 +982,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             bool p = !g_userPaused.load();
             g_userPaused.store(p);
 
-            UpdateTrayTooltip(); // Refresh Tooltip
+            // --- ANIMATION STATE SWITCH ---
+            // 1. Swap the pointer
+            g_activeFrames = p ? &g_framesPaused : &g_framesNormal;
+            
+            // 2. Reset index to start fresh immediately
+            g_currentFrame = 0;
+            
+            // 3. Force immediate icon update (don't wait for timer)
+            if (g_activeFrames && !g_activeFrames->empty()) {
+                g_nid.hIcon = (*g_activeFrames)[0];
+                Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+            }
+            // -----------------------------
 
+            UpdateTrayTooltip(); 
             Log(p ? "[USER] Protection PAUSED." : "[USER] Protection RESUMED.");
             if (!p) g_reloadNow.store(true);
         }
