@@ -20,6 +20,7 @@
 #include "memory_optimizer.h"
 #include "globals.h"
 #include "logger.h"
+#include "responsiveness_provider.h"
 #include "utils.h"
 #include <psapi.h>
 #include <pdhmsg.h>
@@ -354,6 +355,14 @@ void MemoryOptimizer::RunThread() {
 
         // 4. Check if target active (Game)
         if (IsTargetProcess(fgName)) {
+            // Phase 4: SRAM Policy Integration
+            // Rule: If SLIGHT_PRESSURE (or worse), pause background trimming.
+            // Memory trimming is I/O and Lock intensive; we must back off early.
+            if (GetSystemResponsiveness() >= LagState::SLIGHT_PRESSURE) {
+                Sleep(2000); // Wait for system to settle
+                continue;
+            }
+
             // Monitor Logic
             MemorySnapshot snap = CollectSnapshot();
             

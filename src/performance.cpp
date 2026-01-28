@@ -20,6 +20,7 @@
 #include "performance.h"
 #include "logger.h"
 #include "globals.h"
+#include "sram_engine.h"
 #include "events.h"
 #include "tweaks.h"
 #include "utils.h"
@@ -571,6 +572,21 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
 }
 
 void PerformanceGuardian::OnPerformanceTick() {
+    // Phase 4: SRAM Policy Integration
+    LagState sysState = SramEngine::Get().GetStatus().state;
+
+    // Rule 1: CRITICAL_LAG -> "Do No Harm" Mode
+    // Stop all active optimizations and analysis to prevent cascading failure.
+    if (sysState == LagState::CRITICAL_LAG) return;
+
+    // Rule 2: LAGGING -> Defer Scans & Yield
+    // If system is lagging, don't burn CPU analyzing previous frames. 
+    // This effectively suspends "Emergency Boosts" since analysis triggers them.
+    if (sysState == LagState::LAGGING) {
+        Sleep(10); // Yield CPU to let the system recover
+        return;
+    }
+
     if (g_isSuspended.load()) return;
     std::lock_guard lock(m_mtx);
     uint64_t now = GetTickCount64();

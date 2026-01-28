@@ -38,6 +38,7 @@
 #include "input_guardian.h"
 #include "gui_manager.h"
 #include "dark_mode.h"
+#include "sram_engine.h"
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -678,10 +679,16 @@ static void UpdateTrayTooltip()
     }
 
     // 3. Current Mode (Optional - requires exposing g_lastMode in globals.h)
-    // For now, we show if we are in a special state
     if (g_sessionLocked.load()) {
          tip += L"\n\u1F3AE Mode: Gaming";
     }
+
+    // Phase 5: SRAM Status
+    LagState sramState = SramEngine::Get().GetStatus().state;
+    if (sramState == LagState::SNAPPY) tip += L"\n\u26A1 System: Snappy";
+    else if (sramState == LagState::SLIGHT_PRESSURE) tip += L"\n\u26A0 System: Pressure";
+    else if (sramState == LagState::LAGGING) tip += L"\n\u26D4 System: Lagging";
+    else if (sramState == LagState::CRITICAL_LAG) tip += L"\n\u2620 System: CRITICAL";
 
     // Safety: Truncate to 127 chars to prevent buffer overflow (szTip limit)
     if (tip.length() > 127) tip = tip.substr(0, 127);
@@ -692,6 +699,36 @@ static void UpdateTrayTooltip()
 
 // Forward declaration for main program logic
 int RunMainProgram(int argc, wchar_t** argv);
+
+// Phase 5: Notification Helper
+static void ShowSramNotification(LagState state) {
+    if (state <= LagState::SLIGHT_PRESSURE) return; // Don't annoy user for minor things
+
+    // Rate Limit: Max 1 notification every 30 seconds
+    static uint64_t lastNotify = 0;
+    uint64_t now = GetTickCount64();
+    if (now - lastNotify < 30000) return;
+    lastNotify = now;
+
+    std::wstring title = L"System Responsiveness Alert";
+    std::wstring msg = L"";
+
+    if (state == LagState::LAGGING) {
+        msg = L"System is experiencing lag. Optimization scans have been deferred to restore responsiveness.";
+        g_nid.dwInfoFlags = NIIF_WARNING;
+    } else if (state == LagState::CRITICAL_LAG) {
+        msg = L"CRITICAL LAG DETECTED. Entering 'Do No Harm' mode. All background operations stopped.";
+        g_nid.dwInfoFlags = NIIF_ERROR;
+    }
+
+    wcsncpy_s(g_nid.szInfoTitle, title.c_str(), _TRUNCATE);
+    wcsncpy_s(g_nid.szInfo, msg.c_str(), _TRUNCATE);
+    g_nid.uFlags |= NIF_INFO;
+    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+    
+    // Clear flag after sending to prevent stuck balloon
+    g_nid.uFlags &= ~NIF_INFO;
+}
 
 // --- Custom Tray Animation Helpers ---
 static void EnsureCustomFolderAndReadme() {
@@ -1418,6 +1455,10 @@ if (!taskExists)
 	// Initialize Service Watcher
     ServiceWatcher::Initialize();
 
+    // Initialize SRAM (System Responsiveness Awareness Module)
+    // Must be initialized before subsystems that depend on LagState
+    SramEngine::Get().Initialize();
+
     DetectOSCapabilities();
     // Managed thread lifetime (removed detach)
     std::thread restoreThread([]() {
@@ -1767,6 +1808,16 @@ if (!taskExists)
                 // Run Responsiveness Manager (Hung App Recovery)
                 // Checks foreground window state and applies safe boosts if hung
                 g_responsivenessManager.Update();
+
+                // Phase 5: SRAM UI Updates
+                static LagState lastKnownState = LagState::SNAPPY;
+                LagState currentState = SramEngine::Get().GetStatus().state;
+                
+                if (currentState != lastKnownState) {
+                    UpdateTrayTooltip(); // Refresh tooltip text
+                    ShowSramNotification(currentState); // Show balloon if critical
+                    lastKnownState = currentState;
+                }
                 
                 g_lastExplorerPollMs = now;
             }
@@ -1794,6 +1845,7 @@ if (!taskExists)
     g_explorerBooster.Shutdown();
     g_inputGuardian.Shutdown();
     g_memoryOptimizer.Shutdown();
+    SramEngine::Get().Shutdown();
 	
     // Signal threads to wake up/stop
     if (g_hShutdownEvent) SetEvent(g_hShutdownEvent); // Wakes Watchdog immediately
