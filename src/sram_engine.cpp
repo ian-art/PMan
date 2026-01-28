@@ -62,12 +62,32 @@ void SramEngine::Shutdown() {
     if (m_thread.joinable()) {
         m_thread.join();
     }
+
+    // Cleanup PDH Resources to prevent handle leak
+    if (m_hPdhQuery) {
+        PdhCloseQuery((PDH_HQUERY)m_hPdhQuery);
+        m_hPdhQuery = nullptr;
+        m_hPdhCounter = nullptr;
+    }
+
     Log("[SRAM] Stopped.");
 }
 
 LagStatus SramEngine::GetStatus() const {
     // Lock-free atomic load (via pointer)
-    return m_status->load(std::memory_order_acquire);
+    LagStatus current = m_status->load(std::memory_order_acquire);
+    
+    // [WATCHDOG] Safety Check: Is the data stale?
+    // If the engine hasn't updated in > 3000ms, assume the thread is dead/hung.
+    // Default to SNAPPY (Do No Harm) to prevent getting stuck in CRITICAL/LAGGING states.
+    uint64_t now = GetTickCount64();
+    if (now - current.timestamp > 3000) {
+        // Return a safe, temporary status. 
+        // We do not overwrite the atomic (to preserve debug evidence), just return safe value to caller.
+        return LagStatus{ 0.0f, LagState::SNAPPY, now };
+    }
+
+    return current;
 }
 
 DWORD SramEngine::GetThreadId() const {
@@ -110,12 +130,46 @@ void SramEngine::InitSensors() {
 }
 
 void SramEngine::CollectUiLatency() {
-    // 2.1 Post a ping to ourselves
-    // We send the current time; when we process the message, we check the delta.
-    // This measures the congestion of OUR thread's message queue.
-    uint64_t now = GetTickCount64();
-    m_lastPingSent = now;
-    PostThreadMessageW(m_threadId.load(), WM_SRAM_PING, (WPARAM)now, 0);
+    // 2.1 Measure Foreground UI Responsiveness
+    // We send a harmless WM_NULL to the foreground window. 
+    // If it takes > 0ms to return, the UI thread is busy.
+    // If it times out, the app is hung.
+    
+    HWND hFg = GetForegroundWindow();
+    if (!hFg) {
+        m_uiLatencyMs = 0; // Desktop/Idle
+        return;
+    }
+
+    // Do not measure ourselves or our own windows
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hFg, &pid);
+    if (pid == GetCurrentProcessId()) {
+        m_uiLatencyMs = 0; 
+        return;
+    }
+
+    uint64_t start = GetTickCount64();
+    DWORD_PTR result = 0;
+    
+    // Timeout of 100ms is sufficient to detect "Micro-lag" vs "Hang"
+    // SMTO_ABORTIFHUNG prevents us from waiting on a truly dead window
+    if (SendMessageTimeoutW(hFg, WM_NULL, 0, 0, 
+        SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_NOTIMEOUTIFNOTHUNG, 
+        100, &result) == 0) {
+        
+        // Failed or Timed Out
+        if (GetLastError() == ERROR_TIMEOUT) {
+            m_uiLatencyMs = 100; // Cap at timeout limit (Critical Lag)
+        } else {
+            // Window invalid or access denied (e.g. Admin process vs User)
+            m_uiLatencyMs = 0; 
+        }
+    } else {
+        // Success - Calculate round-trip time
+        uint64_t delta = GetTickCount64() - start;
+        m_uiLatencyMs = (uint32_t)delta;
+    }
 }
 
 void SramEngine::CollectDwmStats() {
@@ -134,17 +188,21 @@ void SramEngine::CollectInputStats(LPARAM lParam) {
     GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
     
     if (dwSize > 0) {
-        // We just track the timestamp of the last activity for now
-        m_lastInputEvent = GetTickCount64();
+        uint64_t now = GetTickCount64();
+        m_lastInputEvent = now;
         
-        // Calculate latency: The time the event happened vs now
-        // Note: GetMessageTime() is usually consistent with the event retrieval time
-        RAWINPUTHEADER header;
-        if (GetRawInputData((HRAWINPUT)lParam, RID_HEADER, &header, &dwSize, sizeof(RAWINPUTHEADER)) == dwSize) {
-            // header.dwType can be RIM_TYPEKEYBOARD or RIM_TYPEMOUSE
-            // We can't easily get the true "generation" timestamp from raw input without advanced hooks,
-            // but we can measure the gap between the OS dispatching it and us receiving it if using hooks.
-            // For standard RawInput, we'll assume "Input Present" is the signal we care about.
+        // Fix: Populate the latency metric to prevent placebo effect.
+        // While header timestamps aren't perfect, we can measure the gap between
+        // the message posting time (captured by GetMessageTime) and current processing time.
+        // This represents the delay in the message queue processing.
+        DWORD msgTime = GetMessageTime();
+        uint64_t latency = (uint32_t)now - msgTime; 
+        
+        // Sanity check for rollover or clock skew
+        if (latency < 1000) {
+            m_inputLatencyMs = (uint32_t)latency;
+        } else {
+            m_inputLatencyMs = 0;
         }
     }
 }
@@ -203,7 +261,9 @@ void SramEngine::EvaluateState() {
     float c_input = n_input * 0.20f;
     float c_cpu   = n_cpu * 0.15f;
     
-    float score = c_ui + c_dwm + c_input + c_cpu;
+    // Normalize score to 0.0 - 1.0 range (Sum of weights is 0.85)
+    // This accounts for the unimplemented GPU/IO weight (0.15)
+    float score = (c_ui + c_dwm + c_input + c_cpu) / 0.85f;
 
     // 4. Map to Raw State
     LagState rawState = LagState::SNAPPY;
@@ -227,15 +287,17 @@ void SramEngine::EvaluateState() {
         }
     } else if (rawState < m_currentLogicState) {
         // DOWNGRADE (Improving): Use Cool-down Timer
-        // Must stay stable for 2 seconds before relaxing.
-        m_consecutiveSpikes = 0; // Reset spikes on improvement
+        // Must stay CONTINUOUSLY stable for 2 seconds before relaxing.
+        m_consecutiveSpikes = 0; 
         if (now - m_lastStateChangeTime >= HYSTERESIS_COOLDOWN_MS) {
             m_currentLogicState = rawState;
             m_lastStateChangeTime = now;
             stateChanged = true;
         }
     } else {
-        // Stable
+        // Stable or Fluctuation (Higher/Equal but not Spike Trigger)
+        // Reset the stability timer because the signal is not consistently low
+        m_lastStateChangeTime = now;
         m_consecutiveSpikes = 0;
     }
 
@@ -263,7 +325,10 @@ void SramEngine::EvaluateState() {
         if (c_cpu > maxVal) { maxVal = c_cpu; culprit = "CPU Queue (" + std::to_string(m_cpuQueueLength) + ")"; }
         if (c_input > maxVal) { maxVal = c_input; culprit = "Input Delay"; }
 
-        Log("[SRAM] State Transition: " + stateStr + " (Score: " + std::to_string(score) + "). Primary Factor: " + culprit);
+        // Format score to 2 decimal places
+        char scoreBuf[16];
+        snprintf(scoreBuf, sizeof(scoreBuf), "%.2f", score);
+        Log("[SRAM] State Transition: " + stateStr + " (Score: " + std::string(scoreBuf) + "). Primary Factor: " + culprit);
     }
 }
 
@@ -345,6 +410,12 @@ void SramEngine::WorkerThread() {
     } else {
         Log("[SRAM] FATAL: Failed to create message window: " + std::to_string(GetLastError()));
     }
+
+    // Explicitly unregister Raw Input to prevent dangling hooks
+    RAWINPUTDEVICE rid[2];
+    rid[0].usUsagePage = 0x01; rid[0].usUsage = 0x02; rid[0].dwFlags = RIDEV_REMOVE; rid[0].hwndTarget = nullptr;
+    rid[1].usUsagePage = 0x01; rid[1].usUsage = 0x06; rid[1].dwFlags = RIDEV_REMOVE; rid[1].hwndTarget = nullptr;
+    RegisterRawInputDevices(rid, 2, sizeof(rid[0]));
 
     if (hwnd) DestroyWindow(hwnd);
     UnregisterClassW(SRAM_WINDOW_CLASS, wc.hInstance);
