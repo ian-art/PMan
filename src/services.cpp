@@ -29,7 +29,8 @@
 #include <pdh.h>
 #pragma comment(lib, "pdh.lib")
 
-static constexpr int SERVICE_OP_WAIT_RETRIES = 50;
+// [PATCH] Reduced to 2s to prevent blocking Game Mode activation
+static constexpr int SERVICE_OP_WAIT_RETRIES = 20;
 static constexpr int SERVICE_OP_WAIT_DELAY_MS = 100;
 
 // Helper: Check for active dependent services to prevent cascade failures
@@ -955,6 +956,7 @@ void WindowsServiceManager::Cleanup()
     
     // Explicitly release the manager handle
     m_scManager.reset();
+	CloseBitsCounters(); // [PATCH] Ensure PDH is closed
 }
 
 // --------------------------------------------------------------------------
@@ -1062,6 +1064,34 @@ g_serviceManager.ResumeAll();
     g_servicesSuspended.store(false);
 }
 
+void WindowsServiceManager::InitBitsCounters()
+{
+    if (m_pdhQuery) return; // Already initialized
+
+    if (PdhOpenQueryW(nullptr, 0, reinterpret_cast<PDH_HQUERY*>(&m_pdhQuery)) != ERROR_SUCCESS) {
+        m_pdhQuery = nullptr;
+        return;
+    }
+
+    // BITS bytes transferred/sec counter
+    const wchar_t* counterPath = L"\\BITS Net Utilization(*)\\Bytes Transferred/sec";
+
+    if (PdhAddCounterW(reinterpret_cast<PDH_HQUERY>(m_pdhQuery), counterPath, 0, 
+        reinterpret_cast<PDH_HCOUNTER*>(&m_bitsCounter)) != ERROR_SUCCESS) {
+        CloseBitsCounters();
+        return;
+    }
+}
+
+void WindowsServiceManager::CloseBitsCounters()
+{
+    if (m_pdhQuery) {
+        PdhCloseQuery(reinterpret_cast<PDH_HQUERY>(m_pdhQuery));
+        m_pdhQuery = nullptr;
+        m_bitsCounter = nullptr;
+    }
+}
+
 double WindowsServiceManager::GetBitsBandwidthMBps() const
 {
     // Non-blocking retrieval of the last known metric
@@ -1071,36 +1101,32 @@ double WindowsServiceManager::GetBitsBandwidthMBps() const
 
 void WindowsServiceManager::UpdateBitsMetrics()
 {
-    // This function must be called from a background thread (e.g. Watchdog) 
-    // because it contains a necessary sleep for PDH sampling.
+    // This function runs on a background thread.
+    // [PATCH] Use persistent query handle to avoid overhead
     
-    PDH_HQUERY query = nullptr;
-    PDH_HCOUNTER counter = nullptr;
-
-    if (PdhOpenQueryW(nullptr, 0, &query) != ERROR_SUCCESS) return;
-
-    // BITS bytes transferred/sec counter
-    const wchar_t* counterPath = L"\\BITS Net Utilization(*)\\Bytes Transferred/sec";
-
-    if (PdhAddCounterW(query, counterPath, 0, &counter) != ERROR_SUCCESS) {
-        PdhCloseQuery(query);
-        return;
+    if (!m_pdhQuery) {
+        InitBitsCounters();
+        if (!m_pdhQuery) return; // Failed to init
     }
 
-    // First sample
-    if (PdhCollectQueryData(query) == ERROR_SUCCESS) {
-        // We accept the sleep here because this runs on a worker thread
+    // First sample (PDH requires two samples for rate counters)
+    // Note: If the query is kept open, PdhCollectQueryData simply updates the snapshot.
+    // For "Rate" counters, we still need a delay between collections if we want an instant readout,
+    // OR we can rely on the natural interval of this function call (10s) if we structure it differently.
+    // However, to ensure accurate "current" bandwidth without managing global state timestamps, 
+    // a short sleep for differential is still safest for this specific counter type.
+    
+    if (PdhCollectQueryData(reinterpret_cast<PDH_HQUERY>(m_pdhQuery)) == ERROR_SUCCESS) {
         Sleep(100); 
 
-        // Second sample
-        if (PdhCollectQueryData(query) == ERROR_SUCCESS) {
+        if (PdhCollectQueryData(reinterpret_cast<PDH_HQUERY>(m_pdhQuery)) == ERROR_SUCCESS) {
             PDH_FMT_COUNTERVALUE value;
-            if (PdhGetFormattedCounterValue(counter, PDH_FMT_LARGE, nullptr, &value) == ERROR_SUCCESS) {
+            if (PdhGetFormattedCounterValue(reinterpret_cast<PDH_HCOUNTER>(m_bitsCounter), 
+                PDH_FMT_LARGE, nullptr, &value) == ERROR_SUCCESS) {
+                
                 std::lock_guard lock(m_metricsMtx);
                 m_lastBitsBandwidth = (value.largeValue / 1024.0 / 1024.0); // Bytes -> MB
             }
         }
     }
-
-    PdhCloseQuery(query);
 }
