@@ -277,10 +277,15 @@ void SetProcessIoPriority(DWORD pid, int mode)
         std::lock_guard lock(g_ioPriorityCacheMtx);
         
         // Prevent unbounded growth (Claim 2.1)
-        if (g_ioPriorityCache.size() > 1000) {
-            g_ioPriorityCache.clear();
-            Log("[CACHE] IO Priority Cache cleared (size limit reached)");
-        }
+		if (g_ioPriorityCache.size() > 1000) {
+			// [OPTIMIZATION] Prune 50% instead of clear to preserve some history (LRU approx)
+			// This prevents cache thrashing where all processes trigger kernel calls simultaneously
+			auto it = g_ioPriorityCache.begin();
+			for (int i = 0; i < 500 && it != g_ioPriorityCache.end(); ++i) {
+				it = g_ioPriorityCache.erase(it);
+			}
+			Log("[CACHE] IO Priority Cache pruned (size limit reached)");
+		}
 
         if (g_ioPriorityCache.find(pid) != g_ioPriorityCache.end() && g_ioPriorityCache[pid] == mode)
         {
