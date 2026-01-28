@@ -850,15 +850,9 @@ void AntiInterferenceWatchdog()
             LASTINPUTINFO lii = { sizeof(LASTINPUTINFO) };
             if (GetLastInputInfo(&lii))
             {
-                uint64_t now = GetTickCount64();
-                uint32_t lastInput = lii.dwTime;
-                
-                // Handle 32-bit wraparound
-                if (now - lastInput > (1ULL << 32)) {
-                    idleMs = now - (0xFFFFFFFFULL - lastInput + 1ULL);
-                } else {
-                    idleMs = now - lastInput;
-                }
+                // [OPTIMIZATION] Use 32-bit modular arithmetic for safe rollover handling.
+                // This correctly handles uptimes > 49.7 days without complex branching.
+                idleMs = static_cast<uint64_t>(static_cast<DWORD>(GetTickCount64()) - lii.dwTime);
                 isIdleInfoValid = true;
             }
 
@@ -868,7 +862,7 @@ void AntiInterferenceWatchdog()
             {
                 static bool lastIdleState = false;
                 // Hardcoded 30s threshold for core parking (separate from revert policy)
-                bool currentIdleState = (idleMs >= 30000) && (g_lastMode.load() != 1);
+                bool currentIdleState = (idleMs >= 30000) && (g_lastMode.load() != MODE_GAME);
                 
                 if (currentIdleState != lastIdleState) {
                     g_idleAffinityMgr.OnIdleStateChanged(currentIdleState);
@@ -887,8 +881,8 @@ void AntiInterferenceWatchdog()
                 DWORD thresholdMs = g_idleTimeoutMs.load(); 
                 int currentMode = g_lastMode.load();
 
-                // Trigger if NOT already in browser mode (2) and idle time exceeded
-                if (currentMode == 1 && idleMs >= thresholdMs)
+                // Trigger if NOT already in browser mode and idle time exceeded
+                if (currentMode == MODE_GAME && idleMs >= thresholdMs)
                 {
                     bool gameIsPresent = false;
                     
@@ -919,14 +913,14 @@ void AntiInterferenceWatchdog()
                         if (g_caps.hasAdminRights)
                         {
                             SetPrioritySeparation(VAL_BROWSER);
-                            SetNetworkQoS(2);
-                            SetMemoryCompression(2);
-                            SetTimerResolution(2);
-                            SetTimerCoalescingControl(2);
+                            SetNetworkQoS(MODE_BROWSER);
+                            SetMemoryCompression(MODE_BROWSER);
+                            SetTimerResolution(MODE_BROWSER);
+                            SetTimerCoalescingControl(MODE_BROWSER);
                         }
                         
                         // Update State
-                        g_lastMode.store(2);
+                        g_lastMode.store(MODE_BROWSER);
                         
                         // Release locks
                         if (g_sessionLocked.load())

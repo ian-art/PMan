@@ -36,6 +36,10 @@ static constexpr DWORD   VAL_BROWSER    = 0x26; // Short Variable, High Boost (D
 static constexpr DWORD   VAL_BACKGROUND = 0x18; // Long Fixed, No Boost (Deep Idle/Maintenance)
 static constexpr DWORD   IOCP_SHUTDOWN_KEY = 0xFFFFFFFF;
 
+// Internal Operation Modes
+static constexpr int MODE_GAME    = 1;
+static constexpr int MODE_BROWSER = 2;
+
 // Tray Icon
 static constexpr UINT    WM_TRAYICON       = WM_USER + 1;
 static constexpr UINT    ID_TRAY_APP_ICON  = 1001;
