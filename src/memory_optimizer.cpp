@@ -208,8 +208,34 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
         );
 
         if (!hProc) {
-            m_processTracker[pid].lastTrimTime = now; 
+            // Process gone or access denied. 
+            // Do NOT update lastTrimTime here; if the PID is reused later, we want to treat it as new.
+            // m_processTracker[pid].lastTrimTime = now; <--- REMOVED
+            // Instead, remove it from tracker to reset state
+            if (m_processTracker.count(pid)) m_processTracker.erase(pid);
             continue;
+        }
+
+        // [RACE FIX] Verify PID Identity: Ensure this is not a reused PID
+        // If the process is brand new (< 2 seconds old), skip trimming to allow initialization
+        FILETIME ftCreate, ftExit, ftKernel, ftUser;
+        if (GetProcessTimes(hProc, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+             ULARGE_INTEGER ulCreate;
+             ulCreate.LowPart = ftCreate.dwLowDateTime;
+             ulCreate.HighPart = ftCreate.dwHighDateTime;
+             
+             // Current system time as FILETIME
+             FILETIME ftNow;
+             GetSystemTimeAsFileTime(&ftNow);
+             ULARGE_INTEGER ulNow;
+             ulNow.LowPart = ftNow.dwLowDateTime;
+             ulNow.HighPart = ftNow.dwHighDateTime;
+
+             // 10,000,000 ticks per second. 2 seconds = 20,000,000
+             if (ulNow.QuadPart > ulCreate.QuadPart && (ulNow.QuadPart - ulCreate.QuadPart) < 20000000) {
+                 CloseHandle(hProc);
+                 continue; 
+             }
         }
 
         PROCESS_MEMORY_COUNTERS_EX pmc;
