@@ -572,7 +572,7 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
 }
 
 void PerformanceGuardian::OnPerformanceTick() {
-    // Phase 4: SRAM Policy Integration
+    // SRAM Policy Integration
     LagState sysState = SramEngine::Get().GetStatus().state;
 
     // Rule 1: CRITICAL_LAG -> "Do No Harm" Mode

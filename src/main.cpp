@@ -683,7 +683,7 @@ static void UpdateTrayTooltip()
          tip += L"\n\u1F3AE Mode: Gaming";
     }
 
-    // Phase 5: SRAM Status
+    // SRAM Status
     LagState sramState = SramEngine::Get().GetStatus().state;
     if (sramState == LagState::SNAPPY) tip += L"\n\u26A1 System: Snappy";
     else if (sramState == LagState::SLIGHT_PRESSURE) tip += L"\n\u26A0 System: Pressure";
@@ -700,7 +700,7 @@ static void UpdateTrayTooltip()
 // Forward declaration for main program logic
 int RunMainProgram(int argc, wchar_t** argv);
 
-// Phase 5: Notification Helper
+// Notification Helper
 static void ShowSramNotification(LagState state) {
     if (state <= LagState::SLIGHT_PRESSURE) return; // Don't annoy user for minor things
 
@@ -1809,7 +1809,7 @@ if (!taskExists)
                 // Checks foreground window state and applies safe boosts if hung
                 g_responsivenessManager.Update();
 
-                // Phase 5: SRAM UI Updates
+                // SRAM UI Updates
                 static LagState lastKnownState = LagState::SNAPPY;
                 LagState currentState = SramEngine::Get().GetStatus().state;
                 

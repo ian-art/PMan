@@ -355,7 +355,7 @@ void MemoryOptimizer::RunThread() {
 
         // 4. Check if target active (Game)
         if (IsTargetProcess(fgName)) {
-            // Phase 4: SRAM Policy Integration
+            // SRAM Policy Integration
             // Rule: If SLIGHT_PRESSURE (or worse), pause background trimming.
             // Memory trimming is I/O and Lock intensive; we must back off early.
             if (GetSystemResponsiveness() >= LagState::SLIGHT_PRESSURE) {
