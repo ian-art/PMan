@@ -318,9 +318,8 @@ bool IsAntiCheatProcess(const std::wstring& exeName)
 
     if (AC_COMMON.count(exeName)) return true;
 
-#if defined(_M_ARM64)
-    if (AC_ARM64.count(exeName)) return true;
-#endif
+// [FIX] Always check ARM64 list to support x64 apps running on ARM64 (Prism emulation)
+if (AC_ARM64.count(exeName)) return true;
 
     return false;
 }
