@@ -475,12 +475,12 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     session.audioGuard = std::make_shared<AudioModeGuard>();
 
     if (it != m_profiles.end()) {
-        // Existing profile found
-        GameProfile& profile = it->second;
-        profile.totalSessions++;
+		// Existing profile found
+		GameProfile& profile = it->second;
+		// [FIX] Do not increment totalSessions here. Only count completed sessions in OnGameStop.
 
-        // Adaptive Check: Re-validate every 10th session
-        if (profile.totalSessions % 10 == 0) {
+		// Adaptive Check: Re-validate every 10th session (based on completed history)
+		if (profile.totalSessions > 0 && profile.totalSessions % 10 == 0) {
             Log("[PERF] Adaptive Check: Re-evaluating profile for " + WideToUtf8(exeName.c_str()));
             session.learningMode = true;
             session.testPhase = 0;
@@ -662,11 +662,20 @@ void PerformanceGuardian::OnGameStop(DWORD pid) {
         }
 
         // Revert any persistent changes (like affinity)
-        SetProcessAffinity(pid, 2); 
-        SetProcessIoPriority(pid, 2);
-        SetMemoryCompression(2);
+		SetProcessAffinity(pid, 2);
+		SetProcessIoPriority(pid, 2);
+		SetMemoryCompression(2);
 
-        m_sessions.erase(it); // Destructor triggers RAII restoration
+			// [FIX] Update profile stats only on successful completion
+			if (GetTickCount64() - session.sessionStartTime > 60000) {
+				auto pIt = m_profiles.find(session.exeName);
+				if (pIt != m_profiles.end()) {
+					pIt->second.totalSessions++;
+					SaveProfile(pIt->second);
+				}
+			}
+
+			m_sessions.erase(it); // Destructor triggers RAII restoration
     }
 }
 
@@ -804,12 +813,25 @@ void PerformanceGuardian::TriggerEmergencyBoost(DWORD pid) {
         SetPriorityClass(hProc, HIGH_PRIORITY_CLASS);
         
         PROCESS_MEMORY_COUNTERS pmc;
-        if (GetProcessMemoryInfo(hProc, &pmc, sizeof(pmc))) {
-             SIZE_T target = pmc.WorkingSetSize + (500 * 1024 * 1024); // Add 500MB buffer
-             SetProcessWorkingSetSize(hProc, 200 * 1024 * 1024, target);
-        }
-        CloseHandle(hProc);
-    }
+		if (GetProcessMemoryInfo(hProc, &pmc, sizeof(pmc))) {
+			// [FIX] Memory Safety: Calculate safe buffer based on system RAM
+			MEMORYSTATUSEX ms = { sizeof(ms) };
+			GlobalMemoryStatusEx(&ms);
+
+			// Use 10% of total RAM or 500MB, whichever is SMALLER
+			SIZE_T buffer = (std::min)(static_cast<SIZE_T>(500 * 1024 * 1024), static_cast<SIZE_T>(ms.ullTotalPhys / 10));
+    
+			// Ensure we don't exceed available RAM
+			if (buffer > ms.ullAvailPhys) buffer = static_cast<SIZE_T>(ms.ullAvailPhys / 2);
+
+			SIZE_T target = pmc.WorkingSetSize + buffer;
+			SIZE_T minSize = (std::min)(static_cast<SIZE_T>(200 * 1024 * 1024), target / 2);
+
+			SetProcessWorkingSetSize(hProc, minSize, target);
+			Log("[PERF] Emergency Boost: Added " + std::to_string(buffer/1024/1024) + "MB to working set.");
+		}
+		CloseHandle(hProc);
+	}
     
     ::SuspendBackgroundServices();
     SetTimerResolution(1);
@@ -824,13 +846,19 @@ void PerformanceGuardian::UpdateLearning(GameSession& session) {
     if (!session.learningMode || session.testPhase > 4) return;
     
     uint64_t now = GetTickCount64();
-    
-    // FIX: Fallback to CPU estimation if ETW fails (for >5s with no frames)
-    if (session.frameHistory.empty() && (now - session.sessionStartTime) > 5000) {
-        EstimateFrameTimeFromCPU(session.pid);
-    }
-    
-    const uint64_t PHASE_DURATION_MS = 30000; // 30 seconds per phase
+
+	// [FIX] Data Integrity: If frame history is empty (ETW silent), ABORT learning.
+	// We cannot use CPU estimation for A/B testing because it lacks the precision
+	// required to detect variance changes from subtle tweaks like I/O priority.
+	if (session.frameHistory.empty()) {
+		if ((now - session.sessionStartTime) > 10000) {
+			Log("[LEARN] ETW silent for >10s. Aborting learning session for " + WideToUtf8(session.exeName.c_str()));
+			session.learningMode = false; // Give up for this session
+		}
+		return; 
+	}
+
+	const uint64_t PHASE_DURATION_MS = 30000; // 30 seconds per phase
     
     if (now - session.testStartTime < 5000) return; // Buffer
 
