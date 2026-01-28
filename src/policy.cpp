@@ -709,21 +709,30 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
             {
                 // Transition profiling to new PID (Stop old launcher, start new game)
                 g_perfGuardian.OnGameStop(g_lockedGamePid.load());
-                g_perfGuardian.OnGameStart(pid, exe);
+
+                // Check if new PID is a child/worker
+                bool isNewChild = false;
+                if (IsAntiCheatProtected(pid)) isNewChild = true;
+                else {
+                    std::shared_lock lh(g_hierarchyMtx);
+                    if (g_inheritedGamePids.count(pid)) isNewChild = true;
+                }
+
+                if (!isNewChild) {
+                    g_perfGuardian.OnGameStart(pid, exe);
+                }
 
                 g_lockedGamePid.store(pid);
                 
                 // [CACHE] Atomic Update (Release)
-                // Build new instance locally first
-                std::shared_ptr<SessionSmartCache> newCache = std::make_shared<SessionSmartCache>(pid);
-                
-                // Fail-Safe - Do not publish if invalid
-                if (!newCache->IsValid()) {
-                     newCache = nullptr; // Releases memory
-                     Log("[CACHE] Transition init failed. Cache disabled.");
+                std::shared_ptr<SessionSmartCache> newCache;
+                if (!isNewChild) {
+                    newCache = std::make_shared<SessionSmartCache>(pid);
+                    if (!newCache->IsValid()) {
+                        newCache = nullptr;
+                        Log("[CACHE] Transition init failed. Cache disabled.");
+                    }
                 }
-
-                // Publish atomically (Old cache is automatically released)
                 g_sessionCache.store(newCache, std::memory_order_release);
 
                 // Update process identity for the lock
@@ -845,22 +854,28 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                 g_lockedGamePid.store(pid);
                 g_lockStartTime.store(std::chrono::steady_clock::now().time_since_epoch().count());
 
-                // Initialize Performance Guardian Session (Loads Profile)
-                g_perfGuardian.OnGameStart(pid, exe);
+                std::shared_ptr<SessionSmartCache> initCache = nullptr;
 
-                // [CACHE] Atomic Publication (Release)
-                std::shared_ptr<SessionSmartCache> initCache = std::make_shared<SessionSmartCache>(pid);
-                
-                if (!initCache->IsValid()) {
-                    initCache = nullptr; // Releases memory
-                    Log("[CACHE] Initialization failed checks. Cache disabled for this session.");
+                if (!isGameChild) {
+                    // Initialize Performance Guardian Session (Loads Profile)
+                    g_perfGuardian.OnGameStart(pid, exe);
+
+                    // [CACHE] Atomic Publication (Release)
+                    initCache = std::make_shared<SessionSmartCache>(pid);
+                    
+                    if (!initCache->IsValid()) {
+                        initCache = nullptr; // Releases memory
+                        Log("[CACHE] Initialization failed checks. Cache disabled for this session.");
+                    }
+                } else {
+                    Log("[POLICY] Skipping Profiler & Cache for Game Child/Worker");
                 }
 
                 g_sessionCache.store(initCache, std::memory_order_release);
         
                 // Verify if core pinning is allowed by profile
                 // Note: Actual enforcement happens in Affinity Strategy block below
-                if (!g_perfGuardian.IsOptimizationAllowed(exe, "pin")) {
+                if (!isGameChild && !g_perfGuardian.IsOptimizationAllowed(exe, "pin")) {
                     Log("[PERF] Core pinning disabled by learned profile for " + WideToUtf8(exe.c_str()));
                     SetProcessAffinity(pid, 2); // Ensure default state
                 }   
