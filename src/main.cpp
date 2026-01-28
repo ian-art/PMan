@@ -109,6 +109,7 @@ static size_t g_currentFrame = 0;
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
 static GUID* g_pSleepScheme = nullptr;
+static HANDLE g_hGuardProcess = nullptr; // Handle to the watchdog process
 static uint64_t g_resumeStabilizationTime = 0; // Replaces detached sleep thread;
 
 // Removed LaunchProcessAsync (Dead Code / Unsafe Detach)
@@ -1283,16 +1284,14 @@ int wmain(int argc, wchar_t* argv[])
     }
 
     // Check for Guard Mode (Must be before Mutex check)
-    // argc count increased to 7 to account for Power GUID
-    if (argc >= 7 && (std::wstring(argv[1]) == L"--guard"))
+    if (argc >= 5 && (std::wstring(argv[1]) == L"--guard"))
     {
         DWORD pid = std::wcstoul(argv[2], nullptr, 10);
-        DWORD low = std::wcstoul(argv[3], nullptr, 10);
-        DWORD high = std::wcstoul(argv[4], nullptr, 10);
-        DWORD val = std::wcstoul(argv[5], nullptr, 10);
-        std::wstring powerScheme = argv[6];
+        // Fixed: Removed redundant low/high split. Expecting direct value.
+        DWORD val = std::wcstoul(argv[3], nullptr, 10); 
+        std::wstring powerScheme = argv[4];
         
-        RunRegistryGuard(pid, low, high, val, powerScheme);
+        RunRegistryGuard(pid, val, powerScheme);
         return 0;
     }
 
@@ -1641,7 +1640,13 @@ if (!taskExists)
         // Launch Crash-Proof Guard
         if (g_restoreOnExit.load())
         {
-            LaunchRegistryGuard(currentSetting);
+            // Capture handle for lifecycle management
+            g_hGuardProcess = LaunchRegistryGuard(currentSetting);
+            
+            if (!g_hGuardProcess || g_hGuardProcess == INVALID_HANDLE_VALUE) {
+                Log("[CRITICAL] Failed to launch Registry Guard. Crash protection disabled.");
+                g_hGuardProcess = nullptr;
+            }
         }
     }
     else
@@ -1887,6 +1892,14 @@ if (!taskExists)
         PowerSetActiveScheme(NULL, g_pSleepScheme);
         LocalFree(g_pSleepScheme);
         g_pSleepScheme = nullptr;
+    }
+
+    // Terminate Guard Process on graceful shutdown to prevent false positives
+    if (g_hGuardProcess) {
+        TerminateProcess(g_hGuardProcess, 0);
+        CloseHandle(g_hGuardProcess);
+        g_hGuardProcess = nullptr;
+        Log("[GUARD] Watchdog process terminated gracefully.");
     }
 
     Log("=== Priority Manager Stopped ===");

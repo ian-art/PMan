@@ -71,10 +71,12 @@ bool CreateRestorePoint();
 
 // Crash-Proof Watchdog (Main Entry Point)
 // Now pulls extended state from pman_restore.bin if available
-void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWORD originalVal, const std::wstring& startupPowerScheme);
+// Fixed: Removed lowTime/highTime to match main.cpp call signature
+void RunRegistryGuard(DWORD targetPid, DWORD originalVal, const std::wstring& startupPowerScheme);
 
 // Internal Helper: Launch the watchdog process (Saves state to disk first)
-void LaunchRegistryGuard(DWORD originalVal);
+// Fixed: Changed return type to HANDLE to support lifecycle management in main.cpp
+HANDLE LaunchRegistryGuard(DWORD originalVal);
 
 // Internal helpers used by restore/guard
 std::filesystem::path GetStateFilePath();

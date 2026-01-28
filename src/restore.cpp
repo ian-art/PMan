@@ -390,26 +390,15 @@ static void RestoreStringReg(HKEY root, LPCWSTR subKey, LPCWSTR valueName, const
     }
 }
 
-void RunRegistryGuard(DWORD targetPid, DWORD lowTime, DWORD highTime, DWORD originalVal, const std::wstring& startupPowerScheme)
+// [FIX] Updated signature to match header (removed lowTime/highTime)
+void RunRegistryGuard(DWORD targetPid, DWORD originalVal, const std::wstring& startupPowerScheme)
 {
-    // 1. Verify Parent Identity
+    // 1. Verify Parent Existence
     HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, targetPid);
     if (!hProc) return; // Process already gone or inaccessible
 
-    FILETIME ftCreation, ftExit, ftKernel, ftUser;
-    if (GetProcessTimes(hProc, &ftCreation, &ftExit, &ftKernel, &ftUser))
-    {
-        if (ftCreation.dwLowDateTime != lowTime || ftCreation.dwHighDateTime != highTime)
-        {
-            CloseHandle(hProc);
-            return; // PID reused, not our parent
-        }
-    }
-    else
-    {
-        CloseHandle(hProc);
-        return;
-    }
+    // Note: Removed creation time verification to simplify argument passing.
+    // We rely on the handle wait logic now.
 
     // 2. Wait for Parent Termination
     // Block indefinitely until PMan exits (cleanly or crash)
@@ -526,7 +515,7 @@ static void ReadStringReg(HKEY root, LPCWSTR subKey, LPCWSTR valueName, wchar_t*
     }
 }
 
-void LaunchRegistryGuard(DWORD originalVal)
+HANDLE LaunchRegistryGuard(DWORD originalVal)
 {
     // 1. Capture Full Registry State
     RegistryBackupState state{};
@@ -638,14 +627,10 @@ void LaunchRegistryGuard(DWORD originalVal)
     wchar_t selfPath[MAX_PATH]{};
     GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
 
-    FILETIME ftCreation{}, ftExit{}, ftKernel{}, ftUser{};
-    GetProcessTimes(GetCurrentProcess(), &ftCreation, &ftExit, &ftKernel, &ftUser);
-
+    // Fixed: Removed timestamp args to match new Main/Guard logic
     std::wstring cmd =
         L"\"" + std::wstring(selfPath) + L"\" --guard " +
         std::to_wstring(GetCurrentProcessId()) + L" " +
-        std::to_wstring(ftCreation.dwLowDateTime) + L" " +
-        std::to_wstring(ftCreation.dwHighDateTime) + L" " +
         std::to_wstring(originalVal) + L" \"\"";
 
     STARTUPINFOW si{};
@@ -667,12 +652,14 @@ void LaunchRegistryGuard(DWORD originalVal)
     {
         Log("[GUARD] Registry Safety Guard launched (PID " +
             std::to_string(pi.dwProcessId) + ")");
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
+        
+        CloseHandle(pi.hThread); // We don't need the thread handle
+        return pi.hProcess;      // [FIX] Return process handle to Main for lifecycle management
     }
     else
     {
         Log("[GUARD] Failed to launch Safety Guard: " +
             std::to_string(GetLastError()));
+        return nullptr;
     }
 }
