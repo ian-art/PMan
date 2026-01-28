@@ -145,31 +145,32 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
 bool WindowsServiceManager::IsHardExcluded(const std::wstring& serviceName, DWORD currentState) const
 {
     // State-Based Hard Exclusions
-    // "The AI MUST NEVER modify services that are: STOPPED, START_PENDING..."
     if (currentState != SERVICE_RUNNING) return true;
 
-    // Category-Based Hard Exclusions
-    // "Participate in RPC / DCOM, Audio, input, GPU, power, thermal, core networking"
+    // Category-Based Hard Exclusions (LOWERCASE ONLY for safety)
     static const std::unordered_set<std::wstring> HARD_EXCLUSIONS = {
         // RPC / DCOM / MMCSS
-        L"RpcSs", L"DcomLaunch", L"RpcEptMapper", L"MmCss",
+        L"rpcss", L"dcomlaunch", L"rpceptmapper", L"mmcss",
         // Audio
-        L"Audiosrv", L"AudioEndpointBuilder",
+        L"audiosrv", L"audioendpointbuilder",
         // Input
-        L"TabletInputService", L"hidserv", L"TextInputManagementService",
+        L"tabletinputservice", L"hidserv", L"textinputmanagementservice",
         // Power & Thermal
-        L"Power",
+        L"power",
         // Core Networking
-        L"NlaSvc", L"nsi", L"Dhcp", L"Dnscache", L"netprofm",
+        L"nlasvc", L"nsi", L"dhcp", L"dnscache", L"netprofm",
         // SCM Critical
-        L"PlugPlay", L"KeyIso", L"SamSs", L"LSM"
+        L"plugplay", L"keyiso", L"samss", L"lsm"
     };
 
-    if (HARD_EXCLUSIONS.count(serviceName)) return true;
-
-    // Substring checks for broader categories (GPU, Drivers)
+    // Normalize input to lowercase for case-insensitive check
     std::wstring lowerName = serviceName;
     std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::towlower);
+
+    if (HARD_EXCLUSIONS.count(lowerName)) return true;
+
+    // Substring checks for broader categories (GPU, Drivers)
+    // lowerName already normalized above, reuse it
 
     if (lowerName.find(L"nvidia") != std::wstring::npos || 
         lowerName.find(L"amd") != std::wstring::npos || 
