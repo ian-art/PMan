@@ -1032,10 +1032,9 @@ DWORD_PTR GetOptimizationTargetCores()
         // Pick the last two E-Cores (usually furthest from P-Core heat/interrupts)
         size_t count = g_eCoreSets.size();
         
-        // Use the last two E-cores for service offloading
-        // Map E-core logical indices to affinity mask bits
-        int lastECore = g_logicalCoreCount - 1;
-        int secondLastECore = g_logicalCoreCount - 2;
+        // Use the actual IDs from the detected E-Core sets
+        int lastECore = g_eCoreSets[count - 1];
+        int secondLastECore = g_eCoreSets[count - 2];
         
         mask |= (static_cast<DWORD_PTR>(1) << lastECore);
         mask |= (static_cast<DWORD_PTR>(1) << secondLastECore);
@@ -1046,17 +1045,20 @@ DWORD_PTR GetOptimizationTargetCores()
     }
 
     // Strategy B: Standard Architecture
-    // "Identify Core 0 (interrupt-heavy)" -> Core 0 is Mask 0x1.
-    // We select the LAST two logical processors.
-    // - On HT systems, these are the SMT threads of the last physical core.
-    // - On non-HT systems, these are the last two physical cores.
-    // - This satisfies "Are in the same NUMA node" for 99% of consumer desktop CPUs (single socket).
+    // Avoid Core 0 (Interrupts) and try to pick distinct physical cores if SMT is on.
     
     int lastCore = g_logicalCoreCount - 1;
-    int secondLastCore = g_logicalCoreCount - 2;
+    int secondLastCore;
 
-    // Verification: Ensure we aren't selecting Core 0 (Index 0)
-    if (secondLastCore > 0)
+    // SMT Awareness: If logical count > physical, stride by 2 to avoid SMT siblings on same core
+    if (g_logicalCoreCount > g_physicalCoreCount) {
+        secondLastCore = g_logicalCoreCount - 3; // Skip sibling
+    } else {
+        secondLastCore = g_logicalCoreCount - 2; // Contiguous physical cores
+    }
+
+    // Verification: Ensure we aren't selecting Core 0 (Index 0) or invalid indices
+    if (secondLastCore > 0 && lastCore > secondLastCore)
     {
         mask |= (static_cast<DWORD_PTR>(1) << lastCore);
         mask |= (static_cast<DWORD_PTR>(1) << secondLastCore);
