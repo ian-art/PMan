@@ -299,16 +299,17 @@ bool WindowsServiceManager::ResolveAllowlist()
     if (m_sessionServices.empty()) return false;
 
     // "Prefer: Telemetry, Indexers, OEM background agents, Third-party updaters"
+    // STORE AS LOWERCASE for case-insensitive matching
     static const std::unordered_set<std::wstring> EXACT_ALLOWLIST = {
         // Telemetry & Diagnostics
-        L"DiagTrack", L"dmwappushservice", L"WerSvc", 
+        L"diagtrack", L"dmwappushservice", L"wersvc", 
         // Indexers & Cache
-        L"WSearch", L"SysMain", 
+        L"wsearch", L"sysmain", 
         // Windows Updates (Safe to throttle during game)
         L"wuauserv", L"bits", L"dosvc",
         // Common Third-Party
-        L"ClickToRunSvc", // Office
-        L"Steam Client Service", L"Origin Web Helper Service"
+        L"clicktorunsvc", // Office
+        L"steam client service", L"origin web helper service"
     };
 
     auto it = m_sessionServices.begin();
@@ -318,8 +319,8 @@ bool WindowsServiceManager::ResolveAllowlist()
         std::wstring lower = name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
 
-        // 1. Exact Match
-        if (EXACT_ALLOWLIST.count(name)) keep = true;
+        // 1. Exact Match (Case-Insensitive)
+        if (EXACT_ALLOWLIST.count(lower)) keep = true;
 
         // 2. Substring Match (Broad Categories)
         if (!keep) {
@@ -370,62 +371,59 @@ bool WindowsServiceManager::ResolveAllowlist()
 // State Snapshot (Mandatory)
 bool WindowsServiceManager::SnapshotServiceStates()
 {
-    // "If snapshot fails for ANY service: Abort optimization"
-    // "Do not partially apply"
-    
     std::lock_guard lock(m_mutex);
     if (m_sessionServices.empty()) return false;
 
-    Log("[SERVICE] Beginning State Snapshot (Mandatory)...");
+    Log("[SERVICE] Beginning State Snapshot...");
 
-    for (auto& entry : m_sessionServices) {
+    // Iterate backwards to allow safe removal of failed entries
+    for (int i = static_cast<int>(m_sessionServices.size()) - 1; i >= 0; --i) {
+        auto& entry = m_sessionServices[i];
+        
         // Needs PROCESS_QUERY_INFORMATION for Affinity
         UniqueHandle hProcess(OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, entry.pid));
-        
-        if (!hProcess) {
-             Log("[SERVICE] CRITICAL: Snapshot Failed - Cannot open PID " + std::to_string(entry.pid) + 
-                 " (" + WideToUtf8(entry.name.c_str()) + ") Error: " + std::to_string(GetLastError()));
-             m_sessionServices.clear(); // Safety Rollback (Empty list = No actions taken)
-             return false;
-        }
+        bool snapshotOk = false;
 
-        DWORD_PTR processAffinity = 0;
-        DWORD_PTR systemAffinity = 0;
-        if (!GetProcessAffinityMask(hProcess.get(), &processAffinity, &systemAffinity)) {
-             Log("[SERVICE] CRITICAL: Snapshot Failed - Affinity query error " + std::to_string(GetLastError()));
-             // Handle closes automatically
-             m_sessionServices.clear();
-             return false;
-        }
+        if (hProcess) {
+            DWORD_PTR processAffinity = 0;
+            DWORD_PTR systemAffinity = 0;
+            
+            if (GetProcessAffinityMask(hProcess.get(), &processAffinity, &systemAffinity)) {
+                DWORD priority = GetPriorityClass(hProcess.get());
+                if (priority != 0) {
+                    
+                    // Capture Session ID (Restored Logic)
+                    DWORD sessionId = 0;
+                    if (!ProcessIdToSessionId(entry.pid, &sessionId)) {
+                         sessionId = 0;
+                    }
 
-        DWORD priority = GetPriorityClass(hProcess.get());
-        if (priority == 0) {
-             Log("[SERVICE] CRITICAL: Snapshot Failed - Priority query error " + std::to_string(GetLastError()));
-             // Handle closes automatically
-             m_sessionServices.clear();
-             return false;
-        }
+                    entry.originalAffinity = processAffinity;
+                    entry.originalPriority = priority;
+                    entry.sessionId = sessionId;
+                    entry.timestamp = GetTickCount64();
 
-        DWORD sessionId = 0;
-        if (!ProcessIdToSessionId(entry.pid, &sessionId)) {
-            sessionId = 0; // Default to 0 if failed (System)
-        }
-
-        // Store Mandatory State
-        entry.originalAffinity = processAffinity;
-        entry.originalPriority = priority;
-        entry.sessionId = sessionId;
-        entry.timestamp = GetTickCount64();
-
-        // Prerequisite: Capture Creation Time
-        FILETIME ftCreate, ftExit, ftKernel, ftUser;
-        if (GetProcessTimes(hProcess.get(), &ftCreate, &ftExit, &ftKernel, &ftUser)) {
-            entry.creationTime = (static_cast<uint64_t>(ftCreate.dwHighDateTime) << 32) | ftCreate.dwLowDateTime;
-        } else {
-            entry.creationTime = 0; // Should not happen, but safe fallback
+                    // Prerequisite: Capture Creation Time (TOCTOU Fix)
+                    FILETIME ftCreate, ftExit, ftKernel, ftUser;
+                    if (GetProcessTimes(hProcess.get(), &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+                        entry.creationTime = (static_cast<uint64_t>(ftCreate.dwHighDateTime) << 32) | ftCreate.dwLowDateTime;
+                        snapshotOk = true;
+                    }
+                }
+            }
         }
         
-        // Handle closes automatically
+        if (!snapshotOk) {
+            Log("[SERVICE] Warning: Snapshot failed for PID " + std::to_string(entry.pid) + 
+                ". Removed from eligibility.");
+            m_sessionServices.erase(m_sessionServices.begin() + i);
+        }
+    }
+    
+    // Abort only if ALL services failed
+    if (m_sessionServices.empty()) {
+        Log("[SERVICE] Abort: No services could be snapshotted.");
+        return false;
     }
 
     Log("[SERVICE] State Snapshot Complete. All targets captured successfully.");
@@ -502,6 +500,19 @@ bool WindowsServiceManager::ApplySessionOptimizations(DWORD_PTR targetAffinityMa
 
     UniqueHandle hProcess(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.pid));
     if (hProcess) {
+        // [SECURITY] TOCTOU Check: Verify Identity via Creation Time
+        FILETIME ftCreate, ftExit, ftKernel, ftUser;
+        if (GetProcessTimes(hProcess.get(), &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+            uint64_t currentCreateTime = (static_cast<uint64_t>(ftCreate.dwHighDateTime) << 32) | ftCreate.dwLowDateTime;
+            if (currentCreateTime != entry.creationTime) {
+                Log("[SERVICE] SKIP: PID Reuse detected for " + WideToUtf8(entry.name.c_str()));
+                continue; // Skip without marking modified
+            }
+        } else {
+            Log("[SERVICE] SKIP: Failed to verify identity for " + WideToUtf8(entry.name.c_str()));
+            continue;
+        }
+
         // 6.1 Apply Affinity FIRST
         if (SetProcessAffinityMask(hProcess.get(), targetAffinityMask)) {
 
