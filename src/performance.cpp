@@ -492,7 +492,8 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
             session.learningMode = false;
         }
         
-        SaveProfile(profile);
+        // [PATCH] Removed redundant SaveProfile() call here.
+        // Profile is only read, not modified. Saving logic handles updates in OnGameStop/UpdateLearning.
     } else {
         // Unknown game, start learning
         Log("[PERF] New game detected. Starting Silent Learning Mode...");
