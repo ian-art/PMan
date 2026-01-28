@@ -58,8 +58,10 @@ private:
     uint64_t m_lastBoostTime{0};
     uint64_t m_lastDwmScan{0};
     
-    // Managed Worker Thread
+    // Managed Worker Threads
     std::thread m_worker;
+    std::thread m_hookThread;
+    std::atomic<DWORD> m_hookThreadId{0};
 
     // Boost Logic
     void ApplyResponsivenessBoost();

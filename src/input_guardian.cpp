@@ -20,7 +20,7 @@
 #include "input_guardian.h"
 #include "logger.h"
 #include "utils.h"
-#include "globals.h" // For g_userPaused
+#include "context.h"
 #include <tlhelp32.h>
 #include <vector>
 
@@ -42,9 +42,8 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lP
 // Destructor to ensure thread safety
 InputGuardian::~InputGuardian() {
     Shutdown();
-    if (m_worker.joinable()) {
-        m_worker.join();
-    }
+    if (m_worker.joinable()) m_worker.join();
+    if (m_hookThread.joinable()) m_hookThread.join();
 }
 
 void InputGuardian::Initialize() {
@@ -70,17 +69,13 @@ void InputGuardian::SetGameMode(bool enabled) {
 }
 
 void InputGuardian::ToggleInterferenceBlocker(bool enable) {
-    // Thread management statics
-    static std::thread s_hookThread;
-    static std::atomic<DWORD> s_hookThreadId{ 0 };
-
     if (enable) {
         // 1. Disable Windows Key Hook (Moved to dedicated thread to prevent input lag)
-        if (!s_hookThread.joinable()) {
-            s_hookThread = std::thread([]() {
+        if (!m_hookThread.joinable()) {
+            m_hookThread = std::thread([this]() {
                 // Install Hook on this dedicated thread
                 HHOOK hHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(nullptr), 0);
-                s_hookThreadId = GetCurrentThreadId();
+                m_hookThreadId = GetCurrentThreadId();
 
                 MSG msg;
                 // Pump messages to keep hook alive
@@ -91,7 +86,7 @@ void InputGuardian::ToggleInterferenceBlocker(bool enable) {
                 }
 
                 if (hHook) UnhookWindowsHookEx(hHook);
-                s_hookThreadId = 0;
+                m_hookThreadId = 0;
             });
             // Mark as enabled locally using a dummy handle
             m_hKeyHook = (HHOOK)0x1; 
@@ -115,10 +110,10 @@ void InputGuardian::ToggleInterferenceBlocker(bool enable) {
         Log("[INPUT] Game Mode: Blocked Windows Key & Sticky Keys");
     } else {
         // 1. Remove Hook (Signal thread to quit)
-        if (s_hookThread.joinable()) {
-            DWORD tid = s_hookThreadId.load();
+        if (m_hookThread.joinable()) {
+            DWORD tid = m_hookThreadId.load();
             if (tid != 0) PostThreadMessageW(tid, WM_QUIT, 0, 0);
-            s_hookThread.join();
+            m_hookThread.join();
             m_hKeyHook = nullptr;
         }
 
@@ -133,7 +128,7 @@ void InputGuardian::ToggleInterferenceBlocker(bool enable) {
 }
 
 void InputGuardian::OnInput(DWORD msgTime) {
-    if (!m_active || g_userPaused.load()) return;
+    if (!m_active || PManContext::Get().isPaused.load()) return;
 
     DWORD now = static_cast<DWORD>(GetTickCount64());
     

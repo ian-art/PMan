@@ -19,13 +19,13 @@
 
 #include "performance.h"
 #include "logger.h"
-#include "globals.h"
+#include "context.h"
 #include "sram_engine.h"
 #include "events.h"
 #include "tweaks.h"
 #include "utils.h"
-#include "services.h" // For GetBitsBandwidth
-#include "input_guardian.h" // Integration
+#include "services.h" 
+#include "input_guardian.h"
 #include <fstream>
 #include <numeric>
 #include <cmath>
@@ -156,10 +156,15 @@ public:
 class ServiceSuspensionGuard {
 public:
     ServiceSuspensionGuard() {
-        ::SuspendBackgroundServices();
+        // Architecture 2.0: Route through Context Subsystem
+        if (auto* svc = PManContext::Get().subs.serviceMgr.get()) {
+            svc->SuspendAll();
+        }
     }
     ~ServiceSuspensionGuard() {
-        ::ResumeBackgroundServices();
+        if (auto* svc = PManContext::Get().subs.serviceMgr.get()) {
+            svc->ResumeAll();
+        }
     }
 };
 
@@ -167,10 +172,14 @@ public:
 class InputModeGuard {
 public:
     InputModeGuard() {
-        g_inputGuardian.SetGameMode(true);
+        if (auto* input = PManContext::Get().subs.input.get()) {
+            input->SetGameMode(true);
+        }
     }
     ~InputModeGuard() {
-        g_inputGuardian.SetGameMode(false);
+        if (auto* input = PManContext::Get().subs.input.get()) {
+            input->SetGameMode(false);
+        }
     }
 };
 
@@ -216,8 +225,9 @@ private:
                 }
 
                 bool hasHybridElements = false;
+                DWORD_PTR arm64PCoreMask = 0;
                 BYTE* ptr = buffer.data();
-                bool isArm64 = (g_cpuInfo.vendor == CPUVendor::ARM64);
+                bool isArm64 = (PManContext::Get().sys.cpu.vendor == CPUVendor::ARM64);
 
                 while (ptr < buffer.data() + bufferSize) {
                     auto* current = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(ptr);
@@ -226,7 +236,14 @@ private:
                         // INTEL: Class 1+ = E-Core (Efficiency)
                         // ARM64: Class 0  = E-Core (Little)
                         if (isArm64) {
-                            if (current->Processor.EfficiencyClass == 0) hasHybridElements = true;
+                            if (current->Processor.EfficiencyClass == 0) {
+                                hasHybridElements = true;
+                            } else {
+                                // Accumulate P-Cores (Class > 0) for ARM64 directly
+                                if (current->Processor.GroupCount > 0) {
+                                    arm64PCoreMask |= current->Processor.GroupMask[0].Mask;
+                                }
+                            }
                         } else {
                             if (current->Processor.EfficiencyClass > 0) hasHybridElements = true;
                         }
@@ -237,13 +254,10 @@ private:
                 if (isArm64 && hasHybridElements) {
                     s_shouldPin = true;
                     // FORCE PINNING ON ARM64 to P-Cores
-                    s_coreMask = 0;
-                    if (!g_pCoreSets.empty()) {
-                        for (auto id : g_pCoreSets) {
-                            if (id < 64) s_coreMask |= (static_cast<DWORD_PTR>(1) << id);
-                        }
-                    } else {
-                        s_shouldPin = false; // Fallback
+                    s_coreMask = arm64PCoreMask;
+                    
+                    if (s_coreMask == 0) {
+                        s_shouldPin = false; // Fallback if no P-cores found
                     }
                     Log("[AUDIO] ARM64 Hybrid detected. Pinning Audio to P-Cores.");
                 } 
@@ -432,7 +446,7 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     session.powerGuard->UnparkCores();
 
     // Visual & Memory Tuning (Low-End Lifesaver)
-    if (g_isLowMemory || g_isLowCoreCount) {
+    if (PManContext::Get().feat.isLowMemory || PManContext::Get().feat.isLowCoreCount) {
         session.visualGuard = std::make_shared<VisualsSuspend>();
         session.cacheGuard = std::make_shared<CacheLimiter>();
         Log("[PERF] Low-spec mode engaged: Visuals suspended, Cache limited.");
@@ -587,7 +601,7 @@ void PerformanceGuardian::OnPerformanceTick() {
         return;
     }
 
-    if (g_isSuspended.load()) return;
+    if (PManContext::Get().isSuspended.load()) return;
     std::lock_guard lock(m_mtx);
     uint64_t now = GetTickCount64();
 
@@ -749,14 +763,16 @@ PerformanceGuardian::SystemSnapshot PerformanceGuardian::CaptureSnapshot(DWORD p
     CloseHandle(hProc);
 
     // 1. Check BITS bandwidth (Using new class method)
-    if (g_servicesSuspended.load()) {
+    if (PManContext::Get().servicesSuspended.load()) {
         snap.bitsBandwidthMB = 0.0;
     } else {
-        snap.bitsBandwidthMB = g_serviceManager.GetBitsBandwidthMBps();
+        if (auto* svc = PManContext::Get().subs.serviceMgr.get()) {
+             snap.bitsBandwidthMB = svc->GetBitsBandwidthMBps();
+        }
     }
 
     // 2. DPC Latency (From 95th percentile ring buffer)
-    snap.dpcLatencyUs = g_lastDpcLatency.load(std::memory_order_relaxed);
+    snap.dpcLatencyUs = PManContext::Get().telem.lastDpcLatency.load(std::memory_order_relaxed);
 
     // 3. CPU Load (From Utils)
     snap.cpuLoad = GetCpuLoad();
