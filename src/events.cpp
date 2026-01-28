@@ -173,6 +173,9 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
 {
     if (!rec || !g_running) return;
 
+    // [FIX] Update heartbeat for ANY event to show session is alive
+    g_lastEtwHeartbeat.store(GetTickCount64(), std::memory_order_relaxed);
+
 	// Handle DXGI Present Events (Provider: Microsoft-Windows-DxgKrnl)
     static const GUID DxgKrnlGuid = { 0x802ec45a, 0x1e99, 0x4b83, { 0x99, 0x20, 0x87, 0xc9, 0x82, 0x77, 0xba, 0x9d } };
     if (IsEqualGUID(rec->EventHeader.ProviderId, DxgKrnlGuid))
@@ -282,7 +285,7 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
 
         if (pid != 0 && g_running)
         {
-            g_lastEtwHeartbeat.store(GetTickCount64(), std::memory_order_relaxed);
+            // Heartbeat updated at function entry
 
             if (opcode == 1)
             {
@@ -402,6 +405,10 @@ void StopEtwSession()
 void EtwThread()
 {
     g_threadCount++;
+
+    // [FIX] Initialize heartbeat to prevent immediate watchdog timeout on startup
+    g_lastEtwHeartbeat.store(GetTickCount64(), std::memory_order_relaxed);
+
     // FIX: Check return value (C6031)
     if (FAILED(CoInitialize(nullptr))) {
         Log("[ETW] CoInitialize failed");
@@ -943,13 +950,35 @@ void AntiInterferenceWatchdog()
             // ETW Health Check & Auto-Recovery
             if (g_caps.canUseEtw && g_running)
             {
-                if (g_etwSession.load() == 0)
-                {
-                    // Prevent infinite thread spawning loop
-                    static std::atomic<int> retryCount{0};
-                    static std::atomic<uint64_t> lastRestartAttempt{0};
-                    uint64_t now = GetTickCount64();
+                // [FIX] Scoped locally but static to persist across loop iterations
+                static std::atomic<int> retryCount{0};
+                static std::atomic<uint64_t> lastRestartAttempt{0};
+                
+                uint64_t now = GetTickCount64();
+                bool needsRestart = (g_etwSession.load() == 0);
 
+                // Check for frozen session (Silence Detection)
+                if (!needsRestart)
+                {
+                    uint64_t lastBeat = g_lastEtwHeartbeat.load(std::memory_order_relaxed);
+                    // 60s timeout for silence
+                    if (now - lastBeat > 60000)
+                    {
+                        Log("[HEALTH] ETW session silent for >60s. Forcing restart...");
+                        StopEtwSession();
+                        needsRestart = true;
+                    }
+                    else
+                    {
+                        // Session is healthy - reset retry counter
+                        if (retryCount > 0) {
+                            retryCount.store(0);
+                        }
+                    }
+                }
+
+                if (needsRestart)
+                {
                     if (retryCount < 3 && (now - lastRestartAttempt > 5000))
                     {
                         Log("[HEALTH] ETW Session is not running. Restarting (Attempt " + 
