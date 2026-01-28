@@ -146,6 +146,12 @@ private:
     mutable std::mutex m_metricsMtx;
     mutable double m_lastBitsBandwidth = 0.0;
     mutable uint64_t m_lastBandwidthQuery = 0;
+	
+	// [PATCH] Persistent PDH Handles (void* to avoid Pdh.h dependency in header)
+    void* m_pdhQuery = nullptr;
+    void* m_bitsCounter = nullptr;
+    void InitBitsCounters();
+    void CloseBitsCounters();
 };
 
 // Global helper functions for service management logic
