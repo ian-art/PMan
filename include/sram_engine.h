@@ -28,6 +28,7 @@
 #include <thread>
 #include <cstdint>
 #include "responsiveness_provider.h"
+#include <memory> // Required for std::unique_ptr
 
 // Aligned for 16-byte atomic operations (CMPXCHG16B) to ensure lock-free readout
 struct alignas(16) LagStatus {
@@ -44,13 +45,13 @@ public:
     void Shutdown();
     LagStatus GetStatus() const;
 
-    // Phase 1: Message Pump Access
+    // Message Pump Access
     DWORD GetThreadId() const;
 
 private:
-    SramEngine() = default;
+    SramEngine(); // Implemented in .cpp to handle unique_ptr initialization
     
-    // --- Phase 2: Sensor Logic ---
+    // --- Sensor Logic ---
     void InitSensors();
     void UpdateSensors();
     void CollectUiLatency();     // 2.1
@@ -73,7 +74,7 @@ private:
     void* m_hPdhCounter = nullptr; // Processor Queue Length
     double m_cpuQueueLength = 0.0;
 
-    // --- Phase 3: Logic Engine ---
+    // --- Logic Engine ---
     void EvaluateState();
     float NormalizeMetric(float value, float minThreshold, float maxThreshold);
 
@@ -93,7 +94,9 @@ private:
     void WorkerThread();
     static LRESULT CALLBACK SramWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-    std::atomic<LagStatus> m_status{ {0.0f, LagState::SNAPPY, 0} };
+    // Improvement: Use unique_ptr to isolate 16-byte alignment requirement
+    // This prevents warning C4324 (padding) by moving the aligned storage to the heap.
+    std::unique_ptr<std::atomic<LagStatus>> m_status;
     std::atomic<bool> m_running{ false };
     std::thread m_thread;
     std::atomic<DWORD> m_threadId{ 0 };

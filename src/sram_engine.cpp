@@ -29,13 +29,18 @@
 #define WM_SRAM_PING (WM_USER + 1)
 #define SENSOR_POLL_RATE_MS 250
 
-// Phase 3 Config
+// Config
 #define HYSTERESIS_COOLDOWN_MS 2000
 #define HYSTERESIS_SPIKE_COUNT 3
 
 SramEngine& SramEngine::Get() {
     static SramEngine instance;
     return instance;
+}
+
+// Constructor: Initialize the atomic on the heap
+SramEngine::SramEngine() {
+    m_status = std::make_unique<std::atomic<LagStatus>>(LagStatus{0.0f, LagState::SNAPPY, 0});
 }
 
 void SramEngine::Initialize() {
@@ -61,8 +66,8 @@ void SramEngine::Shutdown() {
 }
 
 LagStatus SramEngine::GetStatus() const {
-    // Lock-free atomic load
-    return m_status.load(std::memory_order_acquire);
+    // Lock-free atomic load (via pointer)
+    return m_status->load(std::memory_order_acquire);
 }
 
 DWORD SramEngine::GetThreadId() const {
@@ -178,7 +183,7 @@ void SramEngine::EvaluateState() {
     float n_dwm   = NormalizeMetric((float)dwmDelta, 0.0f, 3.0f);
     
     // Input: <16ms (Good), >50ms (Bad)
-    // Note: Since we only track 'last event time' vs 'now' loosely in Phase 2, 
+    // Note: Since we only track 'last event time' vs 'now' loosely, 
     // we use a decay logic. If input was recent, we assume latency is low unless 
     // the UI thread is blocked (which n_ui covers). 
     // For now, we use a placeholder or derived metric if we can't measure precise hardware latency.
@@ -240,9 +245,9 @@ void SramEngine::EvaluateState() {
     status.state = m_currentLogicState;
     status.timestamp = now;
     
-    m_status.store(status, std::memory_order_release);
+    m_status->store(status, std::memory_order_release);
 
-    // Phase 5: Diagnostic Logging
+    // Diagnostic Logging
     if (stateChanged) {
         std::string stateStr = "SNAPPY";
         if (m_currentLogicState == LagState::SLIGHT_PRESSURE) stateStr = "PRESSURE";
@@ -328,7 +333,7 @@ void SramEngine::WorkerThread() {
                 CollectDwmStats();
                 CollectSystemPressure();
                 
-                // Phase 3: Run Logic Engine
+                // Run Logic Engine
                 EvaluateState();
 
                 lastPoll = now;
