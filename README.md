@@ -24,26 +24,25 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 
 ---
 
-## 🚀 Key Features
+## 🚀 Key Features (Optimized for Legacy & Standard Architectures)
 
-### 🧠 Intelligent CPU Topology Management
+### 🧠 CPU Topology & Thread Management
 
-**Intel Hybrid Architecture (12th–14th Gen)**
+**Smart SMT / Hyper‑Threading Control**
 
-* Automatically pins games to **P‑Cores (Performance cores)**
-* Pushes browsers and background tasks to **E‑Cores (Efficiency cores)**
-* Uses `SetProcessDefaultCpuSets` for clean, scheduler‑aware affinity control
+* Dynamically manages logical cores to reduce jitter and cache contention
+* Re‑enables SMT for multitasking and browser workloads to maximize throughput on standard multi-core CPUs.
 
-**AMD Ryzen X3D (3D V‑Cache Optimization)**
+**Audio Isolation (The Crackle Fixer)**
 
-* Detects CCD topology at runtime
-* Pins games to the **V‑Cache CCD (CCD0)**
-* Restores full multi-CCD access (V-Cache + Frequency) for browsers, allowing the OS to utilize all cores for maximum multitasking throughput.
+* Automatically detects audio engines (`audiodg.exe`)
+* **Pins audio threads to the last physical core** to prevent buffer underruns and "crackling" during heavy CPU loads
+* Ensures `HIGH_PRIORITY_CLASS` for audio processing
 
-**SMT / Hyper‑Threading Control**
+**Legacy Game Support**
 
-* Dynamically disables logical cores for games to reduce jitter and cache contention
-* Re‑enables SMT for multitasking and browser workloads
+* Dedicated detection for older titles (DirectX 9/10) that do not trigger modern presentation events
+* Ensures classic games receive the same high-performance scheduling as modern titles
 
 ---
 
@@ -51,7 +50,7 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 
 **Win32 Priority Separation**
 
-* Dynamically adjusts the CSRSS scheduler quantum
+* Dynamically adjusts the CSRSS scheduler quantum to favor foreground windows:
 
 | Mode            | Value  | Behavior                                             |
 | --------------- | ------ | ---------------------------------------------------- |
@@ -60,60 +59,60 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 
 **Timer Resolution & Coalescing**
 
-* Forces **0.5 ms (5000 units)** global timer resolution during gaming
-* Disables timer coalescing for real‑time precision
+* Forces **0.5 ms (5000 units)** global timer resolution during gaming for maximum precision
+* Disables timer coalescing to reduce input latency
 * Re‑enables coalescing during browsing for power efficiency
 
 **I/O & GPU Priority**
 
 * Elevates **Game I/O priority → High**
-* Elevates **GPU scheduling priority → High** (Hardware Scheduling required)
-* Lowers browser I/O priority to prevent stutters during downloads or tab loading
+* Lowers background browser I/O priority to prevent stutters during downloads
+
+---
+
+### 📡 Network Intelligence & Latency Control
+
+**Adaptive Network Throttling**
+
+* Monitors your **Qualcomm Atheros Wi-Fi** connection stability in real-time
+* Automatically throttles background processes (Windows Update, BITS) when latency spikes are detected
+* Prevents background bandwidth hogs from causing lag spikes during online gaming
+
+**Auto-Repair Mechanism**
+
+* Detects connection drops (>5s) and attempts soft repairs (DNS Flush, IP Renew) automatically
 
 ---
 
 ### 💾 Memory & Resource Management
 
-**Working Set Enforcement**
+**Context-Aware Memory Optimization**
 
-* 🎮 Games: expands working set limits to prevent paging
-* 🌐 Browsers: aggressively trims unused pages when a game starts
+* Monitors system memory pressure (Hard Page Faults)
+* **Gaming:** Expands working set limits to prevent paging to disk
+* **Browsers:** Applies "EcoQoS" and trims memory only when strictly necessary (e.g., system RAM > 85% full)
 
-**Intelligent Standby List Purge**
+**Disk Thrashing Protection**
 
-* Monitors memory pressure in real time
-* Purges cached RAM **only when necessary** (never blindly)
-
-**Kernel Paging Enforcement**
-
-* Temporarily enables DisablePagingExecutive during gaming
-* Prevents the Windows Kernel from paging core drivers and system code to disk, eliminating micro-stutters caused by disk I/O on hot paths.
+* Temporarily pauses high-I/O services during gaming to prevent disk stutter:
+  * `wsearch` (Windows Search)
+  * `sysmain` (Superfetch)
+  * `wuauserv` (Windows Update)
+* Preserves disk I/O bandwidth for the active game
 
 ---
 
-### 🛡️ Stability & Automation
+### 🛡️ Stability & Safety
 
-**Zero‑Latency Detection**
+**Crash-Resilient Architecture**
 
-* Kernel ETW session (`KernelProcessGuid`) for instant process detection
-* Fallback to `SetWinEventHook` for foreground window changes
+* **Registry Watchdog:** A dedicated guard process ensures system settings are restored even if the main app is forced to close
+* **Service Recovery:** Guaranteed auto-resume of paused services upon exit
 
-**Anti‑Interference Watchdog**
+**System Responsiveness Awareness (SRAM)**
 
-* Monitors registry keys for interference from other “optimizer” tools
-* Automatically re‑asserts preferred policies if overwritten
-
-**Service Throttling**
-
-* Temporarily pauses:
-
-  * `wuauserv` (Windows Update)
-  * `BITS` (Background Intelligent Transfer Service)
-* Preserves bandwidth and CPU during gameplay
-
-**Graceful Shutdown**
-
-* Restores all registry keys, services, and timer resolutions to Windows defaults
+* Monitors UI latency and DWM composition drops in real-time
+* Automatically yields CPU if the system detects critical lag, preventing the "optimizer" from becoming the bottleneck
 
 ---
 
@@ -125,10 +124,11 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 * Uses **I/O Completion Ports (IOCP)** to watch file changes
 * No restart required
 
-**Session Locking**
+**System Tray Controls**
 
-* Prevents mode flapping
-* Once a game is running, the system remains in **Game Mode** even during Alt‑Tab
+* **Passive Mode:** Disable CPU throttling while keeping other optimizations active
+* **Keep Awake:** Prevent system sleep/screen-off during critical tasks
+* **Live Log:** View real-time performance decisions via the tray menu
 
 ---
 
@@ -139,46 +139,40 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 | Language     | C++20                                 |
 | Architecture | Event‑Driven (ETW + IOCP + WinEvents) |
 | Dependencies | Native Win32 API only                 |
-| Libraries    | `ntdll.lib`, `tdh.lib`                |
+| Libraries    | `ntdll.lib`, `tdh.lib`, `pdh.lib`     |
 
 **Key APIs Used**
 
 * `NtSetInformationProcess` *(undocumented process priorities)*
 * `NtSetTimerResolution` *(global timer precision)*
 * `SetProcessWorkingSetSizeEx` *(RAM control)*
-* `PowerSettingNotification` *(power plan awareness)*
+* `GetExtendedTcpTable` *(Network monitoring)*
 
 ---
 
 ## 📥 Installation & Usage
 
 1. **Download**
-
    * Grab the latest release or build from source
 
 2. **Run**
-
-   ```text
+   ```
    pman.exe
    ```
 
 3. **First Launch**
-
    * Installs a scheduled task
-   * Runs automatically at logon with **Highest Privileges**
+   * Runs automatically at logon with Highest Privileges
 
 4. **Configuration File**
-
-   ```text
+   ```
    C:\ProgramData\PriorityMgr\config.ini
    ```
-
    * Add executables under `[games]`
    * Add browsers under `[browsers]`
 
 5. **Uninstall**
-
-   ```text
+   ```
    pman.exe --uninstall
    ```
 
@@ -186,67 +180,78 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 
 ## ⚠️ Requirements
 
-* **OS**: Windows 10 (1809+) or Windows 11
-* **Privileges**: Administrator (kernel, registry, and service control)
-* **Hardware**:
-
-  * Optimized for Intel Hybrid CPUs (12th Gen+)
-  * Optimized for AMD Ryzen X3D
-  * Fully functional on all modern multi‑core CPUs
+* **OS:** Windows 10 (1809+) or Windows 11
+* **Privileges:** Administrator (kernel, registry, and service control)
+* **Hardware:**
+  * Optimized for Standard Multi-Core CPUs (Intel Core 1st Gen+, AMD Ryzen, etc.)
+  * Memory: 4GB+ RAM Recommended
+  * Network: Wi-Fi or Ethernet adapter for latency management
 
 ---
 
 ## 🗂️ Source Layout
 
-| File           | Responsibility                                                                   |
-| -------------- | -------------------------------------------------------------------------------- |
-| `main.cpp`     | Entry point, handles `--uninstall`, global mutex, scheduled task, subsystem init |
-| `events.cpp`   | Core engine: ETW kernel events + IOCP config watcher                             |
-| `tweaks.cpp`   | Low‑level tuning: priorities, affinities, RAM, NT API calls                      |
-| `policy.cpp`   | Decision logic: hysteresis, cooldowns, session locking                           |
-| `sysinfo.cpp`  | Hardware detection: CPUID hybrid flags & AMD cache topology                      |
-| `services.cpp` | Windows Service Control Manager (wuauserv, BITS)                                 |
-| `config.cpp`   | INI parsing and Unicode handling                                                 |
+| File          | Responsibility                                                                 |
+| ------------- | ------------------------------------------------------------------------------ |
+| `main.cpp`    | Entry point, handles --uninstall, global mutex, scheduled task, subsystem init |
+| `events.cpp`  | Core engine: ETW kernel events + IOCP config watcher                           |
+| `tweaks.cpp`  | Low‑level tuning: priorities, affinities, RAM, NT API calls                    |
+| `policy.cpp`  | Decision logic: hysteresis, cooldowns, session locking                         |
+| `sysinfo.cpp` | Hardware detection: CPUID & System capabilities                                |
+| `services.cpp`| Windows Service Control Manager (wuauserv, BITS, SysMain)                      |
+| `config.cpp`  | INI parsing and Unicode handling                                               |
 
 ---
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0** (GPL-3.0).
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 
-**What this means**: You can freely use, modify, and distribute this software, but any derivative work must also be released under GPL-3.0 with its source code available.
+**What this means:** You can freely use, modify, and distribute this software, but any derivative work must also be released under GPL-3.0 with its source code available.
 
-See the [LICENSE](LICENSE) file for the full license text.
+See the `LICENSE` file for the full license text.
+
+---
 
 ## Third-Party Components
 
 This project includes the following third-party software:
 
-- **Dear ImGui**
-  - Copyright (c) 2014–2026 Omar Cornut
-  - License: MIT
-  - https://github.com/ocornut/imgui
+**Dear ImGui**
+* Copyright (c) 2014–2026 Omar Cornut
+* License: MIT
+* https://github.com/ocornut/imgui
 
-**VirusTotal**
+---
+
+## VirusTotal
+
 `e573a3ec40b681f7d9ef89b75d6166a43a931c0454a3b2952ab0cd8794641876`
+
+---
 
 <details>
 <summary><small>Notes</small></summary>
 
 <small>
-All these are AI-generated codes and AI-generated fixes, but everything is my core idea.<br>
-Tested and running on my Sony VPCCW21FX laptop without issues.<br><br>
 
-Architect: `Ian Anthony R. Tancinco`<br>
-Engineers: `Gemini, GPT, Claude, Kimi, and others.`<br><br>
+All these are AI-generated codes and AI-generated fixes, but everything is my core idea.
 
-`Further testing on other devices is required.`
+Tested and running on my Sony VPCCW21FX laptop without issues.
+
+**Architect:** Ian Anthony R. Tancincο  
+**Engineers:** Gemini, GPT, Claude, Kimi, and others.
+
+Further testing on other devices is required.
+
 </small>
 
 </details>
 
+---
+
 <div align="center">
 
-**Priority Manager** — *Tune once. Let the system adapt.*
+**Priority Manager — Tune once. Let the system adapt.**
 
 </div>
