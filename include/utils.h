@@ -80,13 +80,8 @@ bool RegWriteDwordCached(HKEY root, const wchar_t* subkey, const wchar_t* value,
 // Updater Functions
 void OpenUpdatePage();
 
-// RAII Wrapper for Windows HANDLEs
-struct HandleDeleter {
-    void operator()(HANDLE h) const {
-        if (h && h != INVALID_HANDLE_VALUE) CloseHandle(h);
-    }
-};
-using UniqueHandle = std::unique_ptr<void, HandleDeleter>;
+// RAII Wrapper for Windows HANDLEs (Moved to types.h)
+// struct HandleDeleter ... using UniqueHandle ...
 
 // RAII Wrapper for Registry HKEYs
 struct RegKeyDeleter {
