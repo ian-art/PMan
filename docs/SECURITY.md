@@ -19,7 +19,7 @@ Required for full functionality:
 * No registry writes or service modifications
 
 ### Standard User Rights
-All monitoring, ETW consumption, and tray UI function without elevation. The startup task is configured to run elevated via Task Scheduler.
+Tray UI and log viewing function without elevation. However, **Real-time ETW monitoring (Kernel Logger) requires Administrator privileges** or membership in the 'Performance Log Users' group to function. The startup task is configured to run elevated via Task Scheduler.
 
 ## Data Handling
 
@@ -31,7 +31,7 @@ All monitoring, ETW consumption, and tray UI function without elevation. The sta
 
 ### Network Activity
 * **Connectivity Probes:** The Network Monitor autonomously sends ICMP Echo Requests (Pings) to public endpoints (1.1.1.1 and 8.8.8.8) to detect network instability. No application data is transmitted in these probes.
-* **Update Check:** Optional, user-initiated from tray menu. Connects to `raw.githubusercontent.com` via HTTPS to fetch `version.txt` and `pman.exe` binary.
+* **Update Check:** Manual, user-initiated from tray menu. Uses ShellExecute to open the project's GitHub Releases page in the default web browser. The application does not perform background network requests or auto-download binaries.
 * **No Telemetry:** No usage data, metrics, or system information is uploaded or transmitted to any remote server.
 
 ### Process Access
@@ -62,7 +62,7 @@ PMan opens target processes with the minimum required access rights for its feat
 * **No code injection:** PMan does not use `CreateRemoteThread`, `WriteProcessMemory`, or similar injection APIs. All optimizations are applied via documented Windows APIs that the OS handles safely.
 
 ## Known Security Limitations
-* **Local Privilege Escalation:** If run as admin, a compromised PMan process could suspend security services. This is mitigated by the critical service whitelist and the requirement for explicit admin consent at startup.
+* **Local Privilege Escalation:** If run as admin, a compromised PMan process could suspend security services. This is hardened by the critical service whitelist, but users should manually restrict write permissions on `%ProgramData%\PriorityMgr` in multi-user environments.
 * **Denial of Service:** Malformed config files could cause high CPU usage during parsing. Mitigated by 1-second reload debounce and size limits on all containers.
 * **Log Injection:** User-controlled process names are logged. The Log viewer runs in the context of the local user and treats content as plain text.
 
