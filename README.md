@@ -129,7 +129,8 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 * **Passive Mode:** Disable CPU throttling while keeping other optimizations active
 * **Keep Awake:** Prevent system sleep/screen-off during critical tasks
 * **Live Log:** View real-time performance decisions via the tray menu
-
+* **Animated tray icon:** Also supports icon theme
+* **..more..**
 ---
 
 ## 🔧 Technical Details
