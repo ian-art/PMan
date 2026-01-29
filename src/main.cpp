@@ -39,6 +39,8 @@
 #include "gui_manager.h"
 #include "dark_mode.h"
 #include "sram_engine.h"
+#include "editor_manager.h"
+#include "lifecycle.h"
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -140,44 +142,6 @@ static void BackgroundWorkerThread() {
         }
         if (task) task();
     }
-}
-
-// --- Helper: Detect External Editors (Notepad++, VS Code, etc.) ---
-static std::wstring GetRegisteredAppPath(const wchar_t* exeName) {
-    const HKEY roots[] = { HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER };
-    wchar_t buffer[MAX_PATH];
-    
-    for (HKEY root : roots) {
-        HKEY hKey;
-        std::wstring keyPath = std::wstring(L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\") + exeName;
-        if (RegOpenKeyExW(root, keyPath.c_str(), 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
-            DWORD size = sizeof(buffer);
-            // Default value of the key contains the full path to the executable
-            if (RegQueryValueExW(hKey, nullptr, nullptr, nullptr, (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
-                RegCloseKey(hKey);
-                return buffer;
-            }
-            RegCloseKey(hKey);
-        }
-    }
-    return L"";
-}
-
-// --- Helper: Find Line Number of Section Header ---
-static int GetConfigLineNumber(const std::wstring& sectionHeader) {
-    std::filesystem::path path = GetLogPath() / CONFIG_FILENAME;
-    std::wifstream file(path);
-    if (!file) return 0;
-
-    std::wstring line;
-    int lineNum = 1;
-    while (std::getline(file, line)) {
-        if (line.find(sectionHeader) != std::wstring::npos) {
-            return lineNum;
-        }
-        lineNum++;
-    }
-    return 0;
 }
 
 // --- Responsiveness Manager (Hung App Recovery) ---
@@ -371,65 +335,6 @@ private:
 
 static ResponsivenessManager g_responsivenessManager;
 
-// --- Helper: Open File in Default or Specific Editor ---
-static void OpenFileInEditor(const std::wstring& filename, const std::wstring& forcedEditor = L"", int jumpToLine = 0) {
-    std::filesystem::path path = GetLogPath() / filename;
-    // Ensure file exists to prevent error
-    if (!std::filesystem::exists(path)) {
-        std::ofstream(path) << ""; // Create empty if missing
-    }
-
-	// 1. Priority: Custom Editor (Notepad++, VS Code, etc.)
-    if (!forcedEditor.empty()) {
-        std::wstring params;
-
-        // Format command line args based on detected editor
-        if (jumpToLine > 0) {
-            std::wstring lowerEditor = forcedEditor;
-            std::transform(lowerEditor.begin(), lowerEditor.end(), lowerEditor.begin(), ::towlower);
-
-            if (lowerEditor.find(L"notepad++.exe") != std::wstring::npos) {
-                // Notepad++: -n123 "path"
-                params = L"-n" + std::to_wstring(jumpToLine) + L" \"" + path.wstring() + L"\"";
-            } else if (lowerEditor.find(L"code.exe") != std::wstring::npos) {
-                // VS Code: -g "path:123"
-                params = L"-g \"" + path.wstring() + L":" + std::to_wstring(jumpToLine) + L"\"";
-            } else if (lowerEditor.find(L"sublime_text.exe") != std::wstring::npos) {
-                // Sublime: "path:123"
-                params = L"\"" + path.wstring() + L":" + std::to_wstring(jumpToLine) + L"\"";
-            } else {
-                params = L"\"" + path.wstring() + L"\"";
-            }
-        } else {
-            params = L"\"" + path.wstring() + L"\"";
-        }
-
-        HINSTANCE res = ShellExecuteW(nullptr, L"open", forcedEditor.c_str(), params.c_str(), nullptr, SW_SHOW);
-        if ((intptr_t)res > 32) return; // Success
-    }
-
-    // 2. Fallback: Force "Run as Administrator" on default Notepad
-    // This solves the "Can't save in ProgramData" issue.
-    // We target "notepad.exe" explicitly to attach the "runas" verb.
-    std::wstring params = L"\"" + path.wstring() + L"\"";
-    HINSTANCE res = ShellExecuteW(nullptr, L"runas", L"notepad.exe", params.c_str(), nullptr, SW_SHOW);
-    
-    // 3. Last Resort: Generic "Open" (Stripped Windows / No Notepad)
-    // If Admin Notepad failed (User cancelled UAC, or notepad.exe is missing in stripped OS)
-    if ((intptr_t)res <= 32) {
-        // Try to open with WHATEVER is registered for .txt/.ini (could be WordPad, etc.)
-        res = ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOW);
-        
-        // 4. Absolute Failure: No application found
-        if ((intptr_t)res <= 32) {
-             MessageBoxW(nullptr, 
-                 L"Unable to open configuration file.\n\n"
-                 L"No text editor was found on this system, or the operation was cancelled.",
-                 L"Editor Error", MB_OK | MB_ICONERROR);
-        }
-    }
-}
-
 // --- Live Log Viewer Window Class ---
 class LogViewer {
 public:
@@ -553,39 +458,6 @@ private:
     }
 };
 
-static void TerminateExistingInstances()
-{
-    wchar_t self[MAX_PATH] = {};
-    GetModuleFileNameW(nullptr, self, MAX_PATH);
-
-    // RAII for Snapshot handle
-    UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
-    if (hSnap.get() == INVALID_HANDLE_VALUE) return;
-
-    PROCESSENTRY32W pe{};
-    pe.dwSize = sizeof(pe);
-
-    if (Process32FirstW(hSnap.get(), &pe))
-    {
-        do
-        {
-            if (_wcsicmp(pe.szExeFile, std::filesystem::path(self).filename().c_str()) == 0)
-            {
-                // RAII for Process handle
-                UniqueHandle hProc(OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID));
-                if (hProc)
-                {
-                    if (pe.th32ProcessID != GetCurrentProcessId())
-                    {
-                        TerminateProcess(hProc.get(), 0);
-                        WaitForSingleObject(hProc.get(), 3000);
-                    }
-                }
-            }
-        } while (Process32NextW(hSnap.get(), &pe));
-    }
-}
-
 // Helper for initial reg read
 static DWORD ReadCurrentPrioritySeparation()
 {
@@ -601,58 +473,6 @@ static DWORD ReadCurrentPrioritySeparation()
     RegCloseKey(key);
     
     return (rc == ERROR_SUCCESS) ? val : 0xFFFFFFFF;
-}
-
-static bool IsTaskInstalled(const std::wstring& taskName)
-{
-    std::wstring cmd = L"schtasks /query /tn \"" + taskName + L"\"";
-    STARTUPINFOW si{};
-    PROCESS_INFORMATION pi{};
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-    
-    if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 
-                       CREATE_NO_WINDOW | DETACHED_PROCESS, nullptr, nullptr, &si, &pi))
-    {
-        return false;
-    }
-
-    UniqueHandle hProc(pi.hProcess);
-    UniqueHandle hThread(pi.hThread);
-
-    // Fix Use async wait with timeout to prevent startup hangs
-    WaitForSingleObject(hProc.get(), 3000); 
-    DWORD exitCode = 0;
-    GetExitCodeProcess(hProc.get(), &exitCode);
-
-return (exitCode == 0);
-}
-
-static int GetStartupMode(const std::wstring& taskName)
-{
-    if (!IsTaskInstalled(taskName)) return 0; // Disabled
-
-    // Check if task has --paused argument by querying XML definition
-    std::wstring cmd = L"cmd /c schtasks /query /tn \"" + taskName + L"\" /xml | findstr /C:\"--paused\"";
-    STARTUPINFOW si{};
-    PROCESS_INFORMATION pi{};
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-
-    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 
-                       CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
-    {
-        UniqueHandle hProc(pi.hProcess);
-        UniqueHandle hThread(pi.hThread);
-
-        WaitForSingleObject(hProc.get(), 3000);
-        DWORD exitCode = 1;
-        GetExitCodeProcess(hProc.get(), &exitCode);
-
-        // findstr returns 0 if found, 1 if not found
-        return (exitCode == 0) ? 2 : 1; // 2=Passive, 1=Active
-    }
-    return 1; // Default to Active if check fails but task exists
 }
 
 // [MOVED] Registry Guard implementation moved to restore.cpp
@@ -923,11 +743,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             // Ensure owner window state is current before menu creation
             DarkMode::ApplyToWindow(hwnd);
             
-            // Detect best available editor (Priority: Notepad++ -> VS Code -> Sublime)
-            std::wstring editorPath, editorName;
-            if ((editorPath = GetRegisteredAppPath(L"notepad++.exe")) != L"")      editorName = L" [Notepad++]";
-            else if ((editorPath = GetRegisteredAppPath(L"Code.exe")) != L"")      editorName = L" [VS Code]";
-            else if ((editorPath = GetRegisteredAppPath(L"sublime_text.exe")) != L"") editorName = L" [Sublime]";
+            // Detect best available editor via EditorManager
+            std::wstring editorName = EditorManager::GetEditorName();
 
             HMENU hMenu = CreatePopupMenu();
 
@@ -995,8 +812,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
             if (cachedMode == -1 || (now - lastCheck > 5000)) {
                 // Fast check (non-blocking if cached or assume previous)
-                // Real update happens in background if needed, here we accept slight staleness for UI responsiveness
-                cachedMode = GetStartupMode(taskName); 
+                cachedMode = Lifecycle::GetStartupMode(taskName); 
                 lastCheck = now;
             }
             int startupMode = cachedMode;
@@ -1063,65 +879,35 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             ShellExecuteW(nullptr, L"open", GetLogPath().c_str(), nullptr, nullptr, SW_SHOW);
         }
 		else if (wmId == ID_TRAY_EDIT_CONFIG) {
-            // Re-detect to ensure we have the path (or cache it in a broader scope, but this is safe)
-            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
-            OpenFileInEditor(CONFIG_FILENAME, path);
+            EditorManager::OpenFile(CONFIG_FILENAME);
         }
 		else if (wmId == ID_TRAY_EDIT_GAMES) {
-            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
-            
-            int line = GetConfigLineNumber(L"[games]");
-            OpenFileInEditor(CONFIG_FILENAME, path, line); 
+            EditorManager::OpenConfigAtSection(L"[games]");
         }
         else if (wmId == ID_TRAY_EDIT_BROWSERS) {
-            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
-            
-            int line = GetConfigLineNumber(L"[browsers]");
-            OpenFileInEditor(CONFIG_FILENAME, path, line); 
+            EditorManager::OpenConfigAtSection(L"[browsers]");
         }
         else if (wmId == ID_TRAY_EDIT_VIDEO_PLAYERS) {
-            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
-            
-            int line = GetConfigLineNumber(L"[video_players]");
-            OpenFileInEditor(CONFIG_FILENAME, path, line); 
+            EditorManager::OpenConfigAtSection(L"[video_players]");
         }
 		else if (wmId == ID_TRAY_EDIT_IGNORED) {
-            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
-            OpenFileInEditor(IGNORED_PROCESSES_FILENAME, path, 0);
+            EditorManager::OpenFile(IGNORED_PROCESSES_FILENAME);
         }
 		else if (wmId == ID_TRAY_EDIT_LAUNCHERS) {
-            std::wstring path = GetRegisteredAppPath(L"notepad++.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"Code.exe");
-            if (path.empty()) path = GetRegisteredAppPath(L"sublime_text.exe");
-            OpenFileInEditor(CUSTOM_LAUNCHERS_FILENAME, path, 0);
+            EditorManager::OpenFile(CUSTOM_LAUNCHERS_FILENAME);
         }
 		// --- End New Handlers ---
 
         else if (wmId == ID_TRAY_STARTUP_DISABLED) {
             wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
             std::wstring taskName = std::filesystem::path(self).stem().wstring();
-            ShellExecuteW(nullptr, L"runas", L"schtasks.exe", (L"/delete /tn \"" + taskName + L"\" /f").c_str(), nullptr, SW_HIDE);
+            Lifecycle::UninstallTask(taskName);
         }
         else if (wmId == ID_TRAY_STARTUP_ACTIVE || wmId == ID_TRAY_STARTUP_PASSIVE) {
             wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
             std::wstring taskName = std::filesystem::path(self).stem().wstring();
-            
-            // Base arguments: Silent only. Passive mode adds --paused
-            std::wstring args = L" /S";
-            if (wmId == ID_TRAY_STARTUP_PASSIVE) args += L" --paused";
-
-            std::wstring params = L"/create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\"" + args + L"\" /sc onlogon /rl highest /f";
-            ShellExecuteW(nullptr, L"runas", L"schtasks.exe", params.c_str(), nullptr, SW_HIDE);
+            bool passive = (wmId == ID_TRAY_STARTUP_PASSIVE);
+            Lifecycle::InstallTask(taskName, self, passive);
         }
         else if (wmId == ID_TRAY_EXIT) {
             DestroyWindow(hwnd);
@@ -1351,9 +1137,9 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 
     if (uninstall)
     {
-        TerminateExistingInstances();
+        Lifecycle::TerminateExistingInstances();
 
-		if (!IsTaskInstalled(taskName))
+		if (!Lifecycle::IsTaskInstalled(taskName))
         {
             if (!silent)
             {
@@ -1365,17 +1151,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
             return 0;
         }
 
-        std::wstring cmd = L"schtasks /delete /tn \"" + taskName + L"\" /f";
-        STARTUPINFOW si{};
-        PROCESS_INFORMATION pi{};
-        si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
-        if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
-        {
-            WaitForSingleObject(pi.hProcess, 5000);
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-        }
+        Lifecycle::UninstallTask(taskName);
 
         if (!silent)
         {
@@ -1388,48 +1164,23 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         return 0;
     }
 
-	bool taskExists = IsTaskInstalled(taskName);
+	bool taskExists = Lifecycle::IsTaskInstalled(taskName);
 
-if (!taskExists)
+    if (!taskExists)
     {
-        // Add /S flag (Silent) to the scheduled task command
-        std::wstring cmdStr = L"schtasks /create /tn \"" + taskName + L"\" /tr \"\\\"" + std::wstring(self) + L"\\\" /S\" /sc onlogon /rl highest /f";
-        
-        // Fix CreateProcessW requires a mutable buffer
-        std::vector<wchar_t> cmdBuf(cmdStr.begin(), cmdStr.end());
-        cmdBuf.push_back(L'\0');
-
-        STARTUPINFOW si{};
-        PROCESS_INFORMATION pi{};
-        si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
-        
-        BOOL created = CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
-        if (created)
+        // Install in Active mode (false for passive), with /S implied by Lifecycle::InstallTask default logic
+        if (Lifecycle::InstallTask(taskName, self, false)) 
         {
-            WaitForSingleObject(pi.hProcess, 10000);
-            DWORD exitCode = 0;
-            GetExitCodeProcess(pi.hProcess, &exitCode);
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-
-		if (exitCode == 0)
-            {
-                if (!silent)
-                    MessageBoxW(nullptr, L"Priority Manager installed successfully!\nIt will now run automatically at logon and is currently active.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
-            }
-            else
-            {
-                if (!silent)
-                    MessageBoxW(nullptr, L"Failed to create startup task. Please run as Administrator.", L"Priority Manager - Error", MB_OK | MB_ICONWARNING);
-                return 1;
-            }
+             // Wait briefly to ensure task registration propagates
+             Sleep(500);
+             if (!silent)
+                MessageBoxW(nullptr, L"Priority Manager installed successfully!\nIt will now run automatically at logon and is currently active.", L"Priority Manager", MB_OK | MB_ICONINFORMATION);
         }
         else
         {
-            if (!silent)
-                MessageBoxW(nullptr, L"Failed to launch schtasks. Please run as Administrator.", L"Priority Manager - Error", MB_OK | MB_ICONWARNING);
-			return 1;
+             if (!silent)
+                MessageBoxW(nullptr, L"Failed to create startup task. Please run as Administrator.", L"Priority Manager - Error", MB_OK | MB_ICONWARNING);
+             return 1;
         }
     }
 
