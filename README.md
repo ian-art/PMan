@@ -24,6 +24,110 @@ Unlike traditional priority tools that *poll* processes (wasting CPU cycles and 
 
 ---
 
+## 🧠 Why PMan Exists (Beyond Windows Game Mode)
+
+Modern Windows versions already ship with **Game Mode**, **Efficiency Mode**, and **hardware-scheduled heterogeneous cores** (Intel Thread Director, AMD CPPC).
+
+**PMan does not replace these systems — it audits, adapts, and corrects them in real time.**
+
+Windows is a **general-purpose operating system**. Its performance decisions are:
+
+* Heuristic-based
+* Static or semi-static
+* Optimized for the *average user on average hardware*
+
+**PMan is a workload-aware specialist**, designed to optimize for **actual runtime behavior**, not assumptions.
+
+---
+
+### 🔬 Adaptive Decisions vs Static Heuristics
+
+Windows optimizations are largely **binary toggles** (Game Mode ON/OFF, Efficiency Mode ON/OFF).
+
+**PMan continuously validates its own decisions**:
+
+* Measures **frame-time variance**, not just FPS
+* Detects whether a tweak *actually* improves stability
+* Automatically disables optimizations that cause regressions
+
+➡️ Result: No “one-size-fits-all” tuning. Each application earns its optimizations.
+
+---
+
+### 🎯 Latency Awareness (Not Just Throughput)
+
+Windows scheduling prioritizes **throughput** (work per second).
+
+**PMan prioritizes latency-critical paths**, including:
+
+* UI thread responsiveness
+* Input message pump delay
+* Audio processing stability
+
+Instead of boosting entire processes blindly, **PMan identifies and elevates the threads that affect user-perceived responsiveness**.
+
+➡️ Result: Lower input lag and fewer micro-stutters at identical FPS.
+
+---
+
+### 🧩 Hybrid CPU Reality Checks (P-Core vs E-Core)
+
+Hybrid schedulers are power-biased by design.
+
+This can misclassify **latency-critical workloads** (audio, input, DWM) as background tasks.
+
+**PMan explicitly corrects this behavior** by:
+
+* Detecting hybrid CPU topology
+* Pinning audio and latency-sensitive threads to performance cores
+* Preventing E-core misplacement that causes crackling or stutter
+
+➡️ Result: Stable audio and consistent responsiveness under load.
+
+---
+
+### 🚑 Reactive Stutter Mitigation
+
+Windows memory and I/O management is **lazy by design**.
+
+**PMan reacts immediately**:
+
+* Detects variance spikes
+* Temporarily boosts working sets
+* Prevents paging-induced stutters during the event
+
+➡️ Result: Short stalls are corrected *as they happen*, not after.
+
+---
+
+### 🔁 Desktop & Alt-Tab Responsiveness
+
+Windows Game Mode optimizes **only the foreground game**.
+
+**PMan treats responsiveness as a system-wide contract**:
+
+* Boosts Explorer and DWM during task switches
+* Restores desktop interactivity instantly
+* Prevents “frozen desktop” behavior after gaming
+
+➡️ Result: The system feels fast everywhere, not just in-game.
+
+---
+
+### 🧬 Summary: Windows vs PMan
+
+| Aspect | Windows | PMan |
+|------|--------|------|
+| Decision model | Static heuristics | Data-driven |
+| Scope | Process-level | Thread-level |
+| Priority | Throughput | Latency |
+| Hybrid CPUs | Power-biased | Responsiveness-biased |
+| Adaptation | Generic | Per-application |
+
+**PMan does not fight Windows — it teaches Windows how your system actually behaves.**
+
+---
+
 ## 🚀 Key Features (Optimized for Legacy & Standard Architectures)
 
 ### 🧠 CPU Topology & Thread Management
