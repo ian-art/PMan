@@ -1029,7 +1029,7 @@ DWORD_PTR GetOptimizationTargetCores()
     // Strategy A: Hybrid Architecture (Use E-Cores)
     if (g_caps.hasHybridCores && g_eCoreSets.size() >= 2)
     {
-        // Pick the last two E-Cores (usually furthest from P-Core heat/interrupts)
+        // Pick the last two available E-Cores to minimize index fragmentation.
         size_t count = g_eCoreSets.size();
         
         // Use the actual IDs from the detected E-Core sets
