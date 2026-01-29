@@ -34,6 +34,15 @@
 #include <vector>
 #include <atomic>
 #include <cstdint>
+#include <memory> // Required for std::unique_ptr
+
+// RAII Wrapper for Windows HANDLEs (Moved from utils.h to avoid circular deps)
+struct HandleDeleter {
+    void operator()(HANDLE h) const {
+        if (h && h != INVALID_HANDLE_VALUE) CloseHandle(h);
+    }
+};
+using UniqueHandle = std::unique_ptr<void, HandleDeleter>;
 
 // --------------------------------------------------------------------------
 // SDK COMPATIBILITY DEFINITIONS
