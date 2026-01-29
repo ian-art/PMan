@@ -32,10 +32,10 @@
 // App State
 // g_running moved to PManContext
 // g_reloadNow moved to PManContext
-std::atomic<uint64_t> g_policyState{0}; // Fix
+// g_policyState moved to PManContext
 // g_lastPid moved to PManContext
 // g_lastMode moved to PManContext
-std::atomic<DWORD> g_lastRamCleanPid{0};
+// g_lastRamCleanPid moved to PManContext
 
 // Process Identity & Hierarchy
 // g_processIdentityMtx, g_lastProcessIdentity, g_lockedProcessIdentity moved to PManContext.proc
@@ -49,37 +49,30 @@ std::atomic<DWORD> g_lastRamCleanPid{0};
 // g_isSuspended moved to PManContext
 // g_userPaused moved to PManContext
 // g_pauseIdle moved to PManContext.conf
-std::atomic<NetworkState> g_networkState{NetworkState::Offline};
+// g_networkState moved to PManContext.net
 
-// Default: Recovery Enabled, Prompts Enabled
-std::atomic<bool> g_responsivenessRecoveryEnabled{ true };
-std::atomic<bool> g_recoveryPromptEnabled{ true };
+// Responsiveness Recovery Config moved to PManContext.conf
 
 // Idle Revert Feature
 // g_idleRevertEnabled, g_idleTimeoutMs moved to PManContext.conf
 
-// Session Lock
-std::atomic<bool> g_sessionLocked{false};
-std::atomic<DWORD> g_lockedGamePid{0};
-std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime{0};
+// Session Lock moved to PManContext
 
-// Prevent system sleep
-std::atomic<bool> g_keepAwake{false};
+// Prevent system sleep moved to PManContext.conf
 
-std::wstring g_iconTheme = L"Default";
+// g_iconTheme moved to PManContext.conf
 
 // Config Storage
 // Sets and g_setMtx moved to PManContext.conf
 
 // Event Handles & Synchronization
 // g_hIocp moved to PManContext
-HPOWERNOTIFY g_pwr1 = nullptr;
-HPOWERNOTIFY g_pwr2 = nullptr;
+// g_pwr1, g_pwr2 moved to PManContext.runtime
 
 // g_shutdownMtx, g_shutdownCv, g_threadCount moved to PManContext
 // g_lastConfigReload moved to PManContext
 
-HANDLE g_hMutex = nullptr;
+// g_hMutex moved to PManContext.runtime
 
 // Hardware & OS Capabilities
 // g_caps moved to PManContext
@@ -88,10 +81,7 @@ HANDLE g_hMutex = nullptr;
 // Fix Compatibility Flags
 // g_isLowCoreCount, g_isLowMemory moved to PManContext.feat
 
-// Hybrid Core Management
-std::vector<ULONG> g_pCoreSets;
-std::vector<ULONG> g_eCoreSets;
-std::mutex g_cpuSetMtx;
+// Hybrid Core Management moved to PManContext.sys
 
 // Registry & Feature States
 // g_memoryCompressionModified, g_originalMemoryCompression moved to PManContext.feat
@@ -114,9 +104,9 @@ std::mutex g_cpuSetMtx;
 
 // Policy & Shutdown
 // g_lastPolicyChange moved to PManContext
-std::atomic<DWORD> g_cachedRegistryValue{0xFFFFFFFF};
+// g_cachedRegistryValue moved to PManContext.runtime
 // g_hShutdownEvent moved to PManContext
-DWORD g_originalRegistryValue = 0xFFFFFFFF;
+// g_originalRegistryValue moved to PManContext.runtime
 // g_etwSession, g_lastEtwHeartbeat moved to PManContext.telem
 
 // Root Cause Correlation Global
