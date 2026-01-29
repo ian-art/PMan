@@ -28,7 +28,15 @@
 #include <unordered_map>
 #include <string>
 #include <memory> 
+#include <vector>
 #include "types.h"
+
+// Network Intelligence
+enum class NetworkState {
+    Offline = 0,    // No internet access
+    Unstable = 1,   // High latency (>150ms) or packet loss
+    Stable = 2      // Low latency, reliable connection
+};
 
 // Forward declarations to avoid circular dependencies
 class SessionSmartCache;
@@ -60,11 +68,17 @@ public:
     // [FIX] Restored Missing Flags
     std::atomic<bool> ignoreNonInteractive{true};
     std::atomic<bool> restoreOnExit{true};
+    
+    std::atomic<uint64_t> policyState{0};
+    std::atomic<DWORD> lastRamCleanPid{0};
 
     // -- Session State --
     std::atomic<DWORD> lastGamePid{0};
     std::atomic<int>   lastMode{0};
     std::atomic<std::chrono::steady_clock::time_point::rep> lastPolicyChange{0};
+    std::atomic<bool> sessionLocked{false};
+    std::atomic<DWORD> lockedGamePid{0};
+    std::atomic<std::chrono::steady_clock::time_point::rep> lockStartTime{0};
 
     // -- System Capabilities (Immutable after init) --
     struct SystemState {
@@ -73,12 +87,17 @@ public:
         DWORD physicalCoreCount{0};
         DWORD logicalCoreCount{0};
         DWORD_PTR physicalCoreMask{0};
+        
+        // Hybrid Core Management
+        std::vector<ULONG> pCoreSets;
+        std::vector<ULONG> eCoreSets;
+        std::mutex cpuSetMtx;
     } sys;
 
     // -- Runtime Primitives (Handles & Sync) --
     struct RuntimeState {
-        HANDLE hIocp{nullptr};
-        HANDLE hShutdownEvent{nullptr}; // Global stop event
+        UniqueHandle hIocp;
+        UniqueHandle hShutdownEvent; // Global stop event
         
         std::mutex shutdownMtx;
         std::condition_variable shutdownCv;
@@ -89,6 +108,12 @@ public:
         
         // Session Smart Cache (Thread-Safe Atomic Shared Pointer)
         std::atomic<std::shared_ptr<SessionSmartCache>> sessionCache;
+
+        HPOWERNOTIFY pwr1{nullptr};
+        HPOWERNOTIFY pwr2{nullptr};
+        UniqueHandle hMutex;
+        std::atomic<DWORD> cachedRegistryValue{0xFFFFFFFF};
+        DWORD originalRegistryValue{0xFFFFFFFF};
     } runtime;
 
     // -- Configuration (User Settings & Lists) --
@@ -100,6 +125,11 @@ public:
         std::atomic<bool> pauseIdle{false};
         std::atomic<bool> idleRevertEnabled{true};
         std::atomic<uint32_t> idleTimeoutMs{300000}; // Default 5m
+        
+        std::atomic<bool> responsivenessRecoveryEnabled{true};
+        std::atomic<bool> recoveryPromptEnabled{true};
+        std::atomic<bool> keepAwake{false};
+        std::wstring iconTheme{L"Default"};
 
         // Process Lists
         std::shared_mutex setMtx;
@@ -162,6 +192,7 @@ public:
     struct NetState {
         std::shared_mutex mtx;
         std::unordered_set<DWORD> activePids;
+        std::atomic<NetworkState> networkState{NetworkState::Offline};
     } net;
 
     // -- Telemetry & Diagnostics --
