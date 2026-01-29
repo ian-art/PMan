@@ -59,7 +59,7 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
 	// Queue size was already reserved (incremented) at the start of the function.
     // Do NOT increment again here.
     
-    if (!PostQueuedCompletionStatus(g_hIocp, 0, 0, reinterpret_cast<LPOVERLAPPED>(job)))
+    if (!PostQueuedCompletionStatus(g_hIocp.get(), 0, 0, reinterpret_cast<LPOVERLAPPED>(job)))
     {
         g_iocpQueueSize.fetch_sub(1, std::memory_order_release);
         delete job;
@@ -79,7 +79,7 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
 void PostShutdown()
 {
     if (g_hIocp)
-        PostQueuedCompletionStatus(g_hIocp, 0, IOCP_SHUTDOWN_KEY, nullptr);
+        PostQueuedCompletionStatus(g_hIocp.get(), 0, IOCP_SHUTDOWN_KEY, nullptr);
 }
 
 void WaitForThreads(DWORD timeoutMs)
@@ -585,7 +585,7 @@ void IocpConfigWatcher()
         return;
     }
     
-    HANDLE hPort = CreateIoCompletionPort(hDir, g_hIocp, 0, 0);
+    HANDLE hPort = CreateIoCompletionPort(hDir, g_hIocp.get(), 0, 0);
     if (!hPort) 
     { 
         CloseHandle(hDir); 
@@ -620,7 +620,7 @@ void IocpConfigWatcher()
         ULONG_PTR key = 0; 
         LPOVERLAPPED pov = nullptr;
         
-        BOOL result = GetQueuedCompletionStatus(g_hIocp, &bytes, &key, &pov, 1000);
+        BOOL result = GetQueuedCompletionStatus(g_hIocp.get(), &bytes, &key, &pov, 1000);
         
         if (!result && pov == nullptr)
         {
@@ -727,7 +727,7 @@ void IocpConfigWatcher()
     LPOVERLAPPED pov = nullptr;
     
 	// FIX: Add yield to prevent CPU starvation during drain
-	while (GetQueuedCompletionStatus(g_hIocp, &bytes, &key, &pov, 0))
+	while (GetQueuedCompletionStatus(g_hIocp.get(), &bytes, &key, &pov, 0))
     {
         if (pov && pov != &ov)
         {
@@ -782,7 +782,7 @@ void AntiInterferenceWatchdog()
         Log("[WATCHDOG] Failed to register initial registry notification.");
     }
 
-    HANDLE handles[] = { g_hShutdownEvent, hRegEvent.get() };
+    HANDLE handles[] = { g_hShutdownEvent.get(), hRegEvent.get() };
     const DWORD CHECK_INTERVAL_MS = 10000; // 10s heartbeat for health checks
     int gcCycles = 0;
 
@@ -934,7 +934,7 @@ void AntiInterferenceWatchdog()
             }
 
             // 1. Health Checks
-            if (!g_hIocp || g_hIocp == INVALID_HANDLE_VALUE)
+            if (!g_hIocp || g_hIocp.get() == INVALID_HANDLE_VALUE)
             {
                 Log("[HEALTH] CRITICAL: IOCP handle is invalid. Initiating shutdown.");
                 g_running = false;
@@ -1135,7 +1135,7 @@ bool CheckForShutdownSignal()
 {
     if (!g_hShutdownEvent) return false;
     
-    DWORD waitResult = WaitForSingleObject(g_hShutdownEvent, 0);
+    DWORD waitResult = WaitForSingleObject(g_hShutdownEvent.get(), 0);
     if (waitResult == WAIT_OBJECT_0)
     {
         Log("Graceful shutdown signal received via named event");
