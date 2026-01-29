@@ -34,13 +34,6 @@
 #include <mutex>
 #include <shared_mutex>
 
-// Network Intelligence
-enum class NetworkState {
-    Offline = 0,    // No internet access
-    Unstable = 1,   // High latency (>150ms) or packet loss
-    Stable = 2      // Low latency, reliable connection
-};
-
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
@@ -74,10 +67,10 @@ enum class NetworkState {
 #define g_running (PManContext::Get().isRunning)
 #define g_reloadNow (PManContext::Get().reloadRequested)
 // Fix Combine Mode (low 32) and PID (high 32) for atomic updates
-extern std::atomic<uint64_t> g_policyState; 
+#define g_policyState (PManContext::Get().policyState)
 #define g_lastMode (PManContext::Get().lastMode)
 #define g_lastPid  (PManContext::Get().lastGamePid)
-extern std::atomic<DWORD> g_lastRamCleanPid;
+#define g_lastRamCleanPid (PManContext::Get().lastRamCleanPid)
 
 // Process Identity (PID reuse protection)
 #define g_processIdentityMtx    (PManContext::Get().proc.identityMtx)
@@ -98,25 +91,25 @@ extern std::atomic<DWORD> g_lastRamCleanPid;
 #define g_isSuspended (PManContext::Get().isSuspended)
 #define g_userPaused  (PManContext::Get().isPaused)
 #define g_pauseIdle            (PManContext::Get().conf.pauseIdle)
-extern std::atomic<NetworkState> g_networkState;
+#define g_networkState         (PManContext::Get().net.networkState)
 
 // Idle Revert Feature
 #define g_idleRevertEnabled    (PManContext::Get().conf.idleRevertEnabled)
 #define g_idleTimeoutMs        (PManContext::Get().conf.idleTimeoutMs)
 
 // Session Lock (Anti-Flapping)
-extern std::atomic<bool> g_sessionLocked;
-extern std::atomic<DWORD> g_lockedGamePid;
-extern std::atomic<std::chrono::steady_clock::time_point::rep> g_lockStartTime;
+#define g_sessionLocked (PManContext::Get().sessionLocked)
+#define g_lockedGamePid (PManContext::Get().lockedGamePid)
+#define g_lockStartTime (PManContext::Get().lockStartTime)
 
 // Prevent system sleep
-extern std::atomic<bool> g_keepAwake;
+#define g_keepAwake (PManContext::Get().conf.keepAwake)
 
-extern std::wstring g_iconTheme;
+#define g_iconTheme (PManContext::Get().conf.iconTheme)
 
 // Responsiveness Recovery Config
-extern std::atomic<bool> g_responsivenessRecoveryEnabled;
-extern std::atomic<bool> g_recoveryPromptEnabled;
+#define g_responsivenessRecoveryEnabled (PManContext::Get().conf.responsivenessRecoveryEnabled)
+#define g_recoveryPromptEnabled (PManContext::Get().conf.recoveryPromptEnabled)
 
 // Config Storage
 #define g_setMtx           (PManContext::Get().conf.setMtx)
@@ -131,15 +124,15 @@ extern std::atomic<bool> g_recoveryPromptEnabled;
 
 // Event Handles & Synchronization
 #define g_hIocp (PManContext::Get().runtime.hIocp)
-extern HPOWERNOTIFY g_pwr1;
-extern HPOWERNOTIFY g_pwr2;
+#define g_pwr1 (PManContext::Get().runtime.pwr1)
+#define g_pwr2 (PManContext::Get().runtime.pwr2)
 
 #define g_shutdownMtx      (PManContext::Get().runtime.shutdownMtx)
 #define g_shutdownCv       (PManContext::Get().runtime.shutdownCv)
 #define g_threadCount      (PManContext::Get().runtime.threadCount)
 #define g_lastConfigReload (PManContext::Get().runtime.lastConfigReload)
 
-extern HANDLE g_hMutex; // Single instance mutex
+#define g_hMutex (PManContext::Get().runtime.hMutex)
 
 // Hardware & OS Capabilities
 #define g_caps    (PManContext::Get().sys.caps)
@@ -150,9 +143,9 @@ extern HANDLE g_hMutex; // Single instance mutex
 #define g_isLowMemory    (PManContext::Get().feat.isLowMemory)
 
 // Hybrid Core Management
-extern std::vector<ULONG> g_pCoreSets;
-extern std::vector<ULONG> g_eCoreSets;
-extern std::mutex g_cpuSetMtx;
+#define g_pCoreSets (PManContext::Get().sys.pCoreSets)
+#define g_eCoreSets (PManContext::Get().sys.eCoreSets)
+#define g_cpuSetMtx (PManContext::Get().sys.cpuSetMtx)
 
 // Registry & Feature States
 #define g_memoryCompressionModified (PManContext::Get().feat.memoryCompressionModified)
@@ -182,9 +175,9 @@ extern std::mutex g_cpuSetMtx;
 
 // Policy & Shutdown
 #define g_lastPolicyChange (PManContext::Get().lastPolicyChange)
-extern std::atomic<DWORD> g_cachedRegistryValue;
+#define g_cachedRegistryValue (PManContext::Get().runtime.cachedRegistryValue)
 #define g_hShutdownEvent (PManContext::Get().runtime.hShutdownEvent)
-extern DWORD g_originalRegistryValue;
+#define g_originalRegistryValue (PManContext::Get().runtime.originalRegistryValue)
 #define g_etwSession       (PManContext::Get().telem.etwSession)
 #define g_lastEtwHeartbeat (PManContext::Get().telem.lastEtwHeartbeat)
 
