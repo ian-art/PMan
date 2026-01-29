@@ -204,9 +204,7 @@ void SetAmd3DVCacheAffinity(DWORD pid, int mode)
         if (pSetProcessDefaultCpuSets(hProcess, g_cpuInfo.ccd0CoreSets.data(), 
                                       static_cast<ULONG>(g_cpuInfo.ccd0CoreSets.size())))
         {
-            Log("[AMD-3D] Game pinned to CCD0 (" + 
-                std::to_string(g_cpuInfo.ccd0CoreSets.size()) + 
-                " cores with 3D V-Cache = 96MB L3)");
+            Log("[AMD-3D] Applied affinity preference to CCD0 (Targeting L3 Cache Die)");
         }
         else
         {
@@ -572,7 +570,7 @@ void SetTimerResolution(int mode)
         {
             g_timerResolutionActive.store(actual);
             Log("[TIMER] Game mode: " + std::to_string(actual / 10000.0) + 
-                "ms precision (reduces input lag)");
+				"ms precision (High Resolution requested)");
         }
     }
 	else if (mode == 2 && g_timerResolutionActive.load() != 0)
@@ -906,7 +904,7 @@ void SetPriorityBoostControl(DWORD pid, int mode)
         {
             std::lock_guard lock(g_dpcStateMtx);
             g_processesWithBoostDisabled[pid] = true;
-            Log("[DPC] Priority boost DISABLED for game (eliminates microstutter)");
+            Log("[DPC] Priority boost DISABLED for game (Standardizes thread quantum)");
         }
         else
         {

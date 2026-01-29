@@ -19,7 +19,7 @@ This release represents the **first formal documentation and feature baseline** 
   - Memory management
   - Network optimization
   - Performance monitoring
-- Session-scoped optimization with crash-proof registry guard
+- Session-scoped optimization with Crash-Resilient registry guard
 - Adaptive learning system for game-specific performance profiles
 - Idle CPU affinity parking with Explorer and DWM priority boosting
 - Network-aware adaptive throttling mechanisms
@@ -31,6 +31,8 @@ This release represents the **first formal documentation and feature baseline** 
   - Anti-cheat environment detection
   - Critical Windows service whitelist enforcement
 
+Refs: #AUDIT-2026-01-29
+
 ## [3.6.0] — 2026-01-20
 
 **Architecture 2.0 (The "Safety First" Update)**
@@ -38,13 +40,13 @@ This release focuses on eliminating technical debt, enforcing thread safety, and
 
 ### Architecture & Safety
 - **Global State Decomposition:** Replaced loose global variables with a unified `PManContext` singleton.
-- **Thread Safety:** Eliminated all unsafe `std::thread::detach()` calls. Replaced with managed `std::thread` members in `InputGuardian` and `ServiceWatcher`.
+- **Thread Safety:** Mitigated all unsafe `std::thread::detach()` calls. Replaced with managed `std::thread` members in `InputGuardian` and `ServiceWatcher`.
 - **Atomic Session Cache:** Fixed "Use-After-Free" race conditions in the session cache using `std::atomic<std::shared_ptr>`.
 - **RAII Enforcement:** Replaced raw `SC_HANDLE` management with `std::unique_ptr` and custom deleters to prevent handle leaks.
 
 ### New Features
-- **Crash-Proof Registry Guard:** A new Watchdog process monitors the application. If PMan is killed forcefully (e.g., Task Manager), critical system settings (network throttling, priority separation) are automatically reverted to defaults.
-- **Transaction Safety:** Services suspended by Game Mode are now guaranteed to auto-resume on exit, even during a crash.
+- **Crash-Resilient Registry Guard:** A new Watchdog process monitors the application. If PMan is killed forcefully (e.g., Task Manager), critical system settings (network throttling, priority separation) are automatically reverted to defaults.
+- **Transaction Safety:** Services suspended by Game Mode are designed to auto-resume on exit via a high-reliability restoration mechanism.
 
 ### Improvements
 - **Input Guardian:** Refactored to run on a managed worker thread, preventing zombie thread accumulation during DWM scanning.

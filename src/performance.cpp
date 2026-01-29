@@ -281,7 +281,7 @@ private:
 
             if (s_shouldPin && s_coreMask != 0) {
                 SetProcessAffinityMask(hProc, s_coreMask);
-                Log("[AUDIO] Optimized audiodg.exe (High Priority + Isolated P-Core)");
+                Log("[AUDIO] Applied affinity constraints to audiodg.exe (Target: P-Core)");
             } else {
                 Log("[AUDIO] Optimized audiodg.exe (High Priority only - Thread Director active)");
             }
@@ -547,7 +547,7 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
         uint64_t deltaTime = now - session.lastCpuTimestamp;
         
 		if (deltaTime > 0) {
-            // CORRECT FORMULA: CPU usage per frame (Percentage relative to one core)
+            // HEURISTIC: Estimate frame time based on CPU usage (Percentage relative to one core)
             // (CPU_Time_ms / Wall_Clock_ms) * 100
             double cpuTimePerFrame = ((deltaCpu / 10000.0) / static_cast<double>(deltaTime)) * 100.0;
             double estimatedFrameTime = 16.67 * (cpuTimePerFrame / 100.0);

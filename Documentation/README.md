@@ -2,7 +2,7 @@
 
 PMan is an automated Windows performance management utility that optimizes process scheduling, resource allocation, and system services to improve responsiveness during gaming and multitasking. It operates entirely in user mode without kernel drivers or permanent system modifications.
 
-## Verified Capabilities
+## Implemented Capabilities
 
 Based on the current implementation, PMan provides:
 

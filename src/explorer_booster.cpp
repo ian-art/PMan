@@ -526,7 +526,7 @@ void ExplorerBooster::RevertBoosts(DWORD pid) {
     ReleaseMemoryGuard(pid);
 
     // Revert Processor Scheduling to "Programs" (0x26)
-    // Ensures snappy UI response immediately upon user return.
+    // Reverts scheduler quantum to favor foreground processes (VAL_BROWSER).
     SetPrioritySeparation(VAL_BROWSER);
 
     it->second.state = ExplorerBoostState::Default;

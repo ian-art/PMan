@@ -54,7 +54,7 @@ void MemoryOptimizer::Initialize() {
     EnablePrivileges();
     InitializePageFaultCounter();
     m_running = true;
-    Log("[MEMOPT] Memory Optimizer Initialized (Smart Standby Purge & Trim)");
+    Log("[MEMOPT] Memory Optimizer Initialized (Working Set Trim Only)");
 }
 
 void MemoryOptimizer::Shutdown() {

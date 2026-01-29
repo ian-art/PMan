@@ -328,7 +328,7 @@ void SramEngine::EvaluateState() {
         // Format score to 2 decimal places
         char scoreBuf[16];
         snprintf(scoreBuf, sizeof(scoreBuf), "%.2f", score);
-        Log("[SRAM] State Transition: " + stateStr + " (Score: " + std::string(scoreBuf) + "). Primary Factor: " + culprit);
+        Log("[SRAM] Heuristic State Change: " + stateStr + " (Score: " + std::string(scoreBuf) + "). Leading Metric: " + culprit);
     }
 }
 
