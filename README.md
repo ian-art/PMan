@@ -233,7 +233,8 @@ Windows Game Mode optimizes **only the foreground game**.
 * **Passive Mode:** Disable CPU throttling while keeping other optimizations active
 * **Keep Awake:** Prevent system sleep/screen-off during critical tasks
 * **Live Log:** View real-time performance decisions via the tray menu
-* **Animated tray icon:** Also supports icon theme
+* **Animated tray icon:** Also supports icon theme.  
+  ![icon theme](gif/tray_animation.gif)
 * **..more..**
 ---
 
