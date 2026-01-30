@@ -38,15 +38,13 @@ static NtQueryTimerResolution_t pNtQueryTimerResolution = nullptr;
 bool NtWrapper::Initialize() {
     if (pNtSetSystemInformation) return true; // Already initialized
 
-    HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
-    if (!hNtDll) return false;
-
-    pNtSetSystemInformation = (NtSetSystemInformation_t)GetProcAddress(hNtDll, "NtSetSystemInformation");
-    pNtQuerySystemInformation = (NtQuerySystemInformation_t)GetProcAddress(hNtDll, "NtQuerySystemInformation");
-    pNtSetInformationProcess = (NtSetInformationProcess_t)GetProcAddress(hNtDll, "NtSetInformationProcess");
-    pNtSetInformationThread = (NtSetInformationThread_t)GetProcAddress(hNtDll, "NtSetInformationThread");
-    pNtSetTimerResolution = (NtSetTimerResolution_t)GetProcAddress(hNtDll, "NtSetTimerResolution");
-    pNtQueryTimerResolution = (NtQueryTimerResolution_t)GetProcAddress(hNtDll, "NtQueryTimerResolution");
+    // Use internal wrapper which handles module resolution safely
+    pNtSetSystemInformation = (NtSetSystemInformation_t)GetProcAddress("NtSetSystemInformation");
+    pNtQuerySystemInformation = (NtQuerySystemInformation_t)GetProcAddress("NtQuerySystemInformation");
+    pNtSetInformationProcess = (NtSetInformationProcess_t)GetProcAddress("NtSetInformationProcess");
+    pNtSetInformationThread = (NtSetInformationThread_t)GetProcAddress("NtSetInformationThread");
+    pNtSetTimerResolution = (NtSetTimerResolution_t)GetProcAddress("NtSetTimerResolution");
+    pNtQueryTimerResolution = (NtQueryTimerResolution_t)GetProcAddress("NtQueryTimerResolution");
 
     return (pNtSetSystemInformation && pNtSetInformationProcess);
 }
@@ -79,4 +77,9 @@ NTSTATUS NtWrapper::SetTimerResolution(ULONG DesiredTime, BOOLEAN SetResolution,
 NTSTATUS NtWrapper::QueryTimerResolution(PULONG MaximumTime, PULONG MinimumTime, PULONG CurrentTime) {
     if (!Initialize() || !pNtQueryTimerResolution) return (NTSTATUS)0xC0000002;
     return pNtQueryTimerResolution(MaximumTime, MinimumTime, CurrentTime);
+}
+
+void* NtWrapper::GetProcAddress(const char* procName) {
+    HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
+    return hNtDll ? reinterpret_cast<void*>(::GetProcAddress(hNtDll, procName)) : nullptr;
 }
