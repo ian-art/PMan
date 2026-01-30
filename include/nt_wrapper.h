@@ -60,7 +60,7 @@ public:
     static NTSTATUS SetTimerResolution(ULONG DesiredTime, BOOLEAN SetResolution, PULONG ActualTime);
     static NTSTATUS QueryTimerResolution(PULONG MaximumTime, PULONG MinimumTime, PULONG CurrentTime);
 
-    // Generic Helper (Phase 4)
+    // Generic Helper
     static void* GetProcAddress(const char* procName);
 };
 

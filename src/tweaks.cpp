@@ -79,7 +79,7 @@ bool SetPrioritySeparation(DWORD val)
 {
     if (g_isSuspended.load()) return false;
 
-    // [Phase 4] Use Standardized Anti-Hammering
+    // Use Standardized Anti-Hammering
     bool result = RegWriteDwordCached(
         HKEY_LOCAL_MACHINE, 
         L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
@@ -1322,7 +1322,7 @@ void ApplyTieredOptimization(DWORD pid, int mode, bool isGameChild)
 
 void ApplyPrivacyPolicies()
 {
-    // [Roadmap Phase 4] Bloat Blocker - Policy Keys
+    // Bloat Blocker - Policy Keys
     // 1. Disable Windows Consumer Features (Candy Crush, etc.)
     RegWriteDwordCached(HKEY_LOCAL_MACHINE, 
         L"SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent", 

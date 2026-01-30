@@ -349,7 +349,7 @@ bool WindowsServiceManager::ResolveAllowlist()
                      lower.find(L"agent") != std::wstring::npos ||
                      lower.find(L"telemetry") != std::wstring::npos) {
                  // Safety Check: Ensure we didn't accidentally catch a critical service
-                 // (Double-check against Hard Exclusions just in case, though Phase 3 handled it)
+                 // (Double-check against Hard Exclusions just in case)
                  if (!IsHardExcluded(name)) {
                      keep = true;
                  }
@@ -481,7 +481,7 @@ void WindowsServiceManager::EnforceSessionPolicies()
     }
 }
 
-// Phase 6: Apply Optimization (Strict Order)
+// Apply Optimization (Strict Order)
 bool WindowsServiceManager::ApplySessionOptimizations(DWORD_PTR targetAffinityMask)
 {
     std::lock_guard lock(m_mutex);
