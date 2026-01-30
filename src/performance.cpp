@@ -198,11 +198,11 @@ private:
         DWORD pid = GetProcessIdByName(L"audiodg.exe");
         if (pid == 0) return;
 
-        HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        UniqueHandle hProc(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
         if (!hProc) return;
 
         if (enable) {
-            SetPriorityClass(hProc, HIGH_PRIORITY_CLASS);
+            SetPriorityClass(hProc.get(), HIGH_PRIORITY_CLASS);
             
             // Detect hybrid CPU topology inline
             static std::once_flag s_topoInit;
@@ -280,33 +280,31 @@ private:
             });
 
             if (s_shouldPin && s_coreMask != 0) {
-                SetProcessAffinityMask(hProc, s_coreMask);
+                SetProcessAffinityMask(hProc.get(), s_coreMask);
                 Log("[AUDIO] Applied affinity constraints to audiodg.exe (Target: P-Core)");
             } else {
                 Log("[AUDIO] Optimized audiodg.exe (High Priority only - Thread Director active)");
             }
         } else {
-            SetPriorityClass(hProc, NORMAL_PRIORITY_CLASS);
+            SetPriorityClass(hProc.get(), NORMAL_PRIORITY_CLASS);
             
             DWORD_PTR processAffinity, systemAffinity;
-            if (GetProcessAffinityMask(hProc, &processAffinity, &systemAffinity)) {
-                SetProcessAffinityMask(hProc, systemAffinity);
+            if (GetProcessAffinityMask(hProc.get(), &processAffinity, &systemAffinity)) {
+                SetProcessAffinityMask(hProc.get(), systemAffinity);
             }
         }
-        CloseHandle(hProc);
     }
 };
 
 // Helper to get precise process creation time for identity validation
 static uint64_t GetProcessCreationTimeHelper(DWORD pid) {
-    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!hProc) return 0;
     FILETIME c, e, k, u;
     uint64_t res = 0;
-    if (GetProcessTimes(hProc, &c, &e, &k, &u)) {
+    if (GetProcessTimes(hProc.get(), &c, &e, &k, &u)) {
         res = (static_cast<uint64_t>(c.dwHighDateTime) << 32) | c.dwLowDateTime;
     }
-    CloseHandle(hProc);
     return res;
 }
 
@@ -527,15 +525,13 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
         if ((now100ns - lastFrameTime) < 1500000) return; // Data is fresh (<150ms), skip CPU fallback
     }
     
-    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!hProc) return;
     
     FILETIME creation, exit, kernel, user;
-    if (!GetProcessTimes(hProc, &creation, &exit, &kernel, &user)) {
-        CloseHandle(hProc);
+    if (!GetProcessTimes(hProc.get(), &creation, &exit, &kernel, &user)) {
         return;
     }
-    CloseHandle(hProc);
     
 	// FIX: Use shared helper
     uint64_t totalCpuTime100ns = FileTimeToULL(kernel) + FileTimeToULL(user);
@@ -768,9 +764,9 @@ PerformanceGuardian::SystemSnapshot PerformanceGuardian::CaptureSnapshot(DWORD p
     snap.timestamp = GetTickCount64();
 
     // ENHANCEMENT: Verify process life
-    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!hProc) return snap;
-    CloseHandle(hProc);
+    // Handle closes automatically
 
     // 1. Check BITS bandwidth (Using new class method)
     if (PManContext::Get().servicesSuspended.load()) {
@@ -808,31 +804,30 @@ void PerformanceGuardian::TriggerEmergencyBoost(DWORD pid) {
     // This runs on the IOCP thread
     Log("[PERF] >>> EMERGENCY BOOST ACTIVATED for PID " + std::to_string(pid) + " <<<");
     
-	HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
+    UniqueHandle hProc(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid));
     if (hProc) {
         // Fix: Use HIGH instead of REALTIME to prevent system lockup
-        SetPriorityClass(hProc, HIGH_PRIORITY_CLASS);
+        SetPriorityClass(hProc.get(), HIGH_PRIORITY_CLASS);
         
         PROCESS_MEMORY_COUNTERS pmc;
-		if (GetProcessMemoryInfo(hProc, &pmc, sizeof(pmc))) {
-			// [FIX] Memory Safety: Calculate safe buffer based on system RAM
-			MEMORYSTATUSEX ms = { sizeof(ms) };
-			GlobalMemoryStatusEx(&ms);
+        if (GetProcessMemoryInfo(hProc.get(), &pmc, sizeof(pmc))) {
+            // [FIX] Memory Safety: Calculate safe buffer based on system RAM
+            MEMORYSTATUSEX ms = { sizeof(ms) };
+            GlobalMemoryStatusEx(&ms);
 
-			// Use 10% of total RAM or 500MB, whichever is SMALLER
-			SIZE_T buffer = (std::min)(static_cast<SIZE_T>(500 * 1024 * 1024), static_cast<SIZE_T>(ms.ullTotalPhys / 10));
+            // Use 10% of total RAM or 500MB, whichever is SMALLER
+            SIZE_T buffer = (std::min)(static_cast<SIZE_T>(500 * 1024 * 1024), static_cast<SIZE_T>(ms.ullTotalPhys / 10));
     
-			// Ensure we don't exceed available RAM
-			if (buffer > ms.ullAvailPhys) buffer = static_cast<SIZE_T>(ms.ullAvailPhys / 2);
+            // Ensure we don't exceed available RAM
+            if (buffer > ms.ullAvailPhys) buffer = static_cast<SIZE_T>(ms.ullAvailPhys / 2);
 
-			SIZE_T target = pmc.WorkingSetSize + buffer;
-			SIZE_T minSize = (std::min)(static_cast<SIZE_T>(200 * 1024 * 1024), target / 2);
+            SIZE_T target = pmc.WorkingSetSize + buffer;
+            SIZE_T minSize = (std::min)(static_cast<SIZE_T>(200 * 1024 * 1024), target / 2);
 
-			SetProcessWorkingSetSize(hProc, minSize, target);
-			Log("[PERF] Emergency Boost: Added " + std::to_string(buffer/1024/1024) + "MB to working set.");
-		}
-		CloseHandle(hProc);
-	}
+            SetProcessWorkingSetSize(hProc.get(), minSize, target);
+            Log("[PERF] Emergency Boost: Added " + std::to_string(buffer/1024/1024) + "MB to working set.");
+        }
+    }
     
     ::SuspendBackgroundServices();
     SetTimerResolution(1);
