@@ -42,82 +42,20 @@ static bool ParseBool(const std::wstring& v) {
     return (v == L"true" || v == L"1" || v == L"yes");
 }
 
-static constexpr const char* DEFAULT_IGNORE_LIST = R"(; Priority Manager - Shell Process Exclusion List (ignore_processes.txt)
-; These system processes are part of the Desktop Experience.
-; They should NEVER be treated as Browsers or Games.
-; Add one process per line (lowercase).
-searchhost.exe
-startmenuexperiencehost.exe
-shellexperiencehost.exe
-applicationframehost.exe
-systemsettings.exe
-lockapp.exe
-textinputhost.exe
-ctfmon.exe
-smartscreen.exe
-taskmgr.exe
-cmd.exe
-powershell.exe
-pwsh.exe
-conhost.exe
-explorer.exe
-werfault.exe
-dllhost.exe
-sihost.exe
-)";
-
-// Generic Loader (Fixes Duplication #3)
-static void LoadProcessList(const std::filesystem::path& path, 
-                            const std::string& defaultContent,
-                            std::unordered_set<std::wstring>& outSet)
-{
-    if (!std::filesystem::exists(path))
-    {
-        std::ofstream f(path);
-        if (f) {
-            f << defaultContent;
-            f.close();
-        }
-    }
-
-    std::wifstream f(path);
-    if (!f) return;
-
-    std::wstring line;
-    while (std::getline(f, line))
-    {
-        size_t first = line.find_first_not_of(L" \t\r\n");
-        if (first == std::wstring::npos) continue;
-        size_t last = line.find_last_not_of(L" \t\r\n");
-        std::wstring exe = line.substr(first, last - first + 1);
-
-        if (exe.empty() || exe[0] == L';' || exe[0] == L'#') continue;
-
-        asciiLower(exe);
-        if (IsValidExecutableName(exe)) {
-            outSet.insert(exe);
-        }
-    }
+static std::unordered_set<std::wstring> GetDefaultCustomLaunchers() {
+    return {
+        L"steam.exe", L"epicgameslauncher.exe", L"battle.net.exe"
+    };
 }
 
-static void LoadCustomLaunchers(std::unordered_set<std::wstring>& outSet)
-{
-    std::string defaults = 
-        "; Custom Launchers Configuration\n"
-        "; List game launchers here to prevent them from being mistaken for games.\n"
-        "; These apps will be set to Low Priority to save CPU/GPU for your actual game.\n"
-        ";\n"
-        "; Add one .exe name per line (lowercase).\n"
-        "steam.exe\n"
-        "epicGameslauncher.exe\n"
-        "battle.net.exe\n";
-
-    LoadProcessList(GetLogPath() / CUSTOM_LAUNCHERS_FILENAME, defaults, outSet);
-}
-
-static void LoadIgnoredProcesses(std::unordered_set<std::wstring>& outSet)
-{
-    LoadProcessList(GetLogPath() / IGNORED_PROCESSES_FILENAME, DEFAULT_IGNORE_LIST, outSet);
+static std::unordered_set<std::wstring> GetDefaultIgnoredProcesses() {
+    return {
+        L"searchhost.exe", L"startmenuexperiencehost.exe",
+        L"shellexperiencehost.exe", L"applicationframehost.exe",
+        L"lockapp.exe", L"textinputhost.exe", L"ctfmon.exe", L"smartscreen.exe",
+        L"taskmgr.exe", L"cmd.exe", L"powershell.exe", L"pwsh.exe", L"conhost.exe",
+        L"explorer.exe", L"werfault.exe", L"dllhost.exe", L"systemsettings.exe", L"sihost.exe"
+    };
 }
 
 // Input Validation Helper
@@ -191,6 +129,8 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
                                    const std::unordered_set<std::wstring>& oldGames, // New parameter
                                    const std::unordered_set<std::wstring>& gameWindows,
                                    const std::unordered_set<std::wstring>& browserWindows,
+                                   const std::unordered_set<std::wstring>& customLaunchers,
+                                   const std::unordered_set<std::wstring>& ignoredProcesses,
                                    bool ignoreNonInteractive,
                                    bool restoreOnExit,
                                    bool lockPolicy,
@@ -373,6 +313,27 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
     }
     buffer << BuildConfigSection("browser_windows", browserWindowsSection.str());
 
+    std::ostringstream launchersSection;
+    launchersSection << "; Custom Launchers Configuration\n"
+                     << "; List game launchers here to prevent them from being mistaken for games.\n"
+                     << "; These apps will be set to Low Priority to save CPU/GPU for your actual game.\n"
+                     << ";\n"
+                     << "; Add one .exe name per line (lowercase).\n";
+    for (const auto& s : customLaunchers) {
+        launchersSection << WideToUtf8(s.c_str()) << "\n";
+    }
+    buffer << BuildConfigSection("custom_launchers", launchersSection.str());
+
+    std::ostringstream ignoredSection;
+    ignoredSection << "; Priority Manager - Shell Process Exclusion List\n"
+                   << "; These system processes are part of the Desktop Experience.\n"
+                   << "; They should NEVER be treated as Browsers or Games.\n"
+                   << "; Add one process per line (lowercase).\n";
+    for (const auto& s : ignoredProcesses) {
+        ignoredSection << WideToUtf8(s.c_str()) << "\n";
+    }
+    buffer << BuildConfigSection("ignored_processes", ignoredSection.str());
+
     buffer << "; ==================== END OF CONFIG ====================\n"
            << "; NOTES:\n"
            << "; - All names should be lowercase\n"
@@ -400,6 +361,7 @@ bool CreateDefaultConfig(const std::filesystem::path& configPath)
         WriteConfigurationFile(
             configPath,
             {}, {}, {}, GetDefaultBackgroundApps(), {}, {}, {}, // Empty sets for games, browsers, etc.
+            GetDefaultCustomLaunchers(), GetDefaultIgnoredProcesses(),
             true,    // ignoreNonInteractive
             true,    // restoreOnExit
             false,   // lockPolicy
@@ -453,9 +415,6 @@ void LoadConfig()
         int idleReservedCores = 2;
         uint32_t idleMinRam = 4;
 
-        // Load custom launchers
-		LoadIgnoredProcesses(ignoredProcesses);
-        LoadCustomLaunchers(customLaunchers);
         bool lockPolicy = false;
         std::wstring iconTheme = L"Default";
         
@@ -476,7 +435,7 @@ void LoadConfig()
 		ExplorerConfig explorerConfig;
         
         std::wstring line;
-        enum Sect { NONE, META, GLOBAL, EXPLORER, G, B, VP, BA, OLD_G, GW, BW } sect = NONE;
+        enum Sect { NONE, META, GLOBAL, EXPLORER, G, B, VP, BA, OLD_G, GW, BW, CL, IP } sect = NONE;
         int lineNum = 0;
         int configVersion = 0;
         
@@ -508,6 +467,8 @@ void LoadConfig()
                 else if (secName == L"old_games") sect = OLD_G;
                 else if (secName == L"game_windows") sect = GW;
                 else if (secName == L"browser_windows") sect = BW;
+                else if (secName == L"custom_launchers") sect = CL;
+                else if (secName == L"ignored_processes") sect = IP;
                 else sect = NONE;
                 continue;
             }
@@ -637,7 +598,7 @@ void LoadConfig()
             
 			asciiLower(item);
             
-            if (!IsValidExecutableName(item) && (sect == G || sect == B || sect == VP || sect == BA || sect == OLD_G))
+            if (!IsValidExecutableName(item) && (sect == G || sect == B || sect == VP || sect == BA || sect == OLD_G || sect == CL || sect == IP))
             {
                 if (!item.empty())
                     Log("[CFG] Skipped unsafe/invalid entry: " + WideToUtf8(item.c_str()));
@@ -651,6 +612,8 @@ void LoadConfig()
             if (sect == OLD_G && !item.empty()) oldGames.insert(item);
             if (sect == GW && !item.empty()) gameWindows.insert(item);
             if (sect == BW && !item.empty()) browserWindows.insert(item);
+            if (sect == CL && !item.empty()) customLaunchers.insert(item);
+            if (sect == IP && !item.empty()) ignoredProcesses.insert(item);
         }
         
         // Configuration upgrade handling (preserves user data while updating format)
@@ -682,10 +645,13 @@ void LoadConfig()
             if (backgroundApps.empty()) {
                 backgroundApps = GetDefaultBackgroundApps();
             }
+            if (customLaunchers.empty()) customLaunchers = GetDefaultCustomLaunchers();
+            if (ignoredProcesses.empty()) ignoredProcesses = GetDefaultIgnoredProcesses();
 
 			// Write upgraded configuration
 			// Note: explorerConfig contains defaults at this point, which is exactly what we want for a fresh section
 			WriteConfigurationFile(configPath, games, browsers, videoPlayers, backgroundApps, oldGames, gameWindows, browserWindows,
+                                  customLaunchers, ignoredProcesses,
                                   ignoreNonInteractive, restoreOnExit, lockPolicy, 
                                   g_suspendUpdatesDuringGames.load(),
                                   g_idleRevertEnabled.load(),

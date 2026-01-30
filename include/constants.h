@@ -28,7 +28,7 @@
 static constexpr wchar_t CONFIG_FILENAME[] = L"config.ini";
 static constexpr wchar_t CUSTOM_LAUNCHERS_FILENAME[] = L"custom_launchers.txt";
 static constexpr wchar_t IGNORED_PROCESSES_FILENAME[] = L"ignore_processes.txt";
-static constexpr int CONFIG_VERSION = 4; // Increment when config structure changes
+static constexpr int CONFIG_VERSION = 5; // Increment when config structure changes
 
 // Registry Values
 static constexpr DWORD   VAL_GAME       = 0x28; // Short Fixed, High Boost (Gaming)
@@ -627,6 +627,41 @@ scan_interval = 5s
 
 ; Debug logging (set 'true' to see state changes in log.txt)
 debug_logging = false
+
+[custom_launchers]
+; Custom Launchers Configuration
+; List game launchers here to prevent them from being mistaken for games.
+; These apps will be set to Low Priority to save CPU/GPU for your actual game.
+;
+; Add one .exe name per line (lowercase).
+steam.exe
+epicgameslauncher.exe
+battle.net.exe
+
+[ignored_processes]
+; Priority Manager - Shell Process Exclusion List
+; These system processes are part of the Desktop Experience.
+; They should NEVER be treated as Browsers or Games.
+; Add one process per line (lowercase).
+mintty.exe
+searchhost.exe
+startmenuexperiencehost.exe
+shellexperiencehost.exe
+applicationframehost.exe
+systemsettings.exe
+lockapp.exe
+textinputhost.exe
+ctfmon.exe
+smartscreen.exe
+taskmgr.exe
+cmd.exe
+powershell.exe
+pwsh.exe
+conhost.exe
+explorer.exe
+werfault.exe
+dllhost.exe
+sihost.exe
 
 ; ==================== END OF CONFIG ====================
 ; NOTES:
