@@ -225,7 +225,11 @@ responsiveness_recovery = true
 ; If false, PMAN will just attempt to boost it silently.
 recovery_prompt = true
 
+;theme
+icon_theme = Default
+
 [games]
+; can add popular aaa games here
 ; Add your game executables here (one per line)
 ; Examples:
 ; game.exe
@@ -272,6 +276,9 @@ mpc-be.exe
 mpc-be64.exe
 kmplayer.exe
 gom.exe
+
+[old_games]
+; dxd9 and dxd10 game lists here
 
 [game_windows]
 ; ==================== WINDOW CLASS/TITLE DETECTION ====================
@@ -621,7 +628,11 @@ scan_interval = 5s
 ; Debug logging (set 'true' to see state changes in log.txt)
 debug_logging = false
 
-; ================= END OF CONFIG =================
+; ==================== END OF CONFIG ====================
+; NOTES:
+; - All names should be lowercase
+; - Remove .exe names you don't use to keep config clean
+; - Add your specific games/browsers if not listed
 )";
 
 #endif // PMAN_CONSTANTS_H

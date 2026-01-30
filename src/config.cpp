@@ -261,7 +261,8 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
 
     globalContent << "; Hung App Recovery\n";
     globalContent << "responsiveness_recovery = " << (responsivenessRecovery ? "true" : "false") << "\n";
-    globalContent << "recovery_prompt = " << (recoveryPrompt ? "true" : "false") << "\n";
+    globalContent << "recovery_prompt = " << (recoveryPrompt ? "true" : "false") << "\n\n";
+    globalContent << ";theme\n";
     globalContent << "icon_theme = " << WideToUtf8(iconTheme.c_str()) << "\n\n";
     
     buffer << BuildConfigSection("global", globalContent.str());
@@ -304,46 +305,79 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
     
     // Build process lists
     std::ostringstream gamesSection;
+    gamesSection << "; can add popular aaa games here\n";
     for (const auto& s : games) {
         gamesSection << WideToUtf8(s.c_str()) << "\n";
     }
     buffer << BuildConfigSection("games", gamesSection.str());
     
 	std::ostringstream browsersSection;
+    browsersSection << "; Add browser executables here\n";
     for (const auto& s : browsers) {
         browsersSection << WideToUtf8(s.c_str()) << "\n";
     }
     buffer << BuildConfigSection("browsers", browsersSection.str());
 
     std::ostringstream videoSection;
+    videoSection << "; Add video players here to boost them. Useful if you play 4k and 8k videos.\n";
     for (const auto& s : videoPlayers) {
         videoSection << WideToUtf8(s.c_str()) << "\n";
     }
     buffer << BuildConfigSection("video_players", videoSection.str());
 
     std::ostringstream bgAppsSection;
+    bgAppsSection << "; Apps to throttle when network contention is detected (FNRO Level 2)\n";
+    bgAppsSection << "; Includes Cloud Sync, Game Launchers, and Torrent Clients\n";
     for (const auto& s : backgroundApps) {
         bgAppsSection << WideToUtf8(s.c_str()) << "\n";
     }
     buffer << BuildConfigSection("background_apps", bgAppsSection.str());
 
     std::ostringstream oldGamesSection;
+    oldGamesSection << "; dxd9 and dxd10 game lists here\n";
     for (const auto& s : oldGames) {
         oldGamesSection << WideToUtf8(s.c_str()) << "\n";
     }
     buffer << BuildConfigSection("old_games", oldGamesSection.str());
     
     std::ostringstream gameWindowsSection;
+    gameWindowsSection << "; ==================== WINDOW CLASS/TITLE DETECTION ====================\n"
+                       << "; These patterns help detect games BEFORE their process name appears\n"
+                       << "; The system checks both window titles AND window class names\n"
+                       << "; Matches are case-insensitive and use partial matching (contains)\n"
+                       << "; This is especially useful for:\n"
+                       << ";   - Games that launch through launchers\n"
+                       << ";   - Games with generic process names\n"
+                       << ";   - Games that show splash screens first\n"
+                       << ";\n"
+                       << "; HOW TO FIND WINDOW CLASS NAMES:\n"
+                       << "; 1. Download \"Spy++\" (comes with Visual Studio) or \"Window Detective\"\n"
+                       << "; 2. Launch your game\n"
+                       << "; 3. Use the finder tool to inspect the game window\n"
+                       << "; 4. Copy the \"Class\" or \"ClassName\" value\n"
+                       << "; 5. Add it here (one per line)\n\n"
+                       << "; ==================== GAME ENGINE WINDOW CLASSES ====================\n"
+                       << "; Unity Engine (very common - used by thousands of games)\n";
     for (const auto& s : gameWindows) {
         gameWindowsSection << WideToUtf8(s.c_str()) << "\n";
     }
     buffer << BuildConfigSection("game_windows", gameWindowsSection.str());
     
     std::ostringstream browserWindowsSection;
+    browserWindowsSection << "; ==================== BROWSER WINDOW CLASS DETECTION ====================\n"
+                          << "; These patterns detect browsers by their window class names\n"
+                          << "; Useful when browser processes have generic names\n"
+                          << "; Or when embedded browsers appear in other applications\n";
     for (const auto& s : browserWindows) {
         browserWindowsSection << WideToUtf8(s.c_str()) << "\n";
     }
     buffer << BuildConfigSection("browser_windows", browserWindowsSection.str());
+
+    buffer << "; ==================== END OF CONFIG ====================\n"
+           << "; NOTES:\n"
+           << "; - All names should be lowercase\n"
+           << "; - Remove .exe names you don't use to keep config clean\n"
+           << "; - Add your specific games/browsers if not listed\n";
     
     // Write buffered content to file in one operation
     std::ofstream outFile(path, std::ios::out | std::ios::trunc);
