@@ -29,6 +29,18 @@
 #endif
 
 // IO Priority Constants
+#ifndef IoPriorityVeryLow
+#define IoPriorityVeryLow 0
+#endif
+#ifndef IoPriorityLow
+#define IoPriorityLow 1
+#endif
+#ifndef IoPriorityVeryLow
+#define IoPriorityVeryLow 0
+#endif
+#ifndef IoPriorityLow
+#define IoPriorityLow 1
+#endif
 #ifndef IoPriorityNormal
 #define IoPriorityNormal 2
 #endif
@@ -37,6 +49,24 @@
 #endif
 #ifndef IoPriorityCritical
 #define IoPriorityCritical 4
+#endif
+
+// Power Throttling
+#ifndef ProcessPowerThrottling
+#define ProcessPowerThrottling (PROCESS_INFORMATION_CLASS)62
+#endif
+
+// Check if SDK already defines this (via the Version constant)
+#ifndef PROCESS_POWER_THROTTLING_CURRENT_VERSION
+typedef struct _PROCESS_POWER_THROTTLING_STATE {
+    ULONG Version;
+    ULONG ControlMask;
+    ULONG StateMask;
+} PROCESS_POWER_THROTTLING_STATE, *PPROCESS_POWER_THROTTLING_STATE;
+
+#define PROCESS_POWER_THROTTLING_CURRENT_VERSION 1
+#define PROCESS_POWER_THROTTLING_EXECUTION_SPEED 0x1
+#define PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION 0x4
 #endif
 
 // Timer Resolution

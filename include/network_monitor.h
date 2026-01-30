@@ -22,6 +22,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <unordered_set>
 
 class NetworkMonitor {
 public:
@@ -40,6 +41,32 @@ private:
     // Smart Network Repair
     void AttemptAutoRepair();
     bool ExecuteNetCommand(const wchar_t* cmd);
+
+    // FNRO: Foreground Responsiveness
+public:
+    void OnForegroundWindowChanged(HWND hwnd);
+
+private:
+    void ApplyBrowserBoost(DWORD pid, const std::wstring& exeName);
+    void RemoveBrowserBoost();
+    void ApplyQosPolicy(const std::wstring& exeName);
+    void RemoveQosPolicy(const std::wstring& exeName);
+	
+    // State 1
+    std::wstring m_lastBoostedBrowser;
+    DWORD m_lastBoostedPid = 0;
+    int m_lastBoostedPriority = NORMAL_PRIORITY_CLASS;
+
+    // Background Traffic Protection
+    void DeprioritizeBackgroundApps();
+    void RestoreBackgroundApps();
+    
+    // TCP Sanity
+    void PerformTcpSanityCheck();
+    
+    // State 2
+    std::unordered_set<DWORD> m_throttledPids;
+    bool m_areBackgroundAppsThrottled = false;
 
     std::thread m_thread;
     std::atomic<bool> m_running{false};

@@ -76,6 +76,8 @@ bool RegReadDword(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD&
 
 // Registry Anti-Hammering
 bool RegWriteDwordCached(HKEY root, const wchar_t* subkey, const wchar_t* value, DWORD data);
+bool RegWriteString(HKEY root, const wchar_t* subkey, const wchar_t* value, const std::wstring& data);
+bool RegDeleteKeyRecursive(HKEY root, const wchar_t* subkey);
 
 // Updater Functions
 void OpenUpdatePage();

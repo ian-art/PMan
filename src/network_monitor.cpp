@@ -21,8 +21,21 @@
 #include "throttle_manager.h"
 #include "logger.h"
 #include "utils.h"
+#include "context.h"
+#include "nt_wrapper.h"
 #include "globals.h" // For g_activeNetPids
 #include <winsock2.h>
+#include <unordered_set>
+
+// Targets: Cloud Sync, Game Launchers, Torrents
+static const std::unordered_set<std::wstring> BACKGROUND_APPS = {
+    // Cloud Storage
+    L"onedrive.exe", L"googledrivesync.exe", L"dropbox.exe", L"box.exe",
+    // Game Launchers (Often downloading updates)
+    L"steam.exe", L"epicgameslauncher.exe", L"battle.net.exe", L"eadesktop.exe", L"upc.exe", 
+    // Torrents / Download Managers
+    L"qbittorrent.exe", L"u torrent.exe", L"transmission-qt.exe", L"idman.exe"
+};
 #include <ws2tcpip.h> // [FIX] Required for iphlpapi.h SAL annotations (defines MIB_TCP6TABLE_OWNER_PID)
 #include <iphlpapi.h>
 #include <shellapi.h>
@@ -43,6 +56,10 @@ NetworkMonitor::~NetworkMonitor() {
 void NetworkMonitor::Initialize() {
     g_throttleManager.Initialize(); // Init Job Object
     if (m_running.exchange(true)) return;
+    
+    // System-Level TCP Sanity Checks (Diagnostic)
+    PerformTcpSanityCheck();
+
     m_thread = std::thread(&NetworkMonitor::WorkerThread, this);
     Log("[NET] Network Intelligence Monitor started");
 }
@@ -56,7 +73,20 @@ void NetworkMonitor::Stop() {
     }
     
     if (m_thread.joinable()) m_thread.join();
-    Log("[NET] Network Monitor stopped");
+
+    // SAFETY REVERSION
+    // Ensure no priorities or QoS tags are left stuck if we shut down
+    std::lock_guard lock(m_mtx);
+    if (m_lastBoostedPid != 0) {
+        Log("[NET] Shutdown: Reverting browser boost for PID " + std::to_string(m_lastBoostedPid));
+        RemoveBrowserBoost();
+    }
+    if (m_areBackgroundAppsThrottled) {
+        Log("[NET] Shutdown: Restoring background apps...");
+        RestoreBackgroundApps();
+    }
+
+    Log("[NET] Network Monitor stopped and state reverted");
 }
 
 // Lightweight probe: Pings Cloudflare (1.1.1.1) and Google (8.8.8.8)
@@ -124,6 +154,211 @@ bool NetworkMonitor::ExecuteNetCommand(const wchar_t* cmd) {
         return true;
     }
     return false;
+}
+
+// =========================================================
+// FNRO Implementation
+// =========================================================
+
+void NetworkMonitor::PerformTcpSanityCheck() {
+    // Check for "Snake Oil" registry tweaks that break Window Auto-Tuning
+    DWORD val = 0;
+    bool issuesFound = false;
+
+    // 1. Static TCP Window Size (Bad)
+    if (RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters", L"TcpWindowSize", val)) {
+        Log("[NET_WARN] Static 'TcpWindowSize' detected. This disables Auto-Tuning and limits speed.");
+        issuesFound = true;
+    }
+    
+    // 2. Global Max Window Size (Bad if too small)
+    if (RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters", L"GlobalMaxTcpWindowSize", val)) {
+        if (val < 65535) {
+             Log("[NET_WARN] 'GlobalMaxTcpWindowSize' is extremely small (" + std::to_string(val) + "). Downloads will be slow.");
+             issuesFound = true;
+        }
+    }
+
+    if (!issuesFound) {
+        Log("[NET] TCP System Configuration appears healthy (Auto-Tuning likely active).");
+    }
+}
+
+void NetworkMonitor::OnForegroundWindowChanged(HWND hwnd) {
+    if (!hwnd) return;
+
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == 0) return;
+
+    // 1. Identify Foreground Process
+    UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (!hProc) return;
+
+    wchar_t path[MAX_PATH];
+    DWORD sz = MAX_PATH;
+    if (!QueryFullProcessImageNameW(hProc.get(), 0, path, &sz)) return;
+    
+    std::wstring exeName = ExeFromPath(path);
+
+    // 2. Check Browser Whitelist (Reuse Context)
+    bool isBrowser = PManContext::Get().conf.browsers.count(exeName);
+
+    std::lock_guard lock(m_mtx);
+
+    // 3. Logic: Apply Boost if Browser, Revert if Focus Lost
+    if (isBrowser) {
+        if (pid != m_lastBoostedPid) {
+            // New browser instance focused
+            RemoveBrowserBoost(); // Revert previous first
+            ApplyBrowserBoost(pid, exeName);
+            
+            // Engage Background Protection
+            DeprioritizeBackgroundApps();
+        }
+    } else {
+        // Non-browser focused
+        if (m_lastBoostedPid != 0) {
+            RemoveBrowserBoost();
+            
+            // Disengage Background Protection
+            RestoreBackgroundApps();
+        }
+    }
+}
+
+void NetworkMonitor::ApplyBrowserBoost(DWORD pid, const std::wstring& exeName) {
+    Log("[FNRO] Boosting Network Responsiveness for: " + WideToUtf8(exeName.c_str()));
+
+    // A. CPU & I/O Bias
+    // 1. Raise I/O Priority to High (3)
+    NtWrapper::Initialize(); // Ensure initialized
+    IO_PRIORITY_HINT ioPri = static_cast<IO_PRIORITY_HINT>(IoPriorityHigh);
+    UniqueHandle hProcTemp(OpenProcessSafe(PROCESS_SET_INFORMATION, pid));
+    NtWrapper::SetInformationProcess(hProcTemp.get(), 
+                                     ProcessIoPriority, &ioPri, sizeof(ioPri));
+
+    // 2. Raise Process Priority (Bias threads)
+    // Cache original for restoration
+    UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_INFORMATION, FALSE, pid));
+    if (hProc) {
+        m_lastBoostedPriority = GetPriorityClass(hProc.get());
+        if (m_lastBoostedPriority == 0) m_lastBoostedPriority = NORMAL_PRIORITY_CLASS;
+        
+        // Use ABOVE_NORMAL to give network threads an edge over background/bulk
+        SetPriorityClass(hProc.get(), ABOVE_NORMAL_PRIORITY_CLASS);
+
+        // C. Burst-Friendly Scheduling (Disable EcoQoS)
+        // Ensure browser threads are never scheduled on E-cores or throttled during bursty loads
+        PROCESS_POWER_THROTTLING_STATE powerThrottling = {};
+        powerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        powerThrottling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+        powerThrottling.StateMask = 0; // 0 = Disable Throttling (High Perf)
+        
+        NtWrapper::SetInformationProcess(hProc.get(), ProcessPowerThrottling, 
+                                         &powerThrottling, sizeof(powerThrottling));
+                                         
+        Log("[FNRO] Burst Protection (NoEcoQoS) applied to PID: " + std::to_string(pid));
+    }
+
+    // B. QoS / DSCP Tagging
+    ApplyQosPolicy(exeName);
+
+    m_lastBoostedPid = pid;
+    m_lastBoostedBrowser = exeName;
+}
+
+void NetworkMonitor::RemoveBrowserBoost() {
+    if (m_lastBoostedPid == 0) return;
+
+    Log("[FNRO] Restoring priorities for PID: " + std::to_string(m_lastBoostedPid));
+
+    // A. Restore CPU & I/O
+    UniqueHandle hProc(OpenProcess(PROCESS_SET_INFORMATION, FALSE, m_lastBoostedPid));
+    if (hProc) {
+        IO_PRIORITY_HINT ioPri = static_cast<IO_PRIORITY_HINT>(IoPriorityNormal);
+        NtWrapper::SetInformationProcess(hProc.get(), ProcessIoPriority, &ioPri, sizeof(ioPri));
+        SetPriorityClass(hProc.get(), m_lastBoostedPriority);
+    }
+
+    // B. Remove QoS Tag
+    if (!m_lastBoostedBrowser.empty()) {
+        RemoveQosPolicy(m_lastBoostedBrowser);
+    }
+
+    m_lastBoostedPid = 0;
+    m_lastBoostedBrowser.clear();
+}
+
+void NetworkMonitor::ApplyQosPolicy(const std::wstring& exeName) {
+    // Registry Path: HKLM\SOFTWARE\Policies\Microsoft\Windows\QoS\<PolicyName>
+    std::wstring keyPath = L"SOFTWARE\\Policies\\Microsoft\\Windows\\QoS\\PMan_FNRO_" + exeName;
+    
+    // Values mandated by Windows Policy-based QoS
+    RegWriteString(HKEY_LOCAL_MACHINE, keyPath.c_str(), L"Version", L"1.0");
+    RegWriteString(HKEY_LOCAL_MACHINE, keyPath.c_str(), L"Application Name", exeName);
+    RegWriteString(HKEY_LOCAL_MACHINE, keyPath.c_str(), L"Protocol", L"*");
+    RegWriteString(HKEY_LOCAL_MACHINE, keyPath.c_str(), L"DSCP Value", L"46"); // EF (Expedited Forwarding)
+    RegWriteString(HKEY_LOCAL_MACHINE, keyPath.c_str(), L"Throttle Rate", L"-1");
+
+    // Note: Changes to Policy-based QoS usually require NLA service refresh or gpupdate.
+    // However, direct registry injection often works for new flows on next socket creation.
+}
+
+void NetworkMonitor::RemoveQosPolicy(const std::wstring& exeName) {
+    std::wstring keyPath = L"SOFTWARE\\Policies\\Microsoft\\Windows\\QoS\\PMan_FNRO_" + exeName;
+    RegDeleteKeyRecursive(HKEY_LOCAL_MACHINE, keyPath.c_str());
+}
+
+void NetworkMonitor::DeprioritizeBackgroundApps() {
+    if (m_areBackgroundAppsThrottled) return;
+
+    Log("[FNRO] Deprioritizing background traffic sources...");
+
+    ForEachProcess([this](const PROCESSENTRY32W& pe) {
+        std::wstring name = pe.szExeFile;
+        asciiLower(name); // Ensure case-insensitive match
+
+        if (BACKGROUND_APPS.count(name)) {
+            DWORD pid = pe.th32ProcessID;
+            
+            UniqueHandle hProc(OpenProcessSafe(PROCESS_SET_INFORMATION, pid));
+            if (hProc) {
+                // 1. Lower Process Priority (IDLE)
+                // This ensures they yield CPU to the browser immediately
+                SetPriorityClass(hProc.get(), IDLE_PRIORITY_CLASS);
+
+                // 2. Lower I/O Priority (Very Low)
+                // This prevents disk contention during page loads/caching
+                IO_PRIORITY_HINT ioPri = static_cast<IO_PRIORITY_HINT>(IoPriorityVeryLow);
+                NtWrapper::SetInformationProcess(hProc.get(), ProcessIoPriority, &ioPri, sizeof(ioPri));
+
+                m_throttledPids.insert(pid);
+            }
+        }
+    });
+
+    m_areBackgroundAppsThrottled = true;
+}
+
+void NetworkMonitor::RestoreBackgroundApps() {
+    if (!m_areBackgroundAppsThrottled) return;
+
+    Log("[FNRO] Restoring background traffic sources...");
+
+    for (DWORD pid : m_throttledPids) {
+        UniqueHandle hProc(OpenProcessSafe(PROCESS_SET_INFORMATION, pid));
+        if (hProc) {
+            // Restore Normal Priorities
+            SetPriorityClass(hProc.get(), NORMAL_PRIORITY_CLASS);
+
+            IO_PRIORITY_HINT ioPri = static_cast<IO_PRIORITY_HINT>(IoPriorityNormal);
+            NtWrapper::SetInformationProcess(hProc.get(), ProcessIoPriority, &ioPri, sizeof(ioPri));
+        }
+    }
+
+    m_throttledPids.clear();
+    m_areBackgroundAppsThrottled = false;
 }
 
 void NetworkMonitor::AttemptAutoRepair() {

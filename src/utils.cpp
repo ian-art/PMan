@@ -31,9 +31,11 @@
 #include <unordered_set> // Required for IsSystemCriticalProcess
 #include <taskschd.h>
 #include <comdef.h>
+#include <shlwapi.h> // Required for SHDeleteKeyW
 #pragma comment(lib, "Version.lib") // Required for GetFileVersionInfo
 #pragma comment(lib, "taskschd.lib")
 #pragma comment(lib, "comsupp.lib")
+#pragma comment(lib, "Shlwapi.lib")
 
 std::string WideToUtf8(const wchar_t* wstr)
 {
@@ -402,6 +404,24 @@ bool RegWriteDwordCached(HKEY root, const wchar_t* subkey, const wchar_t* value,
 
     // Value differs or doesn't exist; perform write
     return RegSetValueExW(key.get(), value, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&data), sizeof(data)) == ERROR_SUCCESS;
+}
+
+bool RegWriteString(HKEY root, const wchar_t* subkey, const wchar_t* value, const std::wstring& data)
+{
+    HKEY rawKey = nullptr;
+    LONG rc = RegCreateKeyExW(root, subkey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &rawKey, nullptr);
+    if (rc != ERROR_SUCCESS) return false;
+    UniqueRegKey key(rawKey);
+
+    return RegSetValueExW(key.get(), value, 0, REG_SZ, 
+        reinterpret_cast<const BYTE*>(data.c_str()), 
+        static_cast<DWORD>((data.length() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+}
+
+bool RegDeleteKeyRecursive(HKEY root, const wchar_t* subkey)
+{
+    // SHDeleteKey is the standard way to delete keys with subkeys
+    return SHDeleteKeyW(root, subkey) == ERROR_SUCCESS;
 }
 
 // ------------------- UPDATER IMPLEMENTATION -------------------
