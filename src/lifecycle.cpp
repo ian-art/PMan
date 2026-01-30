@@ -143,9 +143,9 @@ namespace Lifecycle {
 
         if (CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE, 
                            CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-            WaitForSingleObject(pi.hProcess, 5000);
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
+            UniqueHandle hProc(pi.hProcess);
+            UniqueHandle hThread(pi.hThread);
+            WaitForSingleObject(hProc.get(), 5000);
         }
     }
 }
