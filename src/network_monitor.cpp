@@ -26,16 +26,6 @@
 #include "globals.h" // For g_activeNetPids
 #include <winsock2.h>
 #include <unordered_set>
-
-// Targets: Cloud Sync, Game Launchers, Torrents
-static const std::unordered_set<std::wstring> BACKGROUND_APPS = {
-    // Cloud Storage
-    L"onedrive.exe", L"googledrivesync.exe", L"dropbox.exe", L"box.exe",
-    // Game Launchers (Often downloading updates)
-    L"steam.exe", L"epicgameslauncher.exe", L"battle.net.exe", L"eadesktop.exe", L"upc.exe", 
-    // Torrents / Download Managers
-    L"qbittorrent.exe", L"u torrent.exe", L"transmission-qt.exe", L"idman.exe"
-};
 #include <ws2tcpip.h> // [FIX] Required for iphlpapi.h SAL annotations (defines MIB_TCP6TABLE_OWNER_PID)
 #include <iphlpapi.h>
 #include <shellapi.h>
@@ -87,6 +77,17 @@ void NetworkMonitor::Stop() {
     }
 
     Log("[NET] Network Monitor stopped and state reverted");
+}
+
+void NetworkMonitor::SetBackgroundApps(std::unordered_set<std::wstring> apps) {
+    std::lock_guard lock(m_appsMtx);
+    m_backgroundApps = std::move(apps);
+    Log("[NET] Updated background apps list: " + std::to_string(m_backgroundApps.size()) + " entries");
+}
+
+std::unordered_set<std::wstring> NetworkMonitor::GetBackgroundApps() const {
+    std::lock_guard lock(m_appsMtx);
+    return m_backgroundApps;
 }
 
 // Lightweight probe: Pings Cloudflare (1.1.1.1) and Google (8.8.8.8)
@@ -320,11 +321,12 @@ void NetworkMonitor::DeprioritizeBackgroundApps() {
 
     Log("[FNRO] Deprioritizing background traffic sources...");
 
+    std::lock_guard lock(m_appsMtx);
     ForEachProcess([this](const PROCESSENTRY32W& pe) {
         std::wstring name = pe.szExeFile;
         asciiLower(name); // Ensure case-insensitive match
 
-        if (BACKGROUND_APPS.count(name)) {
+        if (m_backgroundApps.count(name)) {
             DWORD pid = pe.th32ProcessID;
             
             UniqueHandle hProc(OpenProcessSafe(PROCESS_SET_INFORMATION, pid));
@@ -542,10 +544,11 @@ void NetworkMonitor::WorkerThread() {
             bool hogsPresent = false;
             // Only scan if we aren't already throttling (optimization)
             if (!m_areBackgroundAppsThrottled && !lagDetected) {
+                std::lock_guard lock(m_appsMtx);
                 ForEachProcess([&](const PROCESSENTRY32W& pe) {
                     std::wstring name = pe.szExeFile;
                     asciiLower(name);
-                    if (BACKGROUND_APPS.count(name)) hogsPresent = true;
+                    if (m_backgroundApps.count(name)) hogsPresent = true;
                 });
             }
 

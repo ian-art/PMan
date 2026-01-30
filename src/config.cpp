@@ -22,7 +22,8 @@
 #include "constants.h"
 #include "logger.h"
 #include "utils.h"
-#include "static_tweaks.h" 
+#include "static_tweaks.h"
+#include "network_monitor.h" // For SetBackgroundApps
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -45,7 +46,6 @@ static constexpr const char* DEFAULT_IGNORE_LIST = R"(; Priority Manager - Shell
 ; These system processes are part of the Desktop Experience.
 ; They should NEVER be treated as Browsers or Games.
 ; Add one process per line (lowercase).
-mintty.exe
 searchhost.exe
 startmenuexperiencehost.exe
 shellexperiencehost.exe
@@ -174,11 +174,20 @@ static std::string BuildConfigOption(const std::string& comment, const std::stri
     return oss.str();
 }
 
+static std::unordered_set<std::wstring> GetDefaultBackgroundApps() {
+    return {
+        L"onedrive.exe", L"googledrivesync.exe", L"dropbox.exe", L"box.exe",
+        L"steam.exe", L"epicgameslauncher.exe", L"battle.net.exe", L"eadesktop.exe", L"upc.exe",
+        L"qbittorrent.exe", L"u torrent.exe", L"transmission-qt.exe", L"idman.exe"
+    };
+}
+
 // Helper to write configuration data to file (refactored for AV compatibility)
 static void WriteConfigurationFile(const std::filesystem::path& path, 
                                    const std::unordered_set<std::wstring>& games,
                                    const std::unordered_set<std::wstring>& browsers,
                                    const std::unordered_set<std::wstring>& videoPlayers,
+                                   const std::unordered_set<std::wstring>& backgroundApps,
                                    const std::unordered_set<std::wstring>& oldGames, // New parameter
                                    const std::unordered_set<std::wstring>& gameWindows,
                                    const std::unordered_set<std::wstring>& browserWindows,
@@ -312,6 +321,12 @@ static void WriteConfigurationFile(const std::filesystem::path& path,
     }
     buffer << BuildConfigSection("video_players", videoSection.str());
 
+    std::ostringstream bgAppsSection;
+    for (const auto& s : backgroundApps) {
+        bgAppsSection << WideToUtf8(s.c_str()) << "\n";
+    }
+    buffer << BuildConfigSection("background_apps", bgAppsSection.str());
+
     std::ostringstream oldGamesSection;
     for (const auto& s : oldGames) {
         oldGamesSection << WideToUtf8(s.c_str()) << "\n";
@@ -350,7 +365,7 @@ bool CreateDefaultConfig(const std::filesystem::path& configPath)
         
         WriteConfigurationFile(
             configPath,
-            {}, {}, {}, {}, {}, {}, // Empty sets for games, browsers, etc.
+            {}, {}, {}, GetDefaultBackgroundApps(), {}, {}, {}, // Empty sets for games, browsers, etc.
             true,    // ignoreNonInteractive
             true,    // restoreOnExit
             false,   // lockPolicy
@@ -395,7 +410,7 @@ void LoadConfig()
 	try
     {
         std::filesystem::path configPath = GetConfigPath();
-        std::unordered_set<std::wstring> games, browsers, videoPlayers, oldGames, gameWindows, browserWindows, customLaunchers, ignoredProcesses;
+        std::unordered_set<std::wstring> games, browsers, videoPlayers, backgroundApps, oldGames, gameWindows, browserWindows, customLaunchers, ignoredProcesses;
         bool ignoreNonInteractive = true;
         bool restoreOnExit = true;
         
@@ -427,7 +442,7 @@ void LoadConfig()
 		ExplorerConfig explorerConfig;
         
         std::wstring line;
-        enum Sect { NONE, META, GLOBAL, EXPLORER, G, B, VP, OLD_G, GW, BW } sect = NONE;
+        enum Sect { NONE, META, GLOBAL, EXPLORER, G, B, VP, BA, OLD_G, GW, BW } sect = NONE;
         int lineNum = 0;
         int configVersion = 0;
         
@@ -455,6 +470,7 @@ void LoadConfig()
                 else if (secName == L"games") sect = G;
                 else if (secName == L"browsers") sect = B;
                 else if (secName == L"video_players") sect = VP;
+                else if (secName == L"background_apps") sect = BA;
                 else if (secName == L"old_games") sect = OLD_G;
                 else if (secName == L"game_windows") sect = GW;
                 else if (secName == L"browser_windows") sect = BW;
@@ -587,7 +603,7 @@ void LoadConfig()
             
 			asciiLower(item);
             
-            if (!IsValidExecutableName(item) && (sect == G || sect == B || sect == VP || sect == OLD_G))
+            if (!IsValidExecutableName(item) && (sect == G || sect == B || sect == VP || sect == BA || sect == OLD_G))
             {
                 if (!item.empty())
                     Log("[CFG] Skipped unsafe/invalid entry: " + WideToUtf8(item.c_str()));
@@ -597,6 +613,7 @@ void LoadConfig()
             if (sect == G && !item.empty()) games.insert(item);
             if (sect == B && !item.empty()) browsers.insert(item);
             if (sect == VP && !item.empty()) videoPlayers.insert(item);
+            if (sect == BA && !item.empty()) backgroundApps.insert(item);
             if (sect == OLD_G && !item.empty()) oldGames.insert(item);
             if (sect == GW && !item.empty()) gameWindows.insert(item);
             if (sect == BW && !item.empty()) browserWindows.insert(item);
@@ -627,9 +644,14 @@ void LoadConfig()
                 Log("Warning: Could not create config archive");
             }
             
+            // Populate defaults for new section if empty during upgrade
+            if (backgroundApps.empty()) {
+                backgroundApps = GetDefaultBackgroundApps();
+            }
+
 			// Write upgraded configuration
 			// Note: explorerConfig contains defaults at this point, which is exactly what we want for a fresh section
-			WriteConfigurationFile(configPath, games, browsers, videoPlayers, oldGames, gameWindows, browserWindows,
+			WriteConfigurationFile(configPath, games, browsers, videoPlayers, backgroundApps, oldGames, gameWindows, browserWindows,
                                   ignoreNonInteractive, restoreOnExit, lockPolicy, 
                                   g_suspendUpdatesDuringGames.load(),
                                   g_idleRevertEnabled.load(),
@@ -669,6 +691,12 @@ void LoadConfig()
         
         g_idleAffinityMgr.UpdateConfig(idleAffinityEnabled, idleReservedCores, idleMinRam);
         
+        // Apply Background Apps Config
+        if (backgroundApps.empty()) {
+            backgroundApps = GetDefaultBackgroundApps();
+        }
+        g_networkMonitor.SetBackgroundApps(backgroundApps);
+
 		// Finalize Explorer Config with Validations
         // Cross-validate with global idle settings
         if (explorerConfig.enabled && g_idleRevertEnabled.load()) {

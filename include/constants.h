@@ -28,7 +28,7 @@
 static constexpr wchar_t CONFIG_FILENAME[] = L"config.ini";
 static constexpr wchar_t CUSTOM_LAUNCHERS_FILENAME[] = L"custom_launchers.txt";
 static constexpr wchar_t IGNORED_PROCESSES_FILENAME[] = L"ignore_processes.txt";
-static constexpr int CONFIG_VERSION = 3; // Increment when config structure changes
+static constexpr int CONFIG_VERSION = 4; // Increment when config structure changes
 
 // Registry Values
 static constexpr DWORD   VAL_GAME       = 0x28; // Short Fixed, High Boost (Gaming)
@@ -188,7 +188,7 @@ static constexpr const char* DEFAULT_CONFIG = R"(; Priority Manager Configuratio
 ;   Browsers: 0x26 - Optimized for multitasking responsiveness
 
 [meta]
-version=3
+version=4
 
 [global]
 ; Ignore non-interactive processes (services, scheduled tasks, SYSTEM processes)
@@ -241,6 +241,23 @@ msedge.exe
 brave.exe
 opera.exe
 vivaldi.exe
+
+[background_apps]
+; Apps to throttle when network contention is detected (FNRO Level 2)
+; Includes Cloud Sync, Game Launchers, and Torrent Clients
+onedrive.exe
+googledrivesync.exe
+dropbox.exe
+box.exe
+steam.exe
+epicgameslauncher.exe
+battle.net.exe
+eadesktop.exe
+upc.exe
+qbittorrent.exe
+u torrent.exe
+transmission-qt.exe
+idman.exe
 
 [video_players]
 ; Add video players here to boost them. Useful if you play 4k and 8k videos.

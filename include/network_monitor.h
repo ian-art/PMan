@@ -45,6 +45,10 @@ private:
     // FNRO: Foreground Responsiveness
 public:
     void OnForegroundWindowChanged(HWND hwnd);
+    
+    // Dynamic Configuration
+    void SetBackgroundApps(std::unordered_set<std::wstring> apps);
+    std::unordered_set<std::wstring> GetBackgroundApps() const;
 
 private:
     void ApplyBrowserBoost(DWORD pid, const std::wstring& exeName);
@@ -68,6 +72,10 @@ private:
     // State 2
     std::unordered_set<DWORD> m_throttledPids;
     bool m_areBackgroundAppsThrottled = false;
+    
+    // Configurable List
+    std::unordered_set<std::wstring> m_backgroundApps;
+    mutable std::mutex m_appsMtx;
 
     std::thread m_thread;
     std::atomic<bool> m_running{false};
