@@ -208,21 +208,26 @@ void NetworkMonitor::OnForegroundWindowChanged(HWND hwnd) {
 
     // 3. Logic: Apply Boost if Browser, Revert if Focus Lost
     if (isBrowser) {
+        m_foregroundIsBrowser = true;
+
         if (pid != m_lastBoostedPid) {
-            // New browser instance focused
-            RemoveBrowserBoost(); // Revert previous first
+            // Level 1: Instant Priority Bias (Always Safe)
+            RemoveBrowserBoost(); 
             ApplyBrowserBoost(pid, exeName);
-            
-            // Engage Background Protection
+        }
+        
+        // Level 2 (Throttling) is now deferred to the Adaptive Check
+        // unless we KNOW we are already lagging.
+        if (g_networkState.load() == NetworkState::Unstable) {
             DeprioritizeBackgroundApps();
         }
     } else {
-        // Non-browser focused
+        m_foregroundIsBrowser = false;
+
+        // Non-browser focused: Full Stand Down
         if (m_lastBoostedPid != 0) {
             RemoveBrowserBoost();
-            
-            // Disengage Background Protection
-            RestoreBackgroundApps();
+            RestoreBackgroundApps(); // Always restore when focus is lost
         }
     }
 }
@@ -524,6 +529,44 @@ void NetworkMonitor::WorkerThread() {
 
         // Update Process Network Map
         UpdateNetworkActivityMap();
+
+        // =========================================================
+        // Adaptive Congestion Control (The "Smart Trigger")
+        // =========================================================
+        if (m_foregroundIsBrowser) {
+            // Condition A: Network is explicitly unstable (Ping Spikes)
+            bool lagDetected = (newState == NetworkState::Unstable);
+
+            // Condition B: Known "Heavy Upload/Download" Apps are active
+            // We scan the list. If any BACKGROUND_APP is running, we assume contention risk.
+            bool hogsPresent = false;
+            // Only scan if we aren't already throttling (optimization)
+            if (!m_areBackgroundAppsThrottled && !lagDetected) {
+                ForEachProcess([&](const PROCESSENTRY32W& pe) {
+                    std::wstring name = pe.szExeFile;
+                    asciiLower(name);
+                    if (BACKGROUND_APPS.count(name)) hogsPresent = true;
+                });
+            }
+
+            // DECISION MATRIX
+            // If Lagging OR Hogs Present -> Level 2 (Active Defense)
+            // Else -> Level 1 (Passive)
+            if (lagDetected || hogsPresent) {
+                if (!m_areBackgroundAppsThrottled) {
+                    Log("[ADAPTIVE] Contention Detected (Lag: " + std::to_string(lagDetected) + 
+                        ", Hogs: " + std::to_string(hogsPresent) + "). Engaging FNRO Level 2.");
+                    DeprioritizeBackgroundApps();
+                }
+            } 
+            else {
+                // Network is clean AND no hogs running -> Relax to Level 1
+                if (m_areBackgroundAppsThrottled) {
+                    Log("[ADAPTIVE] Network Stable. Relaxing to FNRO Level 1.");
+                    RestoreBackgroundApps();
+                }
+            }
+        }
 
         // Adaptive Polling: 
         // If Unstable/Offline, check frequently (5s) to recover fast.

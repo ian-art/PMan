@@ -56,6 +56,7 @@ private:
     std::wstring m_lastBoostedBrowser;
     DWORD m_lastBoostedPid = 0;
     int m_lastBoostedPriority = NORMAL_PRIORITY_CLASS;
+    bool m_foregroundIsBrowser = false; // Tracks intent, not action
 
     // Background Traffic Protection
     void DeprioritizeBackgroundApps();
