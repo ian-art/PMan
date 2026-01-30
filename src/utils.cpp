@@ -20,6 +20,7 @@
 #include "utils.h"
 #include "constants.h"
 #include "logger.h"
+#include "nt_wrapper.h"
 #include <vector>
 #include <algorithm>
 #include <cctype>
@@ -88,19 +89,17 @@ bool IsSystemCriticalProcess(const std::wstring& exeName) {
 // asciiLower is now templated in header
 void* GetNtProc(const char* procName)
 {
-    HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
-    return hNtdll ? reinterpret_cast<void*>(GetProcAddress(hNtdll, procName)) : nullptr;
+    return NtWrapper::GetProcAddress(procName);
 }
 
 bool GetProcessIdentity(DWORD pid, ProcessIdentity& identity)
 {
     if (pid == 0) return false;
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    UniqueHandle h(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!h) return false;
     
     FILETIME creationTime, exitTime, kernelTime, userTime;
-    BOOL success = GetProcessTimes(h, &creationTime, &exitTime, &kernelTime, &userTime);
-    CloseHandle(h);
+    BOOL success = GetProcessTimes(h.get(), &creationTime, &exitTime, &kernelTime, &userTime);
     
     if (success) {
         identity.pid = pid;
@@ -160,18 +159,18 @@ std::string GetModeDescription(DWORD val)
 
 DWORD GetCurrentPrioritySeparation()
 {
-    HKEY key = nullptr;
+    HKEY rawKey = nullptr;
     LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
                             L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl",
-                            0, KEY_QUERY_VALUE, &key);
+                            0, KEY_QUERY_VALUE, &rawKey);
     if (rc != ERROR_SUCCESS) return 0xFFFFFFFF;
     
+    UniqueRegKey key(rawKey);
     DWORD val = 0;
     DWORD size = sizeof(val);
-    rc = RegQueryValueExW(key, L"Win32PrioritySeparation", nullptr, nullptr, reinterpret_cast<BYTE*>(&val), &size);
-    RegCloseKey(key);
+    rc = RegQueryValueExW(key.get(), L"Win32PrioritySeparation", nullptr, nullptr, reinterpret_cast<BYTE*>(&val), &size);
     
-return (rc == ERROR_SUCCESS) ? val : 0xFFFFFFFF;
+    return (rc == ERROR_SUCCESS) ? val : 0xFFFFFFFF;
 }
 
 // Cache anti-cheat PIDs for 60 seconds to reduce syscall overhead
@@ -214,55 +213,49 @@ bool IsAntiCheatProtected(DWORD pid)
 
 DWORD GetParentProcessId(DWORD pid)
 {
-    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnap == INVALID_HANDLE_VALUE) return 0;
+    UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+    if (hSnap.get() == INVALID_HANDLE_VALUE) return 0;
     
     PROCESSENTRY32W pe = {sizeof(pe)};
-    if (Process32FirstW(hSnap, &pe)) {
+    if (Process32FirstW(hSnap.get(), &pe)) {
         do {
             if (pe.th32ProcessID == pid) {
-                DWORD parent = pe.th32ParentProcessID;
-                CloseHandle(hSnap);
-                return parent;
+                return pe.th32ParentProcessID;
             }
-        } while (Process32NextW(hSnap, &pe));
+        } while (Process32NextW(hSnap.get(), &pe));
     }
-    CloseHandle(hSnap);
     return 0;
 }
 
 DWORD GetDwmProcessId()
 {
     // Method 1: Registry (Fastest)
-    HKEY hKey;
+    HKEY rawKey;
     DWORD dwmPid = 0;
     DWORD size = sizeof(dwmPid);
     
     if (RegOpenKeyExW(HKEY_CURRENT_USER, 
                       L"Software\\Microsoft\\Windows\\DWM", 
-                      0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
-        if (RegQueryValueExW(hKey, L"ProcessId", NULL, NULL, 
+                      0, KEY_QUERY_VALUE, &rawKey) == ERROR_SUCCESS) {
+        UniqueRegKey hKey(rawKey);
+        if (RegQueryValueExW(hKey.get(), L"ProcessId", NULL, NULL, 
                         reinterpret_cast<LPBYTE>(&dwmPid), &size) == ERROR_SUCCESS) {
             // Verify PID actually exists and is DWM (PID reuse protection)
             ProcessIdentity id;
             if (GetProcessIdentity(dwmPid, id)) {
                 // Double check name
-                HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, dwmPid);
+                UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, dwmPid));
                 if (hProc) {
                     wchar_t path[MAX_PATH];
                     DWORD sz = MAX_PATH;
-                    if (QueryFullProcessImageNameW(hProc, 0, path, &sz)) {
+                    if (QueryFullProcessImageNameW(hProc.get(), 0, path, &sz)) {
                         if (ExeFromPath(path) == L"dwm.exe") {
-                            RegCloseKey(hKey);
-                            CloseHandle(hProc);
                             return dwmPid;
                         }
                     }
-                    CloseHandle(hProc);
                 }
             }
         }
-        RegCloseKey(hKey);
     }
     
     // Method 2: Snapshot Fallback
