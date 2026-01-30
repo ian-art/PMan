@@ -93,11 +93,11 @@ std::unordered_set<std::wstring> NetworkMonitor::GetBackgroundApps() const {
 // Lightweight probe: Pings Cloudflare (1.1.1.1) and Google (8.8.8.8)
 // Returns TRUE if connection is STABLE (<150ms, no loss)
 bool NetworkMonitor::PerformLatencyProbe() {
-    // Cache result for 30s to reduce ICMP spam
+    // Cache result for 5s (matched to WorkerThread) for fresher scoring
     static uint64_t lastCheck = 0;
     static bool lastResult = false;
     uint64_t now = GetTickCount64();
-    if (now - lastCheck < 30000) return lastResult;
+    if (now - lastCheck < 5000) return lastResult;
 
     HANDLE hIcmp = IcmpCreateFile();
     if (hIcmp == INVALID_HANDLE_VALUE) return false;
@@ -127,15 +127,86 @@ bool NetworkMonitor::PerformLatencyProbe() {
 
     IcmpCloseHandle(hIcmp);
 
-    // Criteria: At least one succeeded AND average latency <= 150ms
-    if (successCount == 0) return false; // Both failed/timeout -> Unstable
+    if (successCount > 0) {
+        m_lastLatencyMs = totalTime / successCount;
+        // [FIX] Relax threshold to 600ms. Streaming 4K often spikes ping to 300-500ms.
+        lastResult = (m_lastLatencyMs <= 600);
+    } else {
+        m_lastLatencyMs = 9999; // Treat as effectively offline
+        lastResult = false;
+    }
     
-    DWORD avgLatency = totalTime / successCount;
-    // [FIX] Relax threshold to 600ms. Streaming 4K often spikes ping to 300-500ms.
-    // As long as packets are returning (successCount > 0), the connection is usable.
-    lastResult = (avgLatency <= 600);
     lastCheck = now;
     return lastResult;
+}
+
+bool NetworkMonitor::IsInteractiveApp(const std::wstring& exeName) {
+    // 1. Check User Config (Browsers)
+    if (g_browsers.count(exeName)) return true;
+
+    // 2. Interactive Window Heuristic (Extended List)
+    // Includes communication, gaming, and development tools that require low latency.
+    static const std::unordered_set<std::wstring> EXTRA_INTERACTIVE = {
+        L"discord.exe", L"steam.exe", L"code.exe", L"devenv.exe", 
+        L"slack.exe", L"teams.exe", L"obs64.exe", L"spotify.exe",
+        L"zoom.exe", L"parsec.exe"
+    };
+    return EXTRA_INTERACTIVE.count(exeName);
+}
+
+int NetworkMonitor::CalculateContentionScore() {
+    int score = 0;
+    
+    // 1. Network Latency (Responsiveness)
+    // 100ms+ is noticeable, 200ms+ is bad
+    if (m_lastLatencyMs > 200) score += 50;
+    else if (m_lastLatencyMs > 100) score += 30;
+
+    // 2. CPU Load (System Pressure)
+    // High CPU usage often correlates with DPC latency and scheduler contention
+    double cpu = GetCpuLoad();
+    if (cpu > 80.0) score += 30;
+    else if (cpu > 60.0) score += 15;
+
+    // 3. Network Congestion (Connection Count)
+    // More active connections = higher probability of bufferbloat
+    size_t netCount = 0;
+    {
+        // [FIX] Use shared_lock for std::shared_mutex (g_netActivityMtx) to allow concurrent readers
+        std::shared_lock<std::shared_mutex> lock(g_netActivityMtx);
+        netCount = g_activeNetPids.size();
+    }
+    
+    // >20 active streams is typical for P2P or heavy downloading
+    if (netCount > 20) score += 25;
+    else if (netCount > 10) score += 10;
+    
+    return score;
+}
+
+void NetworkMonitor::ApplyFnroLevel(FnroLevel level) {
+    if (level == m_currentFnroLevel) return;
+    
+    // Log state transition
+    std::string levelStr;
+    switch(level) {
+        case FnroLevel::Off: levelStr = "OFF"; break;
+        case FnroLevel::Light: levelStr = "LIGHT"; break;
+        case FnroLevel::Active: levelStr = "ACTIVE"; break;
+        case FnroLevel::Aggressive: levelStr = "AGGRESSIVE"; break;
+    }
+    Log("[FNRO] Contention Score Triggered Level: " + levelStr);
+
+    m_currentFnroLevel = level;
+
+    // Map levels to actions
+    // Light: Bias only (Handled in ApplyBrowserBoost)
+    // Active/Aggressive: Throttle background noise
+    if (level >= FnroLevel::Active) {
+        DeprioritizeBackgroundApps();
+    } else {
+        RestoreBackgroundApps();
+    }
 }
 
 bool NetworkMonitor::ExecuteNetCommand(const wchar_t* cmd) {
@@ -202,14 +273,14 @@ void NetworkMonitor::OnForegroundWindowChanged(HWND hwnd) {
     
     std::wstring exeName = ExeFromPath(path);
 
-    // 2. Check Browser Whitelist (Reuse Context)
-    bool isBrowser = PManContext::Get().conf.browsers.count(exeName);
+    // 2. Check Interactive Heuristic (Reuse Context + Internal List)
+    bool isInteractive = IsInteractiveApp(exeName);
 
     std::lock_guard lock(m_mtx);
 
-    // 3. Logic: Apply Boost if Browser, Revert if Focus Lost
-    if (isBrowser) {
-        m_foregroundIsBrowser = true;
+    // 3. Logic: Apply Boost if Interactive, Revert if Focus Lost
+    if (isInteractive) {
+        m_foregroundIsInteractive = true;
 
         if (pid != m_lastBoostedPid) {
             // Level 1: Instant Priority Bias (Always Safe)
@@ -217,15 +288,11 @@ void NetworkMonitor::OnForegroundWindowChanged(HWND hwnd) {
             ApplyBrowserBoost(pid, exeName);
         }
         
-        // Level 2 (Throttling) is now deferred to the Adaptive Check
-        // unless we KNOW we are already lagging.
-        if (g_networkState.load() == NetworkState::Unstable) {
-            DeprioritizeBackgroundApps();
-        }
+        // Defer Level 2 (Throttling) to the Contention Scorer in WorkerThread
     } else {
-        m_foregroundIsBrowser = false;
+        m_foregroundIsInteractive = false;
 
-        // Non-browser focused: Full Stand Down
+        // Non-interactive focused: Full Stand Down
         if (m_lastBoostedPid != 0) {
             RemoveBrowserBoost();
             RestoreBackgroundApps(); // Always restore when focus is lost
@@ -533,42 +600,28 @@ void NetworkMonitor::WorkerThread() {
         UpdateNetworkActivityMap();
 
         // =========================================================
-        // Adaptive Congestion Control (The "Smart Trigger")
+        // Adaptive Contention Scoring (FNRO v2)
         // =========================================================
-        if (m_foregroundIsBrowser) {
-            // Condition A: Network is explicitly unstable (Ping Spikes)
-            bool lagDetected = (newState == NetworkState::Unstable);
+        if (m_foregroundIsInteractive) {
+            int score = CalculateContentionScore();
+            FnroLevel targetLevel = FnroLevel::Off;
 
-            // Condition B: Known "Heavy Upload/Download" Apps are active
-            // We scan the list. If any BACKGROUND_APP is running, we assume contention risk.
-            bool hogsPresent = false;
-            // Only scan if we aren't already throttling (optimization)
-            if (!m_areBackgroundAppsThrottled && !lagDetected) {
-                std::lock_guard lock(m_appsMtx);
-                ForEachProcess([&](const PROCESSENTRY32W& pe) {
-                    std::wstring name = pe.szExeFile;
-                    asciiLower(name);
-                    if (m_backgroundApps.count(name)) hogsPresent = true;
-                });
+            // Determine FNRO Level based on Score Bands
+            if (score >= 70) {
+                targetLevel = FnroLevel::Aggressive; // Throttling + Aggressive Defense
+            }
+            else if (score >= 50) {
+                targetLevel = FnroLevel::Active; // Standard Throttling
+            }
+            else if (score >= 30) {
+                targetLevel = FnroLevel::Light; // Priority Bias only
             }
 
-            // DECISION MATRIX
-            // If Lagging OR Hogs Present -> Level 2 (Active Defense)
-            // Else -> Level 1 (Passive)
-            if (lagDetected || hogsPresent) {
-                if (!m_areBackgroundAppsThrottled) {
-                    Log("[ADAPTIVE] Contention Detected (Lag: " + std::to_string(lagDetected) + 
-                        ", Hogs: " + std::to_string(hogsPresent) + "). Engaging FNRO Level 2.");
-                    DeprioritizeBackgroundApps();
-                }
-            } 
-            else {
-                // Network is clean AND no hogs running -> Relax to Level 1
-                if (m_areBackgroundAppsThrottled) {
-                    Log("[ADAPTIVE] Network Stable. Relaxing to FNRO Level 1.");
-                    RestoreBackgroundApps();
-                }
-            }
+            ApplyFnroLevel(targetLevel);
+        }
+        else {
+            // If user switches to non-interactive app, relax defenses immediately
+            ApplyFnroLevel(FnroLevel::Off);
         }
 
         // Adaptive Polling: 

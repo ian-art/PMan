@@ -55,12 +55,21 @@ private:
     void RemoveBrowserBoost();
     void ApplyQosPolicy(const std::wstring& exeName);
     void RemoveQosPolicy(const std::wstring& exeName);
+
+    // FNRO V2: Contention-Based Logic
+    enum class FnroLevel { Off, Light, Active, Aggressive };
+    FnroLevel m_currentFnroLevel = FnroLevel::Off;
+    int m_lastLatencyMs = 0;
+
+    int CalculateContentionScore();
+    void ApplyFnroLevel(FnroLevel level);
+    bool IsInteractiveApp(const std::wstring& exeName);
 	
     // State 1
     std::wstring m_lastBoostedBrowser;
     DWORD m_lastBoostedPid = 0;
     int m_lastBoostedPriority = NORMAL_PRIORITY_CLASS;
-    bool m_foregroundIsBrowser = false; // Tracks intent, not action
+    bool m_foregroundIsInteractive = false; // Tracks intent (Interactive Window Heuristic)
 
     // Background Traffic Protection
     void DeprioritizeBackgroundApps();
