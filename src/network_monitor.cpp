@@ -118,9 +118,9 @@ bool NetworkMonitor::ExecuteNetCommand(const wchar_t* cmd) {
     
     if (CreateProcessW(nullptr, cmdStr.data(), nullptr, nullptr, FALSE, 
                       CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-        WaitForSingleObject(pi.hProcess, 10000); // 10s timeout
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
+        UniqueHandle hProcess(pi.hProcess);
+        UniqueHandle hThread(pi.hThread);
+        WaitForSingleObject(hProcess.get(), 10000); // 10s timeout
         return true;
     }
     return false;
