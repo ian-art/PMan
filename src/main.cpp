@@ -111,7 +111,7 @@ static size_t g_currentFrame = 0;
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
 static GUID* g_pSleepScheme = nullptr;
-static HANDLE g_hGuardProcess = nullptr; // Handle to the watchdog process
+static UniqueHandle g_hGuardProcess; // Handle to the watchdog process
 static uint64_t g_resumeStabilizationTime = 0; // Replaces detached sleep thread;
 
 // Removed LaunchProcessAsync (Dead Code / Unsafe Detach)
@@ -417,13 +417,13 @@ private:
     static void UpdateLog(HWND hEdit, std::streampos& lastPos) {
         std::filesystem::path logPath = GetLogPath() / L"log.txt";
         
-        HANDLE hFile = CreateFileW(logPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
-            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        UniqueHandle hFile(CreateFileW(logPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
         
-        if (hFile == INVALID_HANDLE_VALUE) return;
+        if (hFile.get() == INVALID_HANDLE_VALUE) return;
 
         LARGE_INTEGER size;
-        GetFileSizeEx(hFile, &size);
+        GetFileSizeEx(hFile.get(), &size);
 
         if (size.QuadPart < lastPos) lastPos = 0;
 
@@ -436,10 +436,10 @@ private:
 
             std::vector<char> buffer(bytesToRead + 1);
             LARGE_INTEGER move; move.QuadPart = lastPos;
-            SetFilePointerEx(hFile, move, nullptr, FILE_BEGIN);
+            SetFilePointerEx(hFile.get(), move, nullptr, FILE_BEGIN);
             
             DWORD bytesRead = 0;
-            if (ReadFile(hFile, buffer.data(), bytesToRead, &bytesRead, nullptr) && bytesRead > 0) {
+            if (ReadFile(hFile.get(), buffer.data(), bytesToRead, &bytesRead, nullptr) && bytesRead > 0) {
                 buffer[bytesRead] = '\0';
                 
                 int wlen = MultiByteToWideChar(CP_ACP, 0, buffer.data(), bytesRead, nullptr, 0);
@@ -454,7 +454,6 @@ private:
                 lastPos += bytesRead;
             }
         }
-        CloseHandle(hFile);
     }
 };
 
@@ -1113,7 +1112,7 @@ int wmain(int argc, wchar_t* argv[])
 
     if (!uninstall)
     {
-        g_hMutex = CreateMutexW(nullptr, TRUE, MUTEX_NAME);
+        g_hMutex.reset(CreateMutexW(nullptr, TRUE, MUTEX_NAME));
         if (GetLastError() == ERROR_ALREADY_EXISTS)
         {
             if (!silent)
@@ -1147,7 +1146,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                     L"Priority Manager is not currently installed.\nAny running instances have been stopped.", 
                     L"Priority Manager", MB_OK | MB_ICONWARNING);
             }
-            if (g_hMutex) { CloseHandle(g_hMutex); g_hMutex = nullptr; }
+            g_hMutex.reset();
             return 0;
         }
 
@@ -1160,7 +1159,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                 L"Priority Manager", MB_OK | MB_ICONINFORMATION);
         }
 
-        if (g_hMutex) { CloseHandle(g_hMutex); g_hMutex = nullptr; }
+        g_hMutex.reset();
         return 0;
     }
 
@@ -1229,22 +1228,21 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         */
 
         // Check if services are suspended (shouldn't be at startup)
-        SC_HANDLE scManager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+        ScHandle scManager(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
         if (scManager)
         {
             auto CheckAndRecover = [&](const wchar_t* name) {
-                SC_HANDLE hSvc = OpenServiceW(scManager, name, SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG | SERVICE_START);
+                ScHandle hSvc(OpenServiceW(scManager.get(), name, SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG | SERVICE_START));
                 if (hSvc)
                 {
                     // 1. Check if DISABLED first
             DWORD bytesNeeded = 0;
             // Fix C6031: Check return value (expect failure with buffer size)
-            if (!QueryServiceConfigW(hSvc, nullptr, 0, &bytesNeeded) && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+            if (!QueryServiceConfigW(hSvc.get(), nullptr, 0, &bytesNeeded) && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
                 std::vector<BYTE> buffer(bytesNeeded);
                         LPQUERY_SERVICE_CONFIGW config = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(buffer.data());
-                        if (QueryServiceConfigW(hSvc, config, bytesNeeded, &bytesNeeded)) {
+                        if (QueryServiceConfigW(hSvc.get(), config, bytesNeeded, &bytesNeeded)) {
                             if (config->dwStartType == SERVICE_DISABLED) {
-                                CloseServiceHandle(hSvc);
                                 return; // Ignore disabled services
                             }
                         }
@@ -1252,35 +1250,32 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 
                     // 2. Check Status and Recover
                     SERVICE_STATUS status;
-                    if (QueryServiceStatus(hSvc, &status))
+                    if (QueryServiceStatus(hSvc.get(), &status))
                     {
                         if (status.dwCurrentState == SERVICE_STOPPED || status.dwCurrentState == SERVICE_PAUSED)
                         {
                             Log(std::string("[STARTUP] WARNING: ") + WideToUtf8(name) + " was stopped/paused - attempting recovery");
-                            StartServiceW(hSvc, 0, nullptr);
+                            StartServiceW(hSvc.get(), 0, nullptr);
                         }
                     }
-                    CloseServiceHandle(hSvc);
                 }
             };
 
             CheckAndRecover(L"wuauserv");
             CheckAndRecover(L"BITS");
-            
-            CloseServiceHandle(scManager);
         }
     }
 
     LoadConfig();
     
-    g_hIocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1);
+    g_hIocp.reset(CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1));
     if (!g_hIocp)
     {
         Log("Failed to create IOCP: " + std::to_string(GetLastError()));
         return 1;
     }
 
-    g_hShutdownEvent = CreateEventW(nullptr, TRUE, FALSE, SHUTDOWN_EVENT_NAME);
+    g_hShutdownEvent.reset(CreateEventW(nullptr, TRUE, FALSE, SHUTDOWN_EVENT_NAME));
     if (!g_hShutdownEvent)
     {
         Log("Failed to create shutdown event: " + std::to_string(GetLastError()));
@@ -1392,11 +1387,12 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         if (g_restoreOnExit.load())
         {
             // Capture handle for lifecycle management
-            g_hGuardProcess = LaunchRegistryGuard(currentSetting);
+            HANDLE hGuard = LaunchRegistryGuard(currentSetting);
+            g_hGuardProcess.reset(hGuard);
             
-            if (!g_hGuardProcess || g_hGuardProcess == INVALID_HANDLE_VALUE) {
+            if (!g_hGuardProcess || g_hGuardProcess.get() == INVALID_HANDLE_VALUE) {
                 Log("[CRITICAL] Failed to launch Registry Guard. Crash protection disabled.");
-                g_hGuardProcess = nullptr;
+                g_hGuardProcess.reset();
             }
         }
     }
@@ -1518,7 +1514,10 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         // Use MsgWaitForMultipleObjects to stay responsive to inputs/shutdown while waiting
         // Reduced timeout to 16ms (~60 FPS) only when GUI is open to ensure smooth rendering
         DWORD waitTimeout = GuiManager::IsWindowOpen() ? 16 : 100;
-        DWORD waitResult = MsgWaitForMultipleObjects(1, &g_hShutdownEvent, FALSE, waitTimeout, QS_ALLINPUT);
+        
+        // Fix: Use local handle for array pointer requirement
+        HANDLE hShutdown = g_hShutdownEvent.get();
+        DWORD waitResult = MsgWaitForMultipleObjects(1, &hShutdown, FALSE, waitTimeout, QS_ALLINPUT);
 
         // [SAFETY] Fix C4189 & Prevent CPU spin if API fails
         if (waitResult == WAIT_FAILED) {
@@ -1604,7 +1603,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     SramEngine::Get().Shutdown();
 	
     // Signal threads to wake up/stop
-    if (g_hShutdownEvent) SetEvent(g_hShutdownEvent); // Wakes Watchdog immediately
+    if (g_hShutdownEvent) SetEvent(g_hShutdownEvent.get()); // Wakes Watchdog immediately
     StopEtwSession(); // Unblocks EtwThread (ProcessTrace returns)
     PostShutdown(); // Wakes IocpConfigWatcher
     
@@ -1622,21 +1621,15 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         if (t.joinable()) t.join();
     }
     
-	if (g_hIocp && g_hIocp != INVALID_HANDLE_VALUE) {
-        CloseHandle(g_hIocp);
-        g_hIocp = nullptr;
+    // RAII Cleanup handled by PManContext destructor
+    // Explicitly release mutex ownership before closing handle
+    if (g_hMutex) {
+        ReleaseMutex(g_hMutex.get());
+        g_hMutex.reset();
     }
-
-    if (g_hShutdownEvent && g_hShutdownEvent != INVALID_HANDLE_VALUE) {
-        CloseHandle(g_hShutdownEvent);
-        g_hShutdownEvent = nullptr;
-    }
-
-    if (g_hMutex && g_hMutex != INVALID_HANDLE_VALUE) {
-        ReleaseMutex(g_hMutex);
-        CloseHandle(g_hMutex);
-        g_hMutex = nullptr;
-    }
+    
+    g_hIocp.reset();
+    g_hShutdownEvent.reset();
     
     // Safety cleanup for Power Scheme
     if (g_pSleepScheme != nullptr) {
@@ -1647,9 +1640,8 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 
     // Terminate Guard Process on graceful shutdown to prevent false positives
     if (g_hGuardProcess) {
-        TerminateProcess(g_hGuardProcess, 0);
-        CloseHandle(g_hGuardProcess);
-        g_hGuardProcess = nullptr;
+        TerminateProcess(g_hGuardProcess.get(), 0);
+        g_hGuardProcess.reset();
         Log("[GUARD] Watchdog process terminated gracefully.");
     }
 
