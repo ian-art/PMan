@@ -45,8 +45,11 @@ static bool HasActiveDependents(SC_HANDLE hSvc) {
     return false;
 }
 
-// Destructor is now automatic thanks to RAII
-WindowsServiceManager::~WindowsServiceManager() = default;
+// Destructor
+WindowsServiceManager::~WindowsServiceManager() {
+    CloseBitsCounters();
+    // m_scManager and m_services (via ScHandle) clean up automatically
+}
 
 bool WindowsServiceManager::Initialize()
 {
