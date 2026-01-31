@@ -123,8 +123,8 @@ LRESULT CALLBACK SramEngine::SramWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
 void SramEngine::InitSensors() {
     // 2.4 System Pressure (PDH)
     if (PdhOpenQueryW(nullptr, 0, (PDH_HQUERY*)&m_hPdhQuery) == ERROR_SUCCESS) {
-        // Monitor total processor queue length
-        PdhAddCounterW((PDH_HQUERY)m_hPdhQuery, L"\\System\\Processor Queue Length", 0, (PDH_HCOUNTER*)&m_hPdhCounter);
+        // Monitor total processor queue length (Locale-independent)
+        PdhAddEnglishCounterW((PDH_HQUERY)m_hPdhQuery, L"\\System\\Processor Queue Length", 0, (PDH_HCOUNTER*)&m_hPdhCounter);
         PdhCollectQueryData((PDH_HQUERY)m_hPdhQuery); // Prime the counter
     }
 }
