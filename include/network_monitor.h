@@ -58,7 +58,7 @@ private:
 
     // FNRO V2: Contention-Based Logic
     enum class FnroLevel { Off, Light, Active, Aggressive };
-    FnroLevel m_currentFnroLevel = FnroLevel::Off;
+    std::atomic<FnroLevel> m_currentFnroLevel{ FnroLevel::Off };
     int m_lastLatencyMs = 0;
 
     int CalculateContentionScore();
@@ -68,19 +68,35 @@ private:
     // State 1
     std::wstring m_lastBoostedBrowser;
     DWORD m_lastBoostedPid = 0;
+    
+    // Thread Scheduling Helpers
+    void BoostProcessThreads(DWORD pid);
     int m_lastBoostedPriority = NORMAL_PRIORITY_CLASS;
-    bool m_foregroundIsInteractive = false; // Tracks intent (Interactive Window Heuristic)
+    std::atomic<bool> m_foregroundIsInteractive{ false }; // Tracks intent (Interactive Window Heuristic)
+    int m_boostFailures = 0; // Fault counter for auto-disable
 
     // Background Traffic Protection
     void DeprioritizeBackgroundApps();
     void RestoreBackgroundApps();
+
+    // qWave QoS (Ephemeral/Handle-Based)
+    bool InitializeQwave();
+    void ApplyQwaveFlows(DWORD pid, bool isVoip);
+    void CloseQwaveFlows();
     
+    // Helpers
+    std::vector<HANDLE> GetProcessSocketHandles(DWORD pid);
+
     // TCP Sanity
     void PerformTcpSanityCheck();
     
     // State 2
     std::unordered_set<DWORD> m_throttledPids;
     bool m_areBackgroundAppsThrottled = false;
+    
+    // qWave State
+    HANDLE m_qosHandle = nullptr;
+    std::vector<HANDLE> m_activeQosSockets; // Duplicated handles holding the flow
     
     // Configurable List
     std::unordered_set<std::wstring> m_backgroundApps;
@@ -93,6 +109,11 @@ private:
     uint64_t m_offlineStartTime{0};
     uint64_t m_lastRepairTime{0};
     int m_repairStage{0}; // 0=None, 1=FlushDNS, 2=RenewIP, 3=ResetAdapter
+    int m_repairBackoffMultiplier{1}; // Exponential backoff factor
+    
+    // Telemetry (Session Stats)
+    std::atomic<int> m_statsBoostCount{0};
+    std::atomic<int> m_statsThrottleEvents{0};
     std::mutex m_mtx;
     std::condition_variable m_cv;
 };

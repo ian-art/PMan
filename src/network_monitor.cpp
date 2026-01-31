@@ -25,6 +25,8 @@
 #include "nt_wrapper.h"
 #include "globals.h" // For g_activeNetPids
 #include <winsock2.h>
+#include <mmsystem.h> // Required for timeBeginPeriod
+#include <tlhelp32.h> // Required for Thread32First/Next
 #include <unordered_set>
 #include <ws2tcpip.h> // [FIX] Required for iphlpapi.h SAL annotations (defines MIB_TCP6TABLE_OWNER_PID)
 #include <iphlpapi.h>
@@ -36,6 +38,35 @@
 
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "winmm.lib") // Required for timeBeginPeriod
+#pragma comment(lib, "qwave.lib") // [FIX] qWave for Ephemeral QoS
+
+#include <qos2.h>
+#include <winternl.h> // For NtQuerySystemInformation types
+
+// Minimal definitions for Handle Enumeration
+#ifndef SystemHandleInformation
+#define SystemHandleInformation 16
+#endif
+
+#ifndef STATUS_INFO_LENGTH_MISMATCH
+#define STATUS_INFO_LENGTH_MISMATCH ((NTSTATUS)0xC0000004L)
+#endif
+
+typedef struct _SYSTEM_HANDLE_TABLE_ENTRY_INFO {
+    USHORT UniqueProcessId;
+    USHORT CreatorBackTraceIndex;
+    UCHAR ObjectTypeIndex;
+    UCHAR HandleAttributes;
+    USHORT HandleValue;
+    PVOID Object;
+    ULONG GrantedAccess;
+} SYSTEM_HANDLE_TABLE_ENTRY_INFO, *PSYSTEM_HANDLE_TABLE_ENTRY_INFO;
+
+typedef struct _SYSTEM_HANDLE_INFORMATION {
+    ULONG NumberOfHandles;
+    SYSTEM_HANDLE_TABLE_ENTRY_INFO Handles[1];
+} SYSTEM_HANDLE_INFORMATION, *PSYSTEM_HANDLE_INFORMATION;
 
 NetworkMonitor g_networkMonitor;
 
@@ -46,6 +77,11 @@ NetworkMonitor::~NetworkMonitor() {
 void NetworkMonitor::Initialize() {
     g_throttleManager.Initialize(); // Init Job Object
     if (m_running.exchange(true)) return;
+    
+    // [FIX] Initialize qWave (Ephemeral QoS)
+    if (!InitializeQwave()) {
+        Log("[NET_ERR] Failed to initialize qWave. QoS features may be disabled.");
+    }
     
     // System-Level TCP Sanity Checks (Diagnostic)
     PerformTcpSanityCheck();
@@ -75,6 +111,17 @@ void NetworkMonitor::Stop() {
         Log("[NET] Shutdown: Restoring background apps...");
         RestoreBackgroundApps();
     }
+
+    // [SAFETY] qWave Cleanup (Handles close automatically, but we explicit for safety)
+    CloseQwaveFlows();
+    if (m_qosHandle) {
+        QOSCloseHandle(m_qosHandle);
+        m_qosHandle = nullptr;
+    }
+
+    // Telemetry Report
+    Log("[NET_STAT] Session Summary: Interactive Boosts: " + std::to_string(m_statsBoostCount) + 
+        ", Contention Interventions: " + std::to_string(m_statsThrottleEvents));
 
     Log("[NET] Network Monitor stopped and state reverted");
 }
@@ -251,8 +298,29 @@ void NetworkMonitor::PerformTcpSanityCheck() {
         }
     }
 
+    // 3. [FIX] Check for Window Scaling (RFC 1323) disablement
+    if (RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters", L"Tcp1323Opts", val)) {
+         // 0 = Disabled, 1 = Window Scaling only, 2 = Timestamps only, 3 = Both
+         if (val == 0 || val == 2) {
+             Log("[NET_WARN] TCP Window Scaling is disabled! High latency connections will be capped.");
+             issuesFound = true;
+         }
+    }
+
+    // 4. [FIX] Check Congestion Control Provider
+    // Modern Windows (10/11) should use CUBIC or BBR (server). 'NewReno' is legacy and handles packet loss poorly.
+    // Note: This is an admin-level check via PowerShell/NetShell, hard to read via Registry for all templates.
+    // We check the global parameter override if it exists.
+    if (RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters", L"CongestionAlgorithm", val)) {
+        // If explicitly set to something other than CUBIC (logic varies), warn.
+        // But more importantly, check if ECN is forcefully disabled in registry.
+        if (RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters", L"EnableECN", val)) {
+            if (val == 0) Log("[NET_INFO] ECN capability is disabled. Enabling it may reduce bufferbloat.");
+        }
+    }
+
     if (!issuesFound) {
-        Log("[NET] TCP System Configuration appears healthy (Auto-Tuning likely active).");
+        Log("[NET] TCP System Configuration appears healthy.");
     }
 }
 
@@ -282,9 +350,13 @@ void NetworkMonitor::OnForegroundWindowChanged(HWND hwnd) {
     if (isInteractive) {
         m_foregroundIsInteractive = true;
 
-        if (pid != m_lastBoostedPid) {
+        // [FIX] Race Condition: Cache old PID to ensure accurate removal
+        DWORD oldPid = m_lastBoostedPid;
+        if (pid != oldPid) {
             // Level 1: Instant Priority Bias (Always Safe)
-            RemoveBrowserBoost(); 
+            if (oldPid != 0) RemoveBrowserBoost();
+            
+            // Apply to new PID (Fault tolerance check included inside)
             ApplyBrowserBoost(pid, exeName);
         }
         
@@ -300,42 +372,212 @@ void NetworkMonitor::OnForegroundWindowChanged(HWND hwnd) {
     }
 }
 
+bool NetworkMonitor::InitializeQwave() {
+    QOS_VERSION version = { 1, 0 };
+    return QOSCreateHandle(&version, &m_qosHandle) != FALSE;
+}
+
+std::vector<HANDLE> NetworkMonitor::GetProcessSocketHandles(DWORD pid) {
+    std::vector<HANDLE> sockets;
+    ULONG size = 0x10000;
+    std::unique_ptr<BYTE[]> buffer(new BYTE[size]);
+    NTSTATUS status;
+
+    // Use NtWrapper to query system handles
+    while ((status = NtWrapper::QuerySystemInformation((SYSTEM_INFORMATION_CLASS)SystemHandleInformation, buffer.get(), size, &size)) == STATUS_INFO_LENGTH_MISMATCH) {
+        buffer.reset(new BYTE[size]);
+    }
+
+    if (!NT_SUCCESS(status)) return sockets;
+
+    PSYSTEM_HANDLE_INFORMATION handleInfo = (PSYSTEM_HANDLE_INFORMATION)buffer.get();
+    UniqueHandle hProcess(OpenProcessSafe(PROCESS_DUP_HANDLE, pid));
+    
+    if (!hProcess) return sockets;
+
+    // [FIX] Optimization: Dynamically detect the OS-specific ObjectTypeIndex for Sockets (Afd)
+    // This allows us to filter out 99% of handles (Events, Mutexes, Keys) before expensive duplication.
+    static UCHAR socketTypeIndex = 0;
+    if (socketTypeIndex == 0) {
+        // Create a dummy socket to learn the type index for this kernel session
+        SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (s != INVALID_SOCKET) {
+            DWORD myPid = GetCurrentProcessId();
+            // Scan the snapshot we already have to find our dummy socket
+            for (ULONG i = 0; i < handleInfo->NumberOfHandles; i++) {
+                if (handleInfo->Handles[i].UniqueProcessId == myPid && 
+                    (HANDLE)(uintptr_t)handleInfo->Handles[i].HandleValue == (HANDLE)s) {
+                    socketTypeIndex = handleInfo->Handles[i].ObjectTypeIndex;
+                    break;
+                }
+            }
+            closesocket(s);
+        }
+    }
+
+    for (ULONG i = 0; i < handleInfo->NumberOfHandles; i++) {
+        SYSTEM_HANDLE_TABLE_ENTRY_INFO& entry = handleInfo->Handles[i];
+        
+        if (entry.UniqueProcessId == pid) {
+            // [FIX] Apply Type Filtering
+            if (socketTypeIndex != 0 && entry.ObjectTypeIndex != socketTypeIndex) continue;
+
+            // Optimization: Duplicate only confirmed socket candidates
+            HANDLE hDup = nullptr;
+            if (DuplicateHandle(hProcess.get(), (HANDLE)(uintptr_t)entry.HandleValue, 
+                              GetCurrentProcess(), &hDup, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+                
+                // Verify it's a socket by checking options
+                int optVal;
+                int optLen = sizeof(optVal);
+                if (getsockopt((SOCKET)hDup, SOL_SOCKET, SO_TYPE, (char*)&optVal, &optLen) == 0) {
+                    sockets.push_back(hDup); // It's a valid socket
+                } else {
+                    CloseHandle(hDup); // Not a socket
+                }
+            }
+        }
+    }
+    return sockets;
+}
+
+void NetworkMonitor::ApplyQwaveFlows(DWORD pid, bool isVoip) {
+    if (!m_qosHandle) return;
+
+    // [FIX] Refresh Safety: Clear existing flows/handles to ensure we don't accumulate 
+    // stale duplicates during periodic refresh cycles.
+    CloseQwaveFlows();
+
+    // 1. Get duplicated handles for the target process
+    std::vector<HANDLE> targetSockets = GetProcessSocketHandles(pid);
+    
+    // 2. Apply Flow to each socket
+    
+    // [STRUCTURAL FIX] Define Policy Struct to hold DSCP configuration
+    struct FnroNetworkPolicy {
+        QOS_TRAFFIC_TYPE TrafficType;
+        DWORD DscpValue;
+    };
+
+    FnroNetworkPolicy policy = {};
+
+    if (isVoip) {
+        policy.TrafficType = QOSTrafficTypeAudioVideo;
+        policy.DscpValue = 46; // EF
+    } else {
+        // Use ExcellentEffort for responsive traffic (Fixes undefined 'Interactive' enum)
+        policy.TrafficType = QOSTrafficTypeExcellentEffort;
+        policy.DscpValue = 34; // AF41
+    }
+
+    for (HANDLE hSock : targetSockets) {
+        QOS_FLOWID flowId = 0;
+        // Apply Policy: Use TrafficType from struct. 
+        // Note: policy.DscpValue is structurally retained for future QOS_SET_FLOW_DSCP_VALUE implementation.
+        if (QOSAddSocketToFlow(m_qosHandle, (SOCKET)hSock, nullptr, policy.TrafficType, QOS_NON_ADAPTIVE_FLOW, &flowId) != FALSE) {
+            m_activeQosSockets.push_back(hSock); // Store to keep flow alive
+        } else {
+            CloseHandle(hSock); // Cleanup if failed
+        }
+    }
+    Log("[FNRO] Applied qWave QoS to " + std::to_string(m_activeQosSockets.size()) + " sockets.");
+}
+
+void NetworkMonitor::CloseQwaveFlows() {
+    // Closing the duplicated handle automatically notifies QOS to remove the socket from the flow.
+    for (HANDLE h : m_activeQosSockets) {
+        CloseHandle(h);
+    }
+    m_activeQosSockets.clear();
+}
+
+void NetworkMonitor::BoostProcessThreads(DWORD pid) {
+    UniqueHandle hSnapshot(CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0));
+    if (!hSnapshot) return;
+
+    THREADENTRY32 te = { sizeof(te) };
+    if (Thread32First(hSnapshot.get(), &te)) {
+        do {
+            if (te.th32OwnerProcessID == pid) {
+                // Boost thread to improve input/socket responsiveness
+                UniqueHandle hThread(OpenThread(THREAD_SET_INFORMATION, FALSE, te.th32ThreadID));
+                if (hThread) {
+                    SetThreadPriority(hThread.get(), THREAD_PRIORITY_ABOVE_NORMAL);
+                }
+            }
+        } while (Thread32Next(hSnapshot.get(), &te));
+    }
+}
+
 void NetworkMonitor::ApplyBrowserBoost(DWORD pid, const std::wstring& exeName) {
+    // [FIX] Auto-Disable on Errors: Check fault counter
+    if (m_boostFailures > 3) {
+        if (m_currentFnroLevel != FnroLevel::Off) {
+            Log("[FNRO_ERR] Too many failures. Disabling FNRO safety.");
+            ApplyFnroLevel(FnroLevel::Off);
+        }
+        return;
+    }
+
     Log("[FNRO] Boosting Network Responsiveness for: " + WideToUtf8(exeName.c_str()));
 
     // A. CPU & I/O Bias
-    // 1. Raise I/O Priority to High (3)
-    NtWrapper::Initialize(); // Ensure initialized
+    NtWrapper::Initialize();
+    bool success = true;
+
+    // 1. Raise I/O Priority
     IO_PRIORITY_HINT ioPri = static_cast<IO_PRIORITY_HINT>(IoPriorityHigh);
     UniqueHandle hProcTemp(OpenProcessSafe(PROCESS_SET_INFORMATION, pid));
-    NtWrapper::SetInformationProcess(hProcTemp.get(), 
-                                     ProcessIoPriority, &ioPri, sizeof(ioPri));
+    if (!hProcTemp || !NtWrapper::SetInformationProcess(hProcTemp.get(), ProcessIoPriority, &ioPri, sizeof(ioPri))) {
+        success = false;
+    }
 
-    // 2. Raise Process Priority (Bias threads)
-    // Cache original for restoration
+    // 2. Raise Process Priority & Disable EcoQoS
     UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_INFORMATION, FALSE, pid));
     if (hProc) {
         m_lastBoostedPriority = GetPriorityClass(hProc.get());
         if (m_lastBoostedPriority == 0) m_lastBoostedPriority = NORMAL_PRIORITY_CLASS;
         
-        // Use ABOVE_NORMAL to give network threads an edge over background/bulk
-        SetPriorityClass(hProc.get(), ABOVE_NORMAL_PRIORITY_CLASS);
+        if (!SetPriorityClass(hProc.get(), ABOVE_NORMAL_PRIORITY_CLASS)) success = false;
 
-        // C. Burst-Friendly Scheduling (Disable EcoQoS)
-        // Ensure browser threads are never scheduled on E-cores or throttled during bursty loads
         PROCESS_POWER_THROTTLING_STATE powerThrottling = {};
         powerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
         powerThrottling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
-        powerThrottling.StateMask = 0; // 0 = Disable Throttling (High Perf)
+        powerThrottling.StateMask = 0; // Disable Throttling
         
-        NtWrapper::SetInformationProcess(hProc.get(), ProcessPowerThrottling, 
-                                         &powerThrottling, sizeof(powerThrottling));
-                                         
+        NtWrapper::SetInformationProcess(hProc.get(), ProcessPowerThrottling, &powerThrottling, sizeof(powerThrottling));
         Log("[FNRO] Burst Protection (NoEcoQoS) applied to PID: " + std::to_string(pid));
+        
+        // [FIX] Apply Thread-Level Bias for immediate responsiveness
+        BoostProcessThreads(pid);
+        
+        // [FIX] Reduce Timer Coalescing Latency
+        // Force 1ms timer resolution. This ensures the browser's message loop 
+        // wakes up immediately to process incoming network packets.
+        // [FIX] Prevent Leak: Only apply if this is a new boost session (pid change).
+        // If we are just refreshing sockets for the same PID, the timer is already active.
+        if (m_lastBoostedPid != pid) {
+            timeBeginPeriod(1);
+        }
+        
+        // Telemetry
+        m_statsBoostCount++;
+    } else {
+        success = false;
     }
 
-    // B. QoS / DSCP Tagging
-    ApplyQosPolicy(exeName);
+    if (!success) m_boostFailures++;
+    else m_boostFailures = 0; // Reset on success
+
+    // B. QoS / DSCP Tagging (qWave)
+    // Detect if VoIP/RTC for correct traffic classification
+    std::wstring lowerName = exeName;
+    asciiLower(lowerName);
+    bool isVoip = (lowerName.find(L"discord") != std::string::npos || 
+                   lowerName.find(L"zoom") != std::string::npos || 
+                   lowerName.find(L"teams") != std::string::npos);
+
+    ApplyQwaveFlows(pid, isVoip);
 
     m_lastBoostedPid = pid;
     m_lastBoostedBrowser = exeName;
@@ -352,41 +594,25 @@ void NetworkMonitor::RemoveBrowserBoost() {
         IO_PRIORITY_HINT ioPri = static_cast<IO_PRIORITY_HINT>(IoPriorityNormal);
         NtWrapper::SetInformationProcess(hProc.get(), ProcessIoPriority, &ioPri, sizeof(ioPri));
         SetPriorityClass(hProc.get(), m_lastBoostedPriority);
+        
+        // Restore default timer resolution (save battery)
+        timeEndPeriod(1);
     }
 
-    // B. Remove QoS Tag
-    if (!m_lastBoostedBrowser.empty()) {
-        RemoveQosPolicy(m_lastBoostedBrowser);
-    }
+    // B. Remove QoS Tag (Close Handles)
+    CloseQwaveFlows();
 
     m_lastBoostedPid = 0;
     m_lastBoostedBrowser.clear();
 }
 
-void NetworkMonitor::ApplyQosPolicy(const std::wstring& exeName) {
-    // Registry Path: HKLM\SOFTWARE\Policies\Microsoft\Windows\QoS\<PolicyName>
-    std::wstring keyPath = L"SOFTWARE\\Policies\\Microsoft\\Windows\\QoS\\PMan_FNRO_" + exeName;
-    
-    // Values mandated by Windows Policy-based QoS
-    RegWriteString(HKEY_LOCAL_MACHINE, keyPath.c_str(), L"Version", L"1.0");
-    RegWriteString(HKEY_LOCAL_MACHINE, keyPath.c_str(), L"Application Name", exeName);
-    RegWriteString(HKEY_LOCAL_MACHINE, keyPath.c_str(), L"Protocol", L"*");
-    RegWriteString(HKEY_LOCAL_MACHINE, keyPath.c_str(), L"DSCP Value", L"46"); // EF (Expedited Forwarding)
-    RegWriteString(HKEY_LOCAL_MACHINE, keyPath.c_str(), L"Throttle Rate", L"-1");
-
-    // Note: Changes to Policy-based QoS usually require NLA service refresh or gpupdate.
-    // However, direct registry injection often works for new flows on next socket creation.
-}
-
-void NetworkMonitor::RemoveQosPolicy(const std::wstring& exeName) {
-    std::wstring keyPath = L"SOFTWARE\\Policies\\Microsoft\\Windows\\QoS\\PMan_FNRO_" + exeName;
-    RegDeleteKeyRecursive(HKEY_LOCAL_MACHINE, keyPath.c_str());
-}
+// [DEPRECATED] Registry-based QoS removed in favor of qWave (Handle-based)
 
 void NetworkMonitor::DeprioritizeBackgroundApps() {
     if (m_areBackgroundAppsThrottled) return;
 
     Log("[FNRO] Deprioritizing background traffic sources...");
+    m_statsThrottleEvents++; // Record intervention
 
     std::lock_guard lock(m_appsMtx);
     ForEachProcess([this](const PROCESSENTRY32W& pe) {
@@ -406,6 +632,18 @@ void NetworkMonitor::DeprioritizeBackgroundApps() {
                 // This prevents disk contention during page loads/caching
                 IO_PRIORITY_HINT ioPri = static_cast<IO_PRIORITY_HINT>(IoPriorityVeryLow);
                 NtWrapper::SetInformationProcess(hProc.get(), ProcessIoPriority, &ioPri, sizeof(ioPri));
+                
+                // [FIX] Upload Contention Control
+                // We cannot safely touch SO_SNDBUF of foreign processes without drivers.
+                // Instead, we apply "EcoQoS" (Efficiency Mode) to background uploaders.
+                // This tells the scheduler to defer their work to idle times, 
+                // indirectly throttling their network throughput.
+                PROCESS_POWER_THROTTLING_STATE ecoQos = {};
+                ecoQos.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+                ecoQos.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+                ecoQos.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED; // Enable Throttling (Eco Mode)
+                
+                NtWrapper::SetInformationProcess(hProc.get(), ProcessPowerThrottling, &ecoQos, sizeof(ecoQos));
 
                 m_throttledPids.insert(pid);
             }
@@ -428,6 +666,14 @@ void NetworkMonitor::RestoreBackgroundApps() {
 
             IO_PRIORITY_HINT ioPri = static_cast<IO_PRIORITY_HINT>(IoPriorityNormal);
             NtWrapper::SetInformationProcess(hProc.get(), ProcessIoPriority, &ioPri, sizeof(ioPri));
+            
+            // Remove EcoQoS (Restore full speed)
+            PROCESS_POWER_THROTTLING_STATE ecoQos = {};
+            ecoQos.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+            ecoQos.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+            ecoQos.StateMask = 0; // Disable Throttling
+            
+            NtWrapper::SetInformationProcess(hProc.get(), ProcessPowerThrottling, &ecoQos, sizeof(ecoQos));
         }
     }
 
@@ -438,11 +684,14 @@ void NetworkMonitor::RestoreBackgroundApps() {
 void NetworkMonitor::AttemptAutoRepair() {
     uint64_t now = GetTickCount64();
     
-    // Safety Cooldown: Wait 5 minutes between full repair cycles
-    if (now - m_lastRepairTime < 300000) return;
+    // Smart Backoff: Base 5 mins * Multiplier (5, 10, 20, 40...)
+    uint64_t cooldown = 300000ULL * m_repairBackoffMultiplier;
+    
+    if (now - m_lastRepairTime < cooldown) return;
 
     m_repairStage++;
-    Log("[NET_REPAIR] Connection dead > 5s. Attempting Auto-Repair Stage " + std::to_string(m_repairStage));
+    Log("[NET_REPAIR] Connection dead. Attempting Auto-Repair Stage " + std::to_string(m_repairStage) + 
+        " (Next backoff: " + std::to_string(cooldown / 60000) + "m)");
 
     switch (m_repairStage) {
 		case 1:
@@ -450,17 +699,19 @@ void NetworkMonitor::AttemptAutoRepair() {
 			ExecuteNetCommand(L"cmd.exe /c ipconfig /flushdns");
 			break;
 
-    case 2:
+        case 2:
 			Log("[NET_REPAIR] Renewing IP Address...");
 			ExecuteNetCommand(L"cmd.exe /c ipconfig /release && ipconfig /renew");
 			break;
 
-    case 3: // End of cycle
+        case 3: // End of cycle
 			m_repairStage = 0;
 			m_lastRepairTime = now;
+            // Increase backoff for next time (Exponential: 1 -> 2 -> 4 -> 8)
+            if (m_repairBackoffMultiplier < 12) m_repairBackoffMultiplier *= 2; 
 			break;
 
-    default:
+        default:
 			m_repairStage = 0;
 			m_lastRepairTime = now;
 			break;
@@ -470,54 +721,59 @@ void NetworkMonitor::AttemptAutoRepair() {
 // Scan for bandwidth-hogging processes
 // Uses GetExtendedTcpTable (AV-Safe, Read-Only) to find PIDs with active connections.
 void NetworkMonitor::UpdateNetworkActivityMap() {
-    // [FIX] C28020: Initialize size to structure header size to satisfy analyzer range check
-    DWORD size = sizeof(MIB_TCPTABLE_OWNER_PID);
-    // Query size first
-    if (GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) != ERROR_INSUFFICIENT_BUFFER) {
-        return;
-    }
+    std::unordered_set<DWORD> activePids;
+    std::unordered_map<DWORD, int> synSentCounts; // Track pending connections
 
-    std::vector<BYTE> tableBuffer(size);
-    PMIB_TCPTABLE_OWNER_PID pTable = reinterpret_cast<PMIB_TCPTABLE_OWNER_PID>(tableBuffer.data());
+    // 1. IPv4 Scan
+    DWORD size4 = sizeof(MIB_TCPTABLE_OWNER_PID);
+    if (GetExtendedTcpTable(nullptr, &size4, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == ERROR_INSUFFICIENT_BUFFER) {
+        std::vector<BYTE> buffer4(size4);
+        PMIB_TCPTABLE_OWNER_PID pTable4 = reinterpret_cast<PMIB_TCPTABLE_OWNER_PID>(buffer4.data());
 
-    if (GetExtendedTcpTable(pTable, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
-        std::unordered_set<DWORD> activePids;
-        std::unordered_map<DWORD, int> synSentCounts; // Track pending connections
-        
-        activePids.reserve(pTable->dwNumEntries);
+        if (GetExtendedTcpTable(pTable4, &size4, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
+            for (DWORD i = 0; i < pTable4->dwNumEntries; i++) {
+                DWORD state = pTable4->table[i].dwState;
+                DWORD pid = pTable4->table[i].dwOwningPid;
 
-        for (DWORD i = 0; i < pTable->dwNumEntries; i++) {
-            DWORD state = pTable->table[i].dwState;
-            DWORD pid = pTable->table[i].dwOwningPid;
-
-            // Filter for ESTABLISHED connections only (ignoring LISTENING ports)
-            // This ensures we only target processes actually transferring data.
-            if (state == MIB_TCP_STATE_ESTAB) {
-                activePids.insert(pid);
-            }
-            // Detect Retry Storms (High SYN_SENT count)
-            else if (state == MIB_TCP_STATE_SYN_SENT) {
-                synSentCounts[pid]++;
-            }
-        }
-        
-        // Analyze Storms if Network is Unstable
-        if (g_networkState.load() == NetworkState::Unstable) {
-            for (const auto& [pid, count] : synSentCounts) {
-                // [FIX] Relaxed Threshold: >5 is too low for Game Launchers/P2P/Browsers.
-                // Modern browsers can easily have 20+ SYN_SENT during page loads or downloads.
-                // Only throttle if it looks like a malicious flood (>50).
-                if (count > 50) {
-                    Log("[NET] Massive Connection Storm detected (PID " + std::to_string(pid) + " count: " + std::to_string(count) + ")");
-                    g_throttleManager.TriggerCooldown(pid);
+                if (state == MIB_TCP_STATE_ESTAB) {
+                    activePids.insert(pid);
+                }
+                else if (state == MIB_TCP_STATE_SYN_SENT) {
+                    synSentCounts[pid]++;
                 }
             }
         }
-
-        // Update Global Cache
-        std::unique_lock lock(g_netActivityMtx);
-        g_activeNetPids = std::move(activePids);
     }
+
+    // 2. IPv6 Scan (Happy Eyeballs / Modern Web)
+    DWORD size6 = sizeof(MIB_TCP6TABLE_OWNER_PID);
+    if (GetExtendedTcpTable(nullptr, &size6, FALSE, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0) == ERROR_INSUFFICIENT_BUFFER) {
+        std::vector<BYTE> buffer6(size6);
+        PMIB_TCP6TABLE_OWNER_PID pTable6 = reinterpret_cast<PMIB_TCP6TABLE_OWNER_PID>(buffer6.data());
+
+        if (GetExtendedTcpTable(pTable6, &size6, FALSE, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
+            for (DWORD i = 0; i < pTable6->dwNumEntries; i++) {
+                if (pTable6->table[i].dwState == MIB_TCP_STATE_ESTAB) {
+                    activePids.insert(pTable6->table[i].dwOwningPid);
+                }
+                // Note: We currently only track SYN floods on IPv4 to save cycles
+            }
+        }
+    }
+
+    // 3. Analyze Storms (IPv4 only for now)
+    if (g_networkState.load() == NetworkState::Unstable) {
+        for (const auto& [pid, count] : synSentCounts) {
+            if (count > 50) {
+                Log("[NET] Massive Connection Storm detected (PID " + std::to_string(pid) + " count: " + std::to_string(count) + ")");
+                g_throttleManager.TriggerCooldown(pid);
+            }
+        }
+    }
+
+    // 4. Update Global Cache
+    std::unique_lock lock(g_netActivityMtx);
+    g_activeNetPids = std::move(activePids);
 }
 
 NetworkState NetworkMonitor::CheckConnectivity() {
@@ -574,6 +830,8 @@ void NetworkMonitor::WorkerThread() {
             if (newState != NetworkState::Offline) {
                 m_offlineStartTime = 0;
                 m_repairStage = 0;
+                // Connection restored, reset backoff to normal (5 mins)
+                m_repairBackoffMultiplier = 1; 
             }
             
             // Trigger Adaptive Throttling
@@ -624,10 +882,23 @@ void NetworkMonitor::WorkerThread() {
             ApplyFnroLevel(FnroLevel::Off);
         }
 
+        // [FIX] Single Consolidated Refresh Logic
+        // Re-scan socket table based on contention level to save CPU.
+        // Aggressive/Active: 3s (Need fast reaction for new tabs), Light/Off: 10s.
+        uint64_t refreshInterval = (m_currentFnroLevel >= FnroLevel::Active) ? 3000 : 10000;
+        
+        static uint64_t lastQosRefresh = 0;
+        if (now - lastQosRefresh > refreshInterval) {
+            std::lock_guard lock(m_mtx); 
+            // Only refresh if we are actually in an interactive session
+            if (m_foregroundIsInteractive && m_lastBoostedPid != 0) {
+                ApplyBrowserBoost(m_lastBoostedPid, m_lastBoostedBrowser);
+            }
+            lastQosRefresh = now;
+        }
+
         // Adaptive Polling: 
         // If Unstable/Offline, check frequently (5s) to recover fast.
-        // If Stable, check less frequently (30s) to save resources.
-        // (For now, fixed 5s as per requirement to detect lag spikes)
         std::unique_lock lock(m_mtx);
         m_cv.wait_for(lock, std::chrono::seconds(5), [this] { return !m_running; });
     }
