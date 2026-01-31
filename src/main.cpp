@@ -194,15 +194,18 @@ public:
             DWORD tid = GetWindowThreadProcessId(hFg, &pid);
             if (pid == 0) return;
 
+            // SAFETY: Self-Exclusion (Robust against renaming)
+            if (pid == GetCurrentProcessId()) return;
+
             // SAFETY: Exclude Critical System Processes
+            // Optimization: Only do expensive checks if it's not us
             UniqueHandle hProcCheck(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
             if (hProcCheck) {
                 wchar_t path[MAX_PATH];
                 DWORD sz = MAX_PATH;
                 if (QueryFullProcessImageNameW(hProcCheck.get(), 0, path, &sz)) {
                     std::wstring name = ExeFromPath(path);
-                    // Critical exclusion list + PMan itself
-                    if (IsSystemCriticalProcess(name) || name == L"pman.exe") return;
+                    if (IsSystemCriticalProcess(name)) return;
                 }
             }
 
