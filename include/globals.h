@@ -30,6 +30,7 @@
 #include "input_guardian.h"   // Input Responsiveness
 #include "idle_affinity.h"    // Idle Core Parking
 #include "session_cache.h"    // [CACHE]
+#include "adaptive_engine.h"  // [ADAPTIVE]
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
@@ -53,6 +54,9 @@
 
 // Input Guardian
 #define g_inputGuardian (*PManContext::Get().subs.input)
+
+// Adaptive Learning Engine
+#define g_adaptiveEngine (*PManContext::Get().subs.adaptive)
 
 // Idle Core Parking
 #define g_idleAffinityMgr (*PManContext::Get().subs.idle)

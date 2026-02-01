@@ -46,6 +46,7 @@ class ExplorerBooster;
 class IdleAffinityManager;
 class MemoryOptimizer;
 class InputGuardian; 
+class AdaptiveEngine; 
 
 class PManContext {
 public:
@@ -213,6 +214,7 @@ public:
         std::unique_ptr<IdleAffinityManager>   idle;
         std::unique_ptr<MemoryOptimizer>       mem;
         std::unique_ptr<InputGuardian>         input; 
+        std::unique_ptr<AdaptiveEngine>        adaptive;
     } subs;
 
 private:

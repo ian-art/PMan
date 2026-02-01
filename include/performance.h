@@ -38,21 +38,7 @@ class ServiceSuspensionGuard;
 class InputModeGuard;
 class AudioModeGuard;
 
-struct GameProfile {
-    std::wstring exeName;
-    bool useHighIo;
-    bool useCorePinning;
-    bool useMemoryCompression;
-    bool useTimerCoalescing;
-    double baselineFrameTimeMs;
-    uint64_t lastUpdated;
-
-    // Adaptive Evolution State
-    uint32_t totalSessions = 0;
-    uint8_t ioVoteCount = 3;  // Start with moderate confidence
-    uint8_t pinVoteCount = 3;
-    uint8_t memVoteCount = 3;
-};
+#include "adaptive_engine.h"
 
 class PerformanceGuardian {
 private:
@@ -66,19 +52,6 @@ private:
         std::wstring exeName;
         std::deque<FrameData> frameHistory;
         uint64_t lastAnalysisTime;
-        bool learningMode;
-        
-        // Silent Learning Engine State
-        // 0=Baseline, 1=TestIOPriority, 2=TestCorePinning, 3=TestMemoryCompression, 4=Done
-        int testPhase = 0; 
-        std::vector<double> baselineStats; // [mean, variance, p99]
-        std::vector<double> testStats;     // [mean, variance, p99]
-        uint64_t testStartTime = 0;
-        bool currentTestEnabled = false;   // Is optimization ON in this phase?
-
-        // Temporary storage for multi-phase test results
-        bool tempIoHelps = false;
-        bool tempPinHelps = false;
 
 		// Session Reporting
         uint64_t sessionStartTime = 0;
@@ -114,19 +87,14 @@ private:
 
     std::mutex m_mtx;
     std::unordered_map<DWORD, GameSession> m_sessions;
-    std::unordered_map<std::wstring, GameProfile> m_profiles;
-    std::filesystem::path m_dbPath;
+    // Profiles moved to AdaptiveEngine
 
     // Core Logic
     void AnalyzeStutter(GameSession& session, DWORD pid);
-    void UpdateLearning(GameSession& session);
-    void SaveProfile(const GameProfile& profile);
-    void LoadProfiles();
     void ApplyProfile(DWORD pid, const GameProfile& profile);
-
-    // Statistical Helpers
+    
+    // Internal Stats Helper
     std::vector<double> CalculateStats(const std::deque<FrameData>& history);
-    bool IsSignificantImprovement(const std::vector<double>& baseline, const std::vector<double>& test);
 
     // Diagnostic Helpers
     SystemSnapshot CaptureSnapshot(DWORD pid);
