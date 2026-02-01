@@ -24,6 +24,7 @@
 #include "idle_affinity.h"
 #include "memory_optimizer.h"
 #include "input_guardian.h"
+#include "adaptive_engine.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -33,6 +34,7 @@ PManContext::PManContext() {
     subs.idle       = std::make_unique<IdleAffinityManager>();
     subs.mem        = std::make_unique<MemoryOptimizer>();
     subs.input      = std::make_unique<InputGuardian>();
+    subs.adaptive   = std::make_unique<AdaptiveEngine>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)
