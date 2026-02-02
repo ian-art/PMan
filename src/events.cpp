@@ -300,16 +300,22 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
             // We do this once at startup/creation to avoid overhead on Exit
             static const std::vector<std::wstring> CRITICAL_NAMES = {
                 L"csrss.exe", L"lsass.exe", L"services.exe", 
-                L"wininit.exe", L"winlogon.exe", L"dwm.exe" 
+                L"wininit.exe", L"winlogon.exe", L"dwm.exe",
+                // [FIX] Whitelist Start Menu and Basic Utilities to prevent UI lag
+                L"StartMenuExperienceHost.exe", L"ShellExperienceHost.exe", 
+                L"SearchApp.exe", L"TextInputHost.exe", L"notepad.exe"
             };
 
-            std::wstring imgName = GetProcessNameFromPid(pid); // Assuming Utils helper
+            bool isCritical = false; // [FIX] Track critical status
+            std::wstring imgName = GetProcessNameFromPid(pid); 
             if (!imgName.empty()) {
                 for (const auto& crit : CRITICAL_NAMES) {
                     if (ContainsIgnoreCase(imgName, crit)) {
-                        std::lock_guard lock(g_criticalPidsMtx);
-                        g_criticalPids.insert(pid);
-                        // Log("[SAFETY] Critical process tracked: " + WideToUtf8(crit) + " (" + std::to_string(pid) + ")");
+                        {
+                            std::lock_guard lock(g_criticalPidsMtx);
+                            g_criticalPids.insert(pid);
+                        }
+                        isCritical = true; // [FIX] Mark as critical
                         break;
                     }
                 }
@@ -353,7 +359,10 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
                 g_processHierarchy[identity] = node;
             }
 
-            PostIocp(JobType::Policy, pid);
+            // [FIX] Skip policy enforcement for critical shell components
+            if (!isCritical) {
+                PostIocp(JobType::Policy, pid);
+            }
         }
         else if (opcode == 2) // Process End
         {
