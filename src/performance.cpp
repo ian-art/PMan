@@ -75,8 +75,8 @@ public:
         if (parkingModified_) {
              GUID parking = { 0x0cc5b647, 0xc1df, 0x4637, { 0x89, 0x1a, 0xde, 0xc3, 0x5c, 0x31, 0x85, 0x83 } };
              PowerWriteACValueIndex(NULL, &modifiedScheme_, &GUID_PROCESSOR_SETTINGS_SUBGROUP, &parking, originalParking_);
-             // Apply update to ensure the registry write is committed and effective immediately
-             PowerSetActiveScheme(NULL, &modifiedScheme_); 
+             // [AUDIT] Registry write is sufficient. Skip intermediate activation to prevent double context-switch lag.
+             // PowerSetActiveScheme(NULL, &modifiedScheme_); 
         }
 
         if (originalScheme_ != GUID_NULL) {
@@ -123,12 +123,12 @@ public:
         SystemParametersInfoA(SPI_GETDRAGFULLWINDOWS, 0, &drag_, 0);
 
         BOOL off = FALSE;
-        SystemParametersInfoA(SPI_SETCLIENTAREAANIMATION, 0, (PVOID)(uintptr_t)off, SPIF_SENDCHANGE);
-        SystemParametersInfoA(SPI_SETDRAGFULLWINDOWS, 0, (PVOID)(uintptr_t)off, SPIF_SENDCHANGE);
+        SystemParametersInfoA(SPI_SETCLIENTAREAANIMATION, 0, (PVOID)(uintptr_t)off, 0);
+        SystemParametersInfoA(SPI_SETDRAGFULLWINDOWS, 0, (PVOID)(uintptr_t)off, 0);
     }
     ~VisualsSuspend() {
-        SystemParametersInfoA(SPI_SETCLIENTAREAANIMATION, 0, (PVOID)(uintptr_t)anim_, SPIF_SENDCHANGE);
-        SystemParametersInfoA(SPI_SETDRAGFULLWINDOWS, 0, (PVOID)(uintptr_t)drag_, SPIF_SENDCHANGE);
+        SystemParametersInfoA(SPI_SETCLIENTAREAANIMATION, 0, (PVOID)(uintptr_t)anim_, 0);
+        SystemParametersInfoA(SPI_SETDRAGFULLWINDOWS, 0, (PVOID)(uintptr_t)drag_, 0);
     }
 };
 

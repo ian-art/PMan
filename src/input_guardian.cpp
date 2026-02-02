@@ -73,6 +73,10 @@ void InputGuardian::ToggleInterferenceBlocker(bool enable) {
         // 1. Disable Windows Key Hook (Moved to dedicated thread to prevent input lag)
         if (!m_hookThread.joinable()) {
             m_hookThread = std::thread([this]() {
+                // [AUDIT] CRITICAL: Raise priority to TIME_CRITICAL. 
+                // A normal priority hook thread will be preempted by games, causing massive input lag.
+                SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+
                 // Install Hook on this dedicated thread
                 HHOOK hHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(nullptr), 0);
                 m_hookThreadId = GetCurrentThreadId();

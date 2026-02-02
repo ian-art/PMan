@@ -407,7 +407,8 @@ void MemoryOptimizer::RunThread() {
             if (m_processTracker.size() > 1000) m_processTracker.clear();
         }
 
-        Sleep(1000);
+        // [AUDIT] Relaxed polling to 5s. 1s PDH polling creates unnecessary background noise.
+        Sleep(5000);
     }
 }
 
@@ -416,8 +417,9 @@ void MemoryOptimizer::PerformSmartTrim(const std::vector<DWORD>& targets, TrimIn
 
     // 1. Global Action: Flush Standby List (Hard Mode Only)
     // Phase 13.2: "Flush System Standby List (Global benefit)"
+    // [AUDIT] CRITICAL: Purging standby list forces hard faults on active assets, causing verifiable stutter. Disabled.
     if (intensity == TrimIntensity::Hard) {
-        FlushStandbyList();
+        // FlushStandbyList();
     }
 
     // 2. Targeted Action

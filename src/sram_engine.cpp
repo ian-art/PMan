@@ -27,7 +27,8 @@
 
 #define SRAM_WINDOW_CLASS L"PMan_SRAM_Hidden"
 #define WM_SRAM_PING (WM_USER + 1)
-#define SENSOR_POLL_RATE_MS 250
+// [AUDIT] Decreased poll rate to 2000ms. 250ms polling of PDH/UI locks causes system-wide micro-stutter.
+#define SENSOR_POLL_RATE_MS 2000
 
 // Config
 #define HYSTERESIS_COOLDOWN_MS 2000
