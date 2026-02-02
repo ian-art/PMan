@@ -296,4 +296,50 @@ enum class ProcessNetClass {
     BulkBackground   // Indexers, Telemetry (Throttle Aggressively)
 };
 
+// Phase 1.5: Canonical Process Taxonomy
+// Strictly 2 bits for embedding in SystemState
+enum class ProcessCategory : uint8_t {
+    Interactive_Game    = 0b00,
+    Interactive_Desktop = 0b01,
+    Background_Work     = 0b10,
+    System_Critical     = 0b11
+};
+
+// Phase 2.1: BrainAction Enum (Fixed & Auditable)
+enum class BrainAction : uint8_t {
+    Maintain = 0,
+    Throttle_Mild,
+    Throttle_Aggressive,
+    Optimize_Memory,
+    Suspend_Services,
+    Release_Pressure,
+    Count // Compile-time fixed size
+};
+
+// Compile-time check for Phase 2.1 compliance
+constexpr size_t ACTION_COUNT = static_cast<size_t>(BrainAction::Count);
+static_assert(ACTION_COUNT == 6, "BrainAction count must match Roadmap Phase 2.1");
+
+// Phase 11: Executor Intent Structure
+struct ActionIntent {
+    BrainAction action;
+    uint64_t nonce;         // For replay protection (Phase 16.4)
+    uint64_t timestamp;     // For staleness checks
+    double confidence;      // From RL Engine
+};
+
+// Phase 11.4: Targeting System Data
+struct TargetSet {
+    std::vector<ProcessIdentity> targets;
+    ProcessCategory classification;
+    uint64_t snapshotTime;
+};
+
+// Phase 16.5: Feedback Loop Data
+struct ActionResult {
+    bool success;
+    DWORD win32Error;
+    double actualCpuAfter;
+};
+
 #endif // PMAN_TYPES_H

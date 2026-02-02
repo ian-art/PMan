@@ -177,6 +177,81 @@ void ThrottleManager::UpdateJobLimits(bool enableThrottle) {
     }
 }
 
+void ThrottleManager::ApplyThrottle(DWORD pid, ThrottleLevel level) {
+    std::lock_guard<std::mutex> lock(m_mtx);
+
+    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
+    if (!hProcess) return;
+    UniqueHandle uhProcess(hProcess);
+
+    // 1. EcoQoS (Power Throttling)
+    PROCESS_POWER_THROTTLING_STATE PowerThrottling;
+    RtlZeroMemory(&PowerThrottling, sizeof(PowerThrottling));
+    PowerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    PowerThrottling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+
+    // [FIX] Phase 12: Job Object Management for CPU Caps
+    HANDLE hJob = nullptr;
+    auto jobIt = m_processJobs.find(pid);
+    if (jobIt != m_processJobs.end()) {
+        hJob = jobIt->second;
+    } else {
+        // Create dedicated job for this process if implied by policy
+        // Note: Processes can only be in one job unless nested jobs are used.
+        // We assume we are the primary manager.
+        hJob = CreateJobObject(nullptr, nullptr);
+        if (hJob) {
+            if (AssignProcessToJobObject(hJob, hProcess)) {
+                m_processJobs[pid] = hJob;
+            } else {
+                CloseHandle(hJob); // Failed to assign
+                hJob = nullptr;
+            }
+        }
+    }
+
+    JOBOBJECT_CPU_RATE_CONTROL_INFORMATION cpuInfo = {0};
+
+    if (level == ThrottleLevel::None) {
+        PowerThrottling.StateMask = 0; // Turn OFF EcoQoS
+        SetPriorityClass(hProcess, NORMAL_PRIORITY_CLASS);
+        
+        // Remove Job Limits
+        if (hJob) {
+            cpuInfo.ControlFlags = 0;
+            SetInformationJobObject(hJob, JobObjectCpuRateControlInformation, &cpuInfo, sizeof(cpuInfo));
+        }
+    }
+    else if (level == ThrottleLevel::Mild) {
+        PowerThrottling.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED; // Turn ON EcoQoS
+        SetPriorityClass(hProcess, BELOW_NORMAL_PRIORITY_CLASS);
+        
+        // Soft Cap: 40% (Roadmap)
+        if (hJob) {
+            cpuInfo.ControlFlags = JOB_OBJECT_CPU_RATE_CONTROL_ENABLE;
+            cpuInfo.CpuRate = 4000; // 40.00%
+            SetInformationJobObject(hJob, JobObjectCpuRateControlInformation, &cpuInfo, sizeof(cpuInfo));
+        }
+    }
+    else if (level == ThrottleLevel::Aggressive) {
+        PowerThrottling.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED; // Turn ON EcoQoS
+        SetPriorityClass(hProcess, IDLE_PRIORITY_CLASS);
+        
+        // Hard Cap: 5% (Roadmap Phase 12 Requirement)
+        if (hJob) {
+            cpuInfo.ControlFlags = JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP;
+            cpuInfo.CpuRate = 500; // 5.00%
+            SetInformationJobObject(hJob, JobObjectCpuRateControlInformation, &cpuInfo, sizeof(cpuInfo));
+        }
+    }
+
+    // Apply Power Throttling if supported
+    if (PManContext::Get().sys.caps.supportsPowerThrottling) {
+        SetProcessInformation(hProcess, ProcessPowerThrottling, 
+                              &PowerThrottling, sizeof(PowerThrottling));
+    }
+}
+
 void ThrottleManager::UpdateProcessPriorities(bool enableThrottle) {
     // [FIX] Cache Foreground PID to prevent throttling the active user app (Game/Browser)
     HWND hFg = GetForegroundWindow();
@@ -260,6 +335,13 @@ void ThrottleManager::RestoreAll() {
             CloseHandle(hProc);
         }
     }
+    
+    // [FIX] Clean up granular Job Objects
+    for (auto& pair : m_processJobs) {
+        if (pair.second) CloseHandle(pair.second);
+    }
+    m_processJobs.clear();
+
     m_managedPids.clear();
     m_originalPriorities.clear();
     Log("[THROTTLE] Restored all managed processes to original state.");

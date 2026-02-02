@@ -47,6 +47,7 @@ class IdleAffinityManager;
 class MemoryOptimizer;
 class InputGuardian; 
 class AdaptiveEngine; 
+class Executor;
 
 class PManContext {
 public:
@@ -215,6 +216,8 @@ public:
         std::unique_ptr<MemoryOptimizer>       mem;
         std::unique_ptr<InputGuardian>         input; 
         std::unique_ptr<AdaptiveEngine>        adaptive;
+        // Phase 11: The Executor Subsystem
+        std::unique_ptr<Executor>              executor;
     } subs;
 
 private:

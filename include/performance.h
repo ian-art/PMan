@@ -38,7 +38,7 @@ class ServiceSuspensionGuard;
 class InputModeGuard;
 class AudioModeGuard;
 
-#include "adaptive_engine.h"
+#include "brain_rl_engine.h"
 
 class PerformanceGuardian {
 private:

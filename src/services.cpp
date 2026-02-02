@@ -146,6 +146,33 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
 	return true;
 	}
 
+bool WindowsServiceManager::IsServiceRunning(const std::wstring& serviceName) {
+    std::lock_guard lock(m_mutex);
+    
+    // Helper to query state without full overhead
+    auto it = m_services.find(serviceName);
+    
+    // If we manage it, use the handle we have
+    if (it != m_services.end() && it->second.handle) {
+        SERVICE_STATUS status;
+        if (QueryServiceStatus(it->second.handle.get(), &status)) {
+            return status.dwCurrentState == SERVICE_RUNNING;
+        }
+    } else {
+        // If not managed, open temporary handle
+        if (m_scManager) {
+             ScHandle hSvc(OpenServiceW(m_scManager.get(), serviceName.c_str(), SERVICE_QUERY_STATUS));
+             if (hSvc) {
+                 SERVICE_STATUS status;
+                 if (QueryServiceStatus(hSvc.get(), &status)) {
+                     return status.dwCurrentState == SERVICE_RUNNING;
+                 }
+             }
+        }
+    }
+    return false;
+}
+
 bool WindowsServiceManager::IsHardExcluded(const std::wstring& serviceName, DWORD currentState) const
 {
     // State-Based Hard Exclusions

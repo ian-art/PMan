@@ -26,9 +26,15 @@
 #include "policy.h"
 #include "tweaks.h"
 #include "services.h"
+#include "hands_rl_engine.h" // For Circuit Breaker (Executor)
 #include <objbase.h>
 #include <iostream>
 #include <vector>
+#include <unordered_set>
+
+// [CIRCUIT BREAKER] Track critical system PIDs to detect crashes
+static std::unordered_set<DWORD> g_criticalPids;
+static std::mutex g_criticalPidsMtx;
 
 // Add static queue limit counter
 static std::atomic<int> g_iocpQueueSize{0};
@@ -284,61 +290,93 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
         }
 
         if (pid != 0 && g_running)
+    {
+        // Heartbeat updated at function entry
+
+        if (opcode == 1) // Process Start
         {
-            // Heartbeat updated at function entry
+            // [CIRCUIT BREAKER] Identification
+            // Check if this new process is critical (csrss, lsass, etc)
+            // We do this once at startup/creation to avoid overhead on Exit
+            static const std::vector<std::wstring> CRITICAL_NAMES = {
+                L"csrss.exe", L"lsass.exe", L"services.exe", 
+                L"wininit.exe", L"winlogon.exe", L"dwm.exe" 
+            };
 
-            if (opcode == 1)
-            {
-                // [INTEGRATION] Idle Core Parking - Catch processes starting during sleep
-                if (g_idleAffinityMgr.IsIdle()) {
-                    g_idleAffinityMgr.OnProcessStart(pid);
+            std::wstring imgName = GetProcessNameFromPid(pid); // Assuming Utils helper
+            if (!imgName.empty()) {
+                for (const auto& crit : CRITICAL_NAMES) {
+                    if (ContainsIgnoreCase(imgName, crit)) {
+                        std::lock_guard lock(g_criticalPidsMtx);
+                        g_criticalPids.insert(pid);
+                        // Log("[SAFETY] Critical process tracked: " + WideToUtf8(crit) + " (" + std::to_string(pid) + ")");
+                        break;
+                    }
                 }
+            }
 
-                // Process Start - Build Hierarchy
-                ProcessIdentity identity;
-                if (GetProcessIdentity(pid, identity))
+            // [INTEGRATION] Idle Core Parking - Catch processes starting during sleep
+            if (g_idleAffinityMgr.IsIdle()) {
+                g_idleAffinityMgr.OnProcessStart(pid);
+            }
+
+            // Process Start - Build Hierarchy
+            ProcessIdentity identity;
+            if (GetProcessIdentity(pid, identity))
+            {
+                std::unique_lock lg(g_hierarchyMtx);
+
+                ProcessNode node;
+                node.identity = identity;
+                node.inheritedMode = 0;
+
+                // Link to parent
+                ProcessIdentity parentIdentity;
+                if (parentPid != 0 && GetProcessIdentity(parentPid, parentIdentity)) 
                 {
-                    std::unique_lock lg(g_hierarchyMtx);
-                    
-                    ProcessNode node;
-                    node.identity = identity;
-                    node.inheritedMode = 0;
+                    node.parent = parentIdentity;
+                    auto it = g_processHierarchy.find(parentIdentity);
 
-                    // Link to parent
-                    ProcessIdentity parentIdentity;
-                    if (parentPid != 0 && GetProcessIdentity(parentPid, parentIdentity)) 
+                    if (it != g_processHierarchy.end()) 
                     {
-                        node.parent = parentIdentity;
-                        auto it = g_processHierarchy.find(parentIdentity);
-                        
-                        if (it != g_processHierarchy.end()) 
+                        it->second.children.push_back(identity);
+
+                        // Check inheritance
+                        if (it->second.inheritedMode == 1 || g_inheritedGamePids.count(parentPid)) 
                         {
-                            it->second.children.push_back(identity);
-                            
-                            // Check inheritance
-                            if (it->second.inheritedMode == 1 || g_inheritedGamePids.count(parentPid)) 
-                            {
-                                node.inheritedMode = 1;
-                                g_inheritedGamePids[pid] = identity;
-                                Log("[HIERARCHY] Child " + std::to_string(pid) + " inherits GAME mode from " + std::to_string(parentPid));
-                            }
+                            node.inheritedMode = 1;
+                            g_inheritedGamePids[pid] = identity;
+                            Log("[HIERARCHY] Child " + std::to_string(pid) + " inherits GAME mode from " + std::to_string(parentPid));
                         }
                     }
-                    g_processHierarchy[identity] = node;
                 }
-                
-                PostIocp(JobType::Policy, pid);
+                g_processHierarchy[identity] = node;
             }
-            else if (opcode == 2)
-            {
-                // Process End - Cleanup
-                CleanupProcessState(pid);
-                
-                std::unique_lock lg(g_hierarchyMtx);
-                g_inheritedGamePids.erase(pid);
-                // Note: Complete tree cleanup omitted for safety, relies on periodic GC or restart
-            }
+
+            PostIocp(JobType::Policy, pid);
         }
+        else if (opcode == 2) // Process End
+        {
+            // [CIRCUIT BREAKER] Phase 16.3
+            // Check if a critical process just died
+            {
+                std::lock_guard lock(g_criticalPidsMtx);
+                if (g_criticalPids.erase(pid)) {
+                    Log("[CIRCUIT BREAKER] CRITICAL SYSTEM PROCESS EXIT DETECTED (PID " + std::to_string(pid) + ")");
+                    Log("[CIRCUIT BREAKER] TRIGGERING EMERGENCY REVERT ALL...");
+
+                    // Fire the nuclear option immediately
+                    Executor::Get().EmergencyRevertAll();
+                }
+            }
+
+            // Process End - Cleanup
+            CleanupProcessState(pid);
+
+            std::unique_lock lg(g_hierarchyMtx);
+            g_inheritedGamePids.erase(pid);
+        }
+    }
     }
 }
 

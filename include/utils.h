@@ -30,6 +30,7 @@
 
 // Helpers
 std::string WideToUtf8(const wchar_t* wstr);
+std::wstring GetProcessNameFromPid(DWORD pid); // [FIX] Added missing helper
 bool IsSystemCriticalProcess(const std::wstring& exeName); // Defender/System Exclusion
 std::wstring ExeFromPath(const wchar_t* path);
 ULONGLONG FileTimeToULL(const FILETIME& ft); // Shared utility

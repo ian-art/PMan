@@ -64,6 +64,25 @@ std::wstring ExeFromPath(const wchar_t* path)
     return s;
 }
 
+// [FIX] Helper Implementation for Circuit Breaker
+std::wstring GetProcessNameFromPid(DWORD pid)
+{
+    if (pid == 0) return L"";
+    if (pid == 4) return L"system"; 
+
+    // PROCESS_QUERY_LIMITED_INFORMATION is sufficient for getting the name
+    // and works on protected processes where PROCESS_QUERY_INFORMATION fails.
+    UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (!hProc) return L"";
+
+    wchar_t path[MAX_PATH];
+    DWORD sz = MAX_PATH;
+    if (QueryFullProcessImageNameW(hProc.get(), 0, path, &sz)) {
+        return ExeFromPath(path);
+    }
+    return L"";
+}
+
 bool IsSystemCriticalProcess(const std::wstring& exeName) {
     // Centralized Safety List (Defender + OS Core)
     // Ensures these processes are NEVER throttled, trimmed, or touched.

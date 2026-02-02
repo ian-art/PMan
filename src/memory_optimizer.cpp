@@ -410,3 +410,48 @@ void MemoryOptimizer::RunThread() {
         Sleep(1000);
     }
 }
+
+void MemoryOptimizer::PerformSmartTrim(const std::vector<DWORD>& targets, TrimIntensity intensity) {
+    std::lock_guard<std::mutex> lock(m_mtx);
+
+    // 1. Global Action: Flush Standby List (Hard Mode Only)
+    // Phase 13.2: "Flush System Standby List (Global benefit)"
+    if (intensity == TrimIntensity::Hard) {
+        FlushStandbyList();
+    }
+
+    // 2. Targeted Action
+    for (DWORD pid : targets) {
+        // Skip own process and critical system processes
+        if (pid == GetCurrentProcessId() || pid == 0 || pid == 4) continue;
+
+        HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
+        if (!hProcess) continue;
+        UniqueHandle uhProcess(hProcess);
+
+        // Phase 13.2: "DO NOT touch the Game/Foreground App"
+        // (This filtering is expected to be done by the Executor's Targeting System,
+        // but we double-check implementation constraints if needed. 
+        // For now, we trust the 'targets' vector passed by Executor).
+
+        SIZE_T minWS, maxWS;
+        if (GetProcessWorkingSetSize(hProcess, &minWS, &maxWS)) {
+            bool shouldTrim = true;
+
+            // Phase 13: "Gentle Trim" logic
+            if (intensity == TrimIntensity::Gentle) {
+                PROCESS_MEMORY_COUNTERS_EX pmc;
+                if (GetProcessMemoryInfo(hProcess, (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+                    if (pmc.WorkingSetSize < 100 * 1024 * 1024) { // < 100MB
+                        shouldTrim = false;
+                    }
+                }
+            }
+
+            if (shouldTrim) {
+                // EmptyWorkingSet is achieved by passing -1, -1
+                SetProcessWorkingSetSize(hProcess, (SIZE_T)-1, (SIZE_T)-1);
+            }
+        }
+    }
+}

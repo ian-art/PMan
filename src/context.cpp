@@ -24,7 +24,8 @@
 #include "idle_affinity.h"
 #include "memory_optimizer.h"
 #include "input_guardian.h"
-#include "adaptive_engine.h"
+#include "brain_rl_engine.h"
+#include "hands_rl_engine.h" // Phase 11
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -35,6 +36,7 @@ PManContext::PManContext() {
     subs.mem        = std::make_unique<MemoryOptimizer>();
     subs.input      = std::make_unique<InputGuardian>();
     subs.adaptive   = std::make_unique<AdaptiveEngine>();
+    subs.executor   = std::unique_ptr<Executor>(new Executor()); // Phase 11
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)

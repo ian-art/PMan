@@ -90,6 +90,9 @@ public:
 
     bool AddService(const std::wstring& serviceName, DWORD accessRights);
     
+    // Check if service is currently running
+    bool IsServiceRunning(const std::wstring& serviceName);
+
     // Suspend with granular bypass control
     bool SuspendService(const std::wstring& serviceName, BypassMode mode = BypassMode::None);
 

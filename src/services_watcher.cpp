@@ -24,6 +24,8 @@
 #include "utils.h"
 #include <vector>
 #include <algorithm>
+#include <thread> // Fix: Needed for std::thread
+#include <atomic> // Fix: Needed for std::atomic
 
 void ServiceWatcher::Initialize() {
     Log("[WATCHER] Service Watcher initialized (Mode: Auto-Trim Manual Services)");
@@ -32,6 +34,18 @@ void ServiceWatcher::Initialize() {
 // Static atomic guard to prevent thread stacking
 static std::atomic<bool> s_scanInProgress{false};
 static std::thread s_workerThread; // Managed thread handle
+
+// Phase 14: Track suspended services for auto-resume
+static std::vector<std::wstring> s_suspendedServices;
+static std::mutex s_suspendMtx;
+
+// Phase 14.2: The Allowlist (Safe & Heavy)
+static const std::vector<std::wstring> SAFE_HEAVY_SERVICES = {
+    L"SysMain",     // Superfetch (High Disk Usage)
+    L"WSearch",     // Windows Search (High CPU/Disk)
+    L"DiagTrack",   // Telemetry (Privacy + CPU)
+    L"BITS"         // Background Transfer (Bandwidth)
+};
 
 void ServiceWatcher::OnTick() {
     if (!g_suspendUpdatesDuringGames.load()) return;
@@ -57,7 +71,7 @@ void ServiceWatcher::OnTick() {
     });
 }
 
-// Check if other running services depend on this one
+// Phase 14.2: Check if other running services depend on this one
 static bool HasActiveDependents(SC_HANDLE hSvc) {
     DWORD bytesNeeded = 0;
     DWORD count = 0;
@@ -170,4 +184,145 @@ bool ServiceWatcher::IsProcessIdle(DWORD pid) {
     }
     
     return isIdle; // hProc closes automatically
+}
+
+// --------------------------------------------------------------------------
+// Phase 14: Service Muscles Implementation
+// --------------------------------------------------------------------------
+
+bool ServiceWatcher::IsSafeToSuspend(const std::wstring& serviceName) {
+    // 1. Open Service Manager
+    ScHandle hSc(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
+    if (!hSc) return false;
+
+    // 2. Open Service
+    ScHandle hSvc(OpenServiceW(hSc.get(), serviceName.c_str(), SERVICE_ENUMERATE_DEPENDENTS | SERVICE_QUERY_STATUS));
+    if (!hSvc) return false;
+
+    // 3. Check Dependencies
+    if (HasActiveDependents(hSvc.get())) {
+        Log("[SAFETY] Cannot suspend " + WideToUtf8(serviceName.c_str()) + ": Active dependents found.");
+        return false;
+    }
+
+    return true;
+}
+
+// Helper for topological sort
+struct ServiceDepNode {
+    std::wstring name;
+    std::vector<std::wstring> dependencies; // Services that depend ON this node
+    bool visited = false;
+    bool onStack = false;
+};
+
+void ServiceWatcher::SuspendAllowedServices() {
+    std::lock_guard<std::mutex> lock(s_suspendMtx);
+
+    // 1. Identify Candidates (Intersection of SafeList and Running Services)
+    std::vector<std::wstring> candidates;
+    for (const auto& svc : SAFE_HEAVY_SERVICES) {
+        if (std::find(s_suspendedServices.begin(), s_suspendedServices.end(), svc) != s_suspendedServices.end()) continue;
+        if (!IsSafeToSuspend(svc)) continue; // Basic safety check
+        if (g_serviceManager.IsServiceRunning(svc)) {
+            candidates.push_back(svc);
+        }
+    }
+
+    if (candidates.empty()) return;
+
+    // 2. Build Dependency Graph
+    // We want to stop A before B if A depends on B.
+    // EnumDependentServices(B) returns A.
+    // So if A is in our candidate list, we record dependency: A -> B (A must stop first).
+    
+    // However, for standard topological sort (Task Order), we usually say "Do B then A".
+    // Here the "Task" is "Stop Service".
+    // STOP A (Dependent) -> STOP B (Provider).
+    
+    // We will perform a sort based on "Depends On".
+    // If A depends on B, we must output A first.
+    
+    // Map service name to node index
+    std::map<std::wstring, size_t> nameToIdx;
+    for(size_t i=0; i<candidates.size(); ++i) nameToIdx[candidates[i]] = i;
+
+    // Adjacency list: adj[B] contains A (B supports A, so A must stop before B)
+    // Actually, let's keep it simple:
+    // We want a list sorted such that Dependents appear BEFORE Providers.
+    // We can swap if we find a violation.
+    
+    // Simple Bubble Sort approach (List is tiny, ~4-5 items)
+    // If candidates[j] depends on candidates[i], swap them so candidates[j] comes first.
+    
+    bool changed = true;
+    while(changed) {
+        changed = false;
+        for (size_t i = 0; i < candidates.size(); ++i) {
+            ScHandle hSc(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
+            if (!hSc) break;
+
+            ScHandle hSvc(OpenServiceW(hSc.get(), candidates[i].c_str(), SERVICE_ENUMERATE_DEPENDENTS));
+            if (!hSvc) continue;
+
+            // Check if any *later* service depends on this one
+            // If candidates[j] (where j > i) depends on candidates[i], then candidates[j] must come FIRST.
+            // So we need to move candidates[j] to before candidates[i].
+            
+            DWORD bytesNeeded = 0;
+            DWORD count = 0;
+            EnumDependentServicesW(hSvc.get(), SERVICE_ACTIVE, nullptr, 0, &bytesNeeded, &count);
+            
+            if (bytesNeeded > 0) {
+                std::vector<BYTE> buffer(bytesNeeded);
+                if (EnumDependentServicesW(hSvc.get(), SERVICE_ACTIVE, 
+                    reinterpret_cast<LPENUM_SERVICE_STATUSW>(buffer.data()), 
+                    bytesNeeded, &bytesNeeded, &count)) {
+                    
+                    LPENUM_SERVICE_STATUSW deps = reinterpret_cast<LPENUM_SERVICE_STATUSW>(buffer.data());
+                    for (DWORD k=0; k<count; ++k) {
+                        std::wstring depName = deps[k].lpServiceName;
+                        
+                        // Check if this dependent is in our list at a later position
+                        for (size_t j = i + 1; j < candidates.size(); ++j) {
+                            if (candidates[j] == depName) {
+                                // Violation! 'depName' depends on 'candidates[i]', 
+                                // so 'depName' must stop BEFORE 'candidates[i]'.
+                                // Swap and restart sort
+                                std::swap(candidates[i], candidates[j]);
+                                changed = true;
+                                goto NextPass;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        NextPass:;
+    }
+
+    // 3. Execute Suspension in Order
+    for (const auto& svc : candidates) {
+        Log("[EXECUTOR] Suspending heavy service: " + WideToUtf8(svc.c_str()));
+        if (g_serviceManager.AddService(svc, SERVICE_STOP | SERVICE_QUERY_STATUS)) {
+             g_serviceManager.SuspendService(svc, WindowsServiceManager::BypassMode::Operational);
+             s_suspendedServices.push_back(svc);
+        }
+    }
+}
+
+void ServiceWatcher::ResumeSuspendedServices() {
+    std::lock_guard<std::mutex> lock(s_suspendMtx);
+
+    if (s_suspendedServices.empty()) return;
+
+    Log("[EXECUTOR] Resuming services...");
+
+    for (const auto& svc : s_suspendedServices) {
+        // Resume (Start) the service
+        // ServiceManager::ResumeService actually calls StartService
+        g_serviceManager.ResumeService(svc);
+    }
+
+    s_suspendedServices.clear();
 }
