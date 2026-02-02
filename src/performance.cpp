@@ -363,12 +363,14 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     session.audioGuard = std::make_shared<AudioModeGuard>();
 
     // Check if we have a valid profile from the engine
-    if (!g_adaptiveEngine.IsLearningActive(pid)) {
-        GameProfile profile = g_adaptiveEngine.GetProfile(exeName);
-        Log("[PERF] Applying stable profile for " + WideToUtf8(exeName.c_str()));
+    // [ARCH-FIX] Always apply stored profile. "Learning Mode" is now passive-only
+    // and should not block the application of previously known good settings.
+    GameProfile profile = g_adaptiveEngine.GetProfile(exeName);
+    
+    // Only log if we are actually applying something interesting
+    if (profile.useHighIo || profile.useCorePinning || profile.useMemoryCompression) {
+        Log("[PERF] Applying Policy Profile for " + WideToUtf8(exeName.c_str()));
         ApplyProfile(pid, profile);
-    } else {
-        Log("[PERF] Learning Mode active. Deferring static profile.");
     }
     
     m_sessions[pid] = session;

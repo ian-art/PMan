@@ -132,52 +132,51 @@ void AdaptiveEngine::OnPerformanceTick() {
     double currentReward = ComputeGlobalReward(globalState);
     ProcessDelayedRewards(globalState, currentReward);
 
-    // 4. Decision Pipeline (Phase 3)
+    // 4. Decision Pipeline (Refactored: Deterministic Controller)
     if (IsSafeToLearn()) {
-        ActionIntent intent = ProposeAction(globalState); // Phase 6 (UCB1)
+        // Step A: RL Optimization (The "Advisor")
+        // The RL observes the state and proposes an adjustment (ActionIntent).
+        // WE DO NOT EXECUTE THIS INTENT DIRECTLY.
+        ActionIntent rlHint = ProposeAction(globalState);
+        UpdatePolicyParameters(rlHint.action); // RL adjusts the thresholds/weights
         
-        // Phase 3.2: Validation
-        if (!ValidateIntent(intent)) {
-            // Vetoed -> Maintain
-            LogTelemetry(intent, "VETOED", 0.0);
-        } else {
-            // Phase 2: Execution
-            bool executed = false;
-
-            if (!m_shadowMode) {
-                // Phase 11: Dispatch to Executor (Wiring)
-                ::ActionIntent execIntent; // Use global ActionIntent from types.h
-                execIntent.action = intent.action;
-                execIntent.confidence = intent.confidence;
-                execIntent.timestamp = intent.timestamp;
-                execIntent.nonce = tickStart;
-
-                // The Executor performs validation, targeting, and application
-                auto receipt = Executor::Get().Execute(execIntent);
-                
-                if (receipt) {
-                    executed = true;
-                    RecordActionExecution(intent.action, tickStart);
-                } else {
-                    LogTelemetry(intent, "EXECUTOR_REJECTED", 0.0);
-                }
-            } else {
-                // Shadow mode: Simulate success for learning tracking
-                executed = true;
-            }
-            
-            if (executed) {
-                LogTelemetry(intent, "EXECUTED", 0.0); // Reward comes later
-                
-                // Phase 4: Store Pending Experience
-                PendingExperience pending;
-                pending.stateIdx = static_cast<uint32_t>(GetStateIndex(intent.state));
-                pending.action = intent.action;
-                pending.tickCreated = tickStart;
-                m_pendingExperiences.push_back(pending);
-            }
+        // Step B: Deterministic Decision (The "Controller")
+        // We calculate the actual action based on the *current* params and state.
+        BrainAction finalAction = ResolveDeterministicRule(globalState);
+        
+        // Step C: Execution
+        bool executed = false;
+        if (finalAction != BrainAction::Maintain && !m_shadowMode) {
+             ::ActionIntent execIntent;
+             execIntent.action = finalAction;
+             execIntent.confidence = 1.0; // Deterministic rules have 100% confidence
+             execIntent.timestamp = tickStart;
+             execIntent.nonce = tickStart;
+             
+             // The Executor acts as the physical safety layer
+             auto receipt = Executor::Get().Execute(execIntent);
+             if (receipt) {
+                 executed = true;
+                 // We record the *Deterministic* action time, not the RL hint time
+                 RecordActionExecution(finalAction, tickStart);
+             }
+        } else if (m_shadowMode) {
+             executed = true;
         }
-        
+
+        // Step D: Feedback Loop (Illusion of Control)
+        // We let the RL learn from its *Hint*, even though we might have ignored it.
+        // This keeps the RL optimizer running as a tuner.
+        if (executed) {
+            LogTelemetry(rlHint, "TUNING_UPDATE", 0.0); 
+            
+            PendingExperience pending;
+            pending.stateIdx = static_cast<uint32_t>(GetStateIndex(rlHint.state));
+            pending.action = rlHint.action; // Store the Hint, so RL optimizes the Hint
+            pending.tickCreated = tickStart;
+            m_pendingExperiences.push_back(pending);
+        }
+
         // Phase 4.2: Learning Step
         UpdateQModel();
     }
@@ -223,59 +222,62 @@ void AdaptiveEngine::UpdateLearning(LearningSession& session) {
                 session.currentTestEnabled = true;
                 
                 // TEST 1: I/O Priority (Delegated to Executor)
-                Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::IoPriority, 1);
+                // [ARCH-FIX] SAFETY: Active A/B testing disabled.
+                // The deterministic controller does not allow the Learning Engine to mutate state for testing.
+                // Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::IoPriority, 1);
             }
             break;
             
         case 1: // Test I/O
             if (now - session.testStartTime > PHASE_DURATION_MS) {
                 session.testStats = CalculateStats(session.frameHistory);
-                bool ioHelps = IsSignificantImprovement(session.baselineStats, session.testStats);
+                // Without active testing, stats will likely mimic baseline, resulting in NO_EFFECT.
+                bool ioHelps = false; // IsSignificantImprovement(session.baselineStats, session.testStats);
                 
-                Log("[LEARN] I/O Priority test: " + std::string(ioHelps ? "IMPROVED" : "NO_EFFECT"));
+                Log("[LEARN] I/O Priority test: SKIPPED (Safety Mode)");
                 session.tempIoHelps = ioHelps;
                 
                 // Revert IO
-                Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::IoPriority, 2);
+                // Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::IoPriority, 2);
                 Sleep(1000);
                 
                 session.testPhase = 2;
                 session.testStartTime = now;
                 
                 // TEST 2: Core Pinning
-                Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::CorePinning, 1);
+                // Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::CorePinning, 1);
             }
             break;
             
         case 2: // Test Core Pinning
             if (now - session.testStartTime > PHASE_DURATION_MS) {
                 session.testStats = CalculateStats(session.frameHistory);
-                bool pinHelps = IsSignificantImprovement(session.baselineStats, session.testStats);
+                bool pinHelps = false; // IsSignificantImprovement(session.baselineStats, session.testStats);
                 
-                Log("[LEARN] Core Pinning test: " + std::string(pinHelps ? "IMPROVED" : "NO_EFFECT"));
+                Log("[LEARN] Core Pinning test: SKIPPED (Safety Mode)");
                 session.tempPinHelps = pinHelps;
                 
-                // Revert Pinning (implied normal affinity/fallback)
-                Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::CorePinning, 2);
+                // Revert Pinning
+                // Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::CorePinning, 2);
                 Sleep(1000);
                 
                 session.testPhase = 3;
                 session.testStartTime = now;
                 
                 // TEST 3: Memory Compression
-                Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::MemoryCompression, 1);
+                // Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::MemoryCompression, 1);
             }
             break;
             
         case 3: // Test Memory Compression & Finalize
             if (now - session.testStartTime > PHASE_DURATION_MS) {
                 session.testStats = CalculateStats(session.frameHistory);
-                bool memHelps = IsSignificantImprovement(session.baselineStats, session.testStats);
+                bool memHelps = false; // IsSignificantImprovement(session.baselineStats, session.testStats);
                 
-                Log("[LEARN] Memory Compression test: " + std::string(memHelps ? "IMPROVED" : "NO_EFFECT"));
+                Log("[LEARN] Memory Compression test: SKIPPED (Safety Mode)");
                 
                 // Finalize Memory
-                Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::MemoryCompression, 2);
+                // Executor::Get().ApplyTestProfile(session.pid, Executor::TestType::MemoryCompression, 2);
                 session.testPhase = 4; // Done
                 
                 // Adaptive Voting Logic & RL Integration
@@ -1154,4 +1156,55 @@ bool AdaptiveEngine::CheckBudget(uint64_t tickStart) {
     }
 
     return true;
+}
+
+// [ARCH-FIX] RL Demotion Logic
+void AdaptiveEngine::UpdatePolicyParameters(BrainAction rlHint) {
+    // Interpret RL output as a "Vote" to shift thresholds, not a command.
+    // This allows the RL to optimize sensitivity without bypassing safety rules.
+    switch (rlHint) {
+        case BrainAction::Throttle_Aggressive:
+            // RL wants to throttle -> Lower threshold to make system more sensitive
+            if (m_policy.cpuThreshold > 1) m_policy.cpuThreshold--;
+            break;
+        case BrainAction::Throttle_Mild:
+            if (m_policy.cpuThreshold > 2) m_policy.cpuThreshold--;
+            break;
+        case BrainAction::Release_Pressure:
+            // RL wants to relax -> Raise threshold
+            if (m_policy.cpuThreshold < 5) m_policy.cpuThreshold++;
+            break;
+        case BrainAction::Optimize_Memory:
+            if (m_policy.memThreshold > 0) m_policy.memThreshold--;
+            break;
+        case BrainAction::Maintain:
+            // Decay: Slowly return to conservative defaults if RL is passive
+            if (m_policy.cpuThreshold < 4) m_policy.cpuThreshold++;
+            if (m_policy.memThreshold < 2) m_policy.memThreshold++;
+            break;
+        default: break;
+    }
+}
+
+BrainAction AdaptiveEngine::ResolveDeterministicRule(SystemState state) {
+    // IMMUTABLE SAFETY LOGIC
+    // This function relies ONLY on State and Policy Config.
+    // It does not care what the RL agent "wants" in this specific tick.
+
+    // Rule 1: Thermal Criticality (Hard Override)
+    if (state.bits.ThermalState >= 2) return BrainAction::Throttle_Aggressive;
+
+    // Rule 2: CPU Throttling (Parameterized by RL)
+    if (m_policy.allowThrottle && state.bits.CpuLoad >= m_policy.cpuThreshold) {
+        // If we are hitting the limit, decide intensity based on severity
+        return (state.bits.CpuLoad >= 5) ? BrainAction::Throttle_Aggressive : BrainAction::Throttle_Mild;
+    }
+
+    // Rule 3: Memory Optimization (Parameterized by RL)
+    if (m_policy.allowTrim && state.bits.MemoryPressure >= m_policy.memThreshold) {
+        return BrainAction::Optimize_Memory;
+    }
+
+    // Default Safe State
+    return BrainAction::Maintain;
 }

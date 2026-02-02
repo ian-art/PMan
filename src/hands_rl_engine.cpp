@@ -152,6 +152,7 @@ std::optional<Executor::Receipt> Executor::Execute(const ActionIntent& intent) {
             success = ApplyMemoryTrim(targets, true); // Hard trim
             break;
         case BrainAction::Suspend_Services:
+            // [ARCH-FIX] Safety: targets are ignored. We only suspend the static AllowedList.
             success = ApplyServiceSuspension(targets);
             break;
         case BrainAction::Release_Pressure:
@@ -256,8 +257,10 @@ bool Executor::HardValidate(const ActionIntent& intent, const TargetSet& targets
 
 // Phase 3.4: Privilege Separation Implementation
 bool Executor::ApplyTestProfile(DWORD pid, TestType type, int param) {
-    // This runs in the "Executor" context (Elevated/Service), 
-    // accepting requests from "Brain" (User Logic).
+    // This runs in the "Executor" context (Elevated/Service).
+    // [ARCH-FIX] SAFETY WARNING: This bypasses the Deterministic Controller.
+    // It should ONLY be used for manual debugging or strictly controlled calibration,
+    // never for automated RL "exploration" in a production environment.
     
     // Safety check on PID?
     if (pid <= 4 || pid == GetCurrentProcessId()) return false;

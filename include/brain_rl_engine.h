@@ -205,6 +205,19 @@ public:
     // Returns false if budget exceeded
     bool CheckBudget(uint64_t tickStart);
 
+    // [ARCH-FIX] Phase 12: Deterministic Policy Layer
+    // RL is demoted to "Tuner". These structures hold the actual control logic.
+    struct PolicyConfig {
+        uint32_t cpuThreshold = 4; // Default: High (Quantized 0-5)
+        uint32_t memThreshold = 2; // Default: High (Quantized 0-3)
+        uint32_t diskThreshold = 3; // Default: High (Quantized 0-4)
+        bool allowThrottle = true;
+        bool allowTrim = true;
+    } m_policy;
+
+    void UpdatePolicyParameters(BrainAction rlHint);
+    BrainAction ResolveDeterministicRule(SystemState state);
+
 private:
     struct LearningSession {
         DWORD pid;
