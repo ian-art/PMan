@@ -1558,16 +1558,15 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 						// Moved ExplorerBooster to background thread to prevent blocking the Keyboard Hook
 						g_explorerBooster.OnTick();
 						g_perfGuardian.OnPerformanceTick();
+                        
+                        // [FIX] Move heavy window checks to background to prevent main thread stutter
+                        g_responsivenessManager.Update();
                     });
                 }
                 g_backgroundCv.notify_one();
                 
                 // Run Service Watcher
                 ServiceWatcher::OnTick();
-
-                // Run Responsiveness Manager (Hung App Recovery)
-                // Checks foreground window state and applies safe boosts if hung
-                g_responsivenessManager.Update();
 
                 // SRAM UI Updates
                 static LagState lastKnownState = LagState::SNAPPY;
