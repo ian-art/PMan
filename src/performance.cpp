@@ -27,6 +27,8 @@
 #include "services.h" 
 #include "input_guardian.h"
 #include "globals.h"
+#include "governor.h"
+#include "governor.h" // Phase 2: Deterministic Governor
 #include <fstream>
 #include <numeric>
 #include <cmath>
@@ -474,8 +476,42 @@ void PerformanceGuardian::OnPerformanceTick() {
 
     if (PManContext::Get().isSuspended.load()) return;
     
-    // Drive the Adaptive Learning Loop (outside mtx to prevent recursion)
-    g_adaptiveEngine.OnPerformanceTick();
+    // --- PHASE 2: GOVERNOR DECISION (The Hard Gate) ---
+    SystemSignalSnapshot snap = {};
+    snap.cpuLoad = GetCpuLoad();
+    
+    // Memory Pressure
+    MEMORYSTATUSEX ms = { sizeof(ms) };
+    GlobalMemoryStatusEx(&ms);
+    snap.memoryPressure = static_cast<double>(ms.dwMemoryLoad);
+
+    // Latency (Using DPC as proxy for system responsiveness)
+    // DPC Latency is stored in microseconds. Convert to milliseconds for Governor.
+    snap.latencyMs = PManContext::Get().telem.lastDpcLatency.load(std::memory_order_relaxed) / 1000.0;
+    
+    // User Activity
+    LASTINPUTINFO lii = { sizeof(lii) };
+    if (GetLastInputInfo(&lii)) {
+        // Check if input occurred within the last 30 seconds
+        snap.userActive = (GetTickCount() - lii.dwTime) < 30000;
+    }
+
+    // Thermal Throttling (Placeholder: Future expansion for thermal zones)
+    snap.isThermalThrottling = false; 
+
+    // EXECUTE GOVERNOR
+    GovernorDecision decision = PManContext::Get().subs.governor->Decide(snap);
+
+    // Gate 1: Thermal Safety - If recovering, block everything and return.
+    if (decision.allowedActions == AllowedActionClass::ThermalSafety) {
+        return; 
+    }
+
+    // Gate 2: Enforce Inaction - If system is healthy, do not learn, do not boost.
+    if (decision.allowedActions != AllowedActionClass::None) {
+        // Only drive the learning loop if we are in a state that permits/requires action
+        g_adaptiveEngine.OnPerformanceTick();
+    }
 
     std::lock_guard lock(m_mtx);
     uint64_t now = GetTickCount64();
@@ -511,7 +547,10 @@ void PerformanceGuardian::OnPerformanceTick() {
             }
 
             if (!session.frameHistory.empty()) {
-                AnalyzeStutter(session, session.pid);
+                // Phase 2 Enforcement: Only analyze/boost if Governor permits intervention
+                if (decision.allowedActions != AllowedActionClass::None) {
+                    AnalyzeStutter(session, session.pid);
+                }
                 session.lastAnalysisTime = now;
             }
         }

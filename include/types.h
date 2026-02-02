@@ -305,6 +305,46 @@ enum class ProcessCategory : uint8_t {
     System_Critical     = 0b11
 };
 
+// Phase 2: Deterministic Governor Types
+enum class DominantPressure : uint8_t {
+    None = 0,
+    Cpu,
+    Disk,
+    Memory,
+    Latency,
+    Thermal
+};
+
+enum class SystemMode : uint8_t {
+    Interactive = 0,       // User-facing latency matters most
+    SustainedLoad,         // Throughput > latency
+    BackgroundMaintenance, // Low priority
+    ThermalRecovery        // Safety > performance
+};
+
+enum class AllowedActionClass : uint8_t {
+    None = 0,
+    Scheduling,        // Thread priorities, affinities
+    IoPrioritization,  // I/O priorities
+    MemoryReclaim,     // Working set trimming
+    ThermalSafety      // Throttling only
+};
+
+struct SystemSignalSnapshot {
+    double cpuLoad;            // 0.0 - 100.0
+    double memoryPressure;     // 0.0 - 100.0
+    double diskQueueLen;       // Raw Queue Depth
+    double latencyMs;          // Input/Audio latency
+    bool isThermalThrottling;
+    bool userActive;           // Input within last X seconds
+};
+
+struct GovernorDecision {
+    SystemMode mode;
+    DominantPressure dominant;
+    AllowedActionClass allowedActions;
+};
+
 // Phase 2.1: BrainAction Enum (Fixed & Auditable)
 enum class BrainAction : uint8_t {
     Maintain = 0,
