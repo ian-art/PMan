@@ -128,6 +128,7 @@ namespace GuiManager {
     void    CleanupDeviceD3D();
     void    CreateRenderTarget();
     void    CleanupRenderTarget();
+	void    RecoverFromDeviceLoss();
     LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
     // ============================================================================================
@@ -591,13 +592,38 @@ namespace GuiManager {
         g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clearColor);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-        g_pSwapChain->Present(1, 0);
+        HRESULT hr = g_pSwapChain->Present(1, 0);
+		if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+			RecoverFromDeviceLoss();
+		}
+	}
+
+	void RecoverFromDeviceLoss() {
+        if (!g_isInitialized) return;
+        
+        // 1. Invalidate ImGui resources associated with the old device
+        ImGui_ImplDX11_InvalidateDeviceObjects();
+        
+        // 2. Tear down the old D3D device
+        CleanupDeviceD3D();
+        
+        // 3. Recreate the device
+        if (CreateDeviceD3D(g_hwnd)) {
+            // 4. Re-initialize the ImGui backend with the new pointers
+            // Note: We perform a partial re-bind here. 
+            // Ideally, we should Shutdown/Init, but swapping pointers works for simple recovery.
+            ImGui_ImplDX11_Shutdown();
+            ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
+            Log("[GUI] Recovered from D3D Device Loss/Reset.");
+        } else {
+            Log("[GUI] CRITICAL: Failed to recover from Device Loss.");
+        }
     }
 
-    // ============================================================================================
-    // D3D / Win32
-    // ============================================================================================
-    bool CreateDeviceD3D(HWND hWnd) {
+	// ============================================================================================
+	// D3D / Win32
+	// ============================================================================================
+	bool CreateDeviceD3D(HWND hWnd) {
         DXGI_SWAP_CHAIN_DESC sd{};
         sd.BufferCount = 2;
         sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
