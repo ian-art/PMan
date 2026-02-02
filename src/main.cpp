@@ -41,6 +41,8 @@
 #include "sram_engine.h"
 #include "editor_manager.h"
 #include "lifecycle.h"
+#include "hands_rl_engine.h" // [FIX] Required for Executor::Shutdown
+#include "brain_rl_engine.h" // [FIX] Required for AdaptiveEngine::Shutdown
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -1604,6 +1606,15 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     g_inputGuardian.Shutdown();
     g_memoryOptimizer.Shutdown();
     SramEngine::Get().Shutdown();
+
+    // [FIX] Phase 11 & 8: Save Brain and Stop Executor
+    // This ensures brain.bin is written to disk
+    if (PManContext::Get().subs.executor) {
+        PManContext::Get().subs.executor->Shutdown();
+    }
+    if (PManContext::Get().subs.adaptive) {
+        PManContext::Get().subs.adaptive->Shutdown();
+    }
 	
     // Signal threads to wake up/stop
     if (g_hShutdownEvent) SetEvent(g_hShutdownEvent.get()); // Wakes Watchdog immediately

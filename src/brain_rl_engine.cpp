@@ -35,6 +35,11 @@
 
 AdaptiveEngine::AdaptiveEngine() {}
 
+// [FIX] Destructor safety: Save on destruction if Shutdown() wasn't called
+AdaptiveEngine::~AdaptiveEngine() {
+    SaveBrain();
+}
+
 void AdaptiveEngine::Initialize() {
     m_dbPath = GetLogPath() / L"profiles.bin";
     LoadProfiles();

@@ -76,6 +76,7 @@ public:
     };
 
     AdaptiveEngine();
+    ~AdaptiveEngine(); // [FIX] Added Destructor Declaration
     void Initialize();
     void Shutdown();
 
