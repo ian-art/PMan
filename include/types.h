@@ -418,4 +418,59 @@ struct ActionResult {
     double actualCpuAfter;
 };
 
+// Phase 6: Game Optimization Profile (Persisted Memory)
+struct GameProfile {
+    std::wstring exeName;
+    bool useHighIo;
+    bool useCorePinning;
+    bool useMemoryCompression;
+    bool useTimerCoalescing;
+    double baselineFrameTimeMs;
+    uint64_t lastUpdated;
+
+    GameProfile() : 
+        useHighIo(false), useCorePinning(false), 
+        useMemoryCompression(false), useTimerCoalescing(false), 
+        baselineFrameTimeMs(0.0), lastUpdated(0) {}
+};
+
+// Phase 6: Policy Parameters (Tunable by Optimizer)
+struct PolicyParameters {
+    // Thresholds for Dominant Pressure (0.0 - 1.0)
+    double cpuThreshold = 0.85;
+    double memThreshold = 0.90;
+    double diskThreshold = 0.60;
+    double latencyThreshold = 0.50;
+
+    // Weights (Importance factors for Regret calculation)
+    double cpuWeight = 1.0;
+    double memWeight = 1.0;
+    double diskWeight = 1.0;
+    double latencyWeight = 2.0; // Interactive mode default
+
+    // Cooldowns (ms)
+    uint64_t actionCooldown = 5000;
+
+    bool operator==(const PolicyParameters& other) const {
+        return cpuThreshold == other.cpuThreshold &&
+               memThreshold == other.memThreshold &&
+               diskThreshold == other.diskThreshold &&
+               latencyThreshold == other.latencyThreshold &&
+               actionCooldown == other.actionCooldown;
+    }
+    bool operator!=(const PolicyParameters& other) const { return !(*this == other); }
+};
+
+// Phase 6: Learning Feedback Tuple
+struct OptimizationFeedback {
+    SystemMode mode;
+    DominantPressure dominant;
+    BrainAction action;
+    double cpuDelta;       // Actual change in CPU
+    double memDelta;       // Actual change in Memory
+    double diskDelta;      // Actual change in Disk
+    double latencyDelta;   // Actual change in Latency
+    bool userInterrupted;
+};
+
 #endif // PMAN_TYPES_H

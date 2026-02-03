@@ -31,17 +31,18 @@ PerformanceGovernor::NormalizedSignals PerformanceGovernor::Normalize(const Syst
     return sig;
 }
 
+// Phase 6: Policy Injection
+void PerformanceGovernor::UpdatePolicy(const PolicyParameters& params) {
+    m_params = params;
+}
+
 // 5.4 Dominant Pressure Selector
 DominantPressure PerformanceGovernor::SelectDominant(const NormalizedSignals& signals) {
-    constexpr double CPU_THRESHOLD = 0.85;
-    constexpr double MEM_THRESHOLD = 0.90;
-    constexpr double DISK_THRESHOLD = 0.60;
-    constexpr double LATENCY_THRESHOLD = 0.50;
-    
-    if (signals.latency > LATENCY_THRESHOLD) return DominantPressure::Latency;
-    if (signals.memory > MEM_THRESHOLD) return DominantPressure::Memory;
-    if (signals.disk > DISK_THRESHOLD) return DominantPressure::Disk;
-    if (signals.cpu > CPU_THRESHOLD) return DominantPressure::Cpu;
+    // Phase 6: Use tunable parameters instead of constants
+    if (signals.latency > m_params.latencyThreshold) return DominantPressure::Latency;
+    if (signals.memory > m_params.memThreshold) return DominantPressure::Memory;
+    if (signals.disk > m_params.diskThreshold) return DominantPressure::Disk;
+    if (signals.cpu > m_params.cpuThreshold) return DominantPressure::Cpu;
     return DominantPressure::None;
 }
 

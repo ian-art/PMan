@@ -313,8 +313,64 @@ static uint64_t GetProcessCreationTimeHelper(DWORD pid) {
 PerformanceGuardian::PerformanceGuardian() {}
 
 void PerformanceGuardian::Initialize() {
-    g_adaptiveEngine.Initialize();
-    Log("[PERF] Autonomous Performance Guardian Initialized");
+    LoadProfiles();
+    Log("[PERF] Autonomous Performance Guardian Initialized (Static Profiles Loaded)");
+}
+
+void PerformanceGuardian::LoadProfiles() {
+    // Simple persistence for "The System Remembers"
+    std::filesystem::path path = GetLogPath() / L"profiles.bin";
+    std::ifstream f(path, std::ios::binary);
+    if (f.is_open()) {
+        size_t count = 0;
+        f.read(reinterpret_cast<char*>(&count), sizeof(count));
+        for (size_t i = 0; i < count; ++i) {
+            GameProfile p;
+            size_t nameLen = 0;
+            f.read(reinterpret_cast<char*>(&nameLen), sizeof(nameLen));
+            if (nameLen > 0) {
+                std::vector<wchar_t> buf(nameLen);
+                f.read(reinterpret_cast<char*>(buf.data()), nameLen * sizeof(wchar_t));
+                p.exeName = std::wstring(buf.begin(), buf.end());
+            }
+            f.read(reinterpret_cast<char*>(&p.useHighIo), sizeof(bool));
+            f.read(reinterpret_cast<char*>(&p.useCorePinning), sizeof(bool));
+            f.read(reinterpret_cast<char*>(&p.useMemoryCompression), sizeof(bool));
+            f.read(reinterpret_cast<char*>(&p.useTimerCoalescing), sizeof(bool));
+            f.read(reinterpret_cast<char*>(&p.baselineFrameTimeMs), sizeof(double));
+            f.read(reinterpret_cast<char*>(&p.lastUpdated), sizeof(uint64_t));
+            
+            m_profiles[p.exeName] = p;
+        }
+    }
+}
+
+void PerformanceGuardian::SaveProfiles() {
+    std::filesystem::path path = GetLogPath() / L"profiles.bin";
+    std::ofstream f(path, std::ios::binary);
+    if (f.is_open()) {
+        size_t count = m_profiles.size();
+        f.write(reinterpret_cast<const char*>(&count), sizeof(count));
+        for (const auto& pair : m_profiles) {
+            const GameProfile& p = pair.second;
+            size_t nameLen = p.exeName.length();
+            f.write(reinterpret_cast<const char*>(&nameLen), sizeof(nameLen));
+            if (nameLen > 0) {
+                f.write(reinterpret_cast<const char*>(p.exeName.data()), nameLen * sizeof(wchar_t));
+            }
+            f.write(reinterpret_cast<const char*>(&p.useHighIo), sizeof(bool));
+            f.write(reinterpret_cast<const char*>(&p.useCorePinning), sizeof(bool));
+            f.write(reinterpret_cast<const char*>(&p.useMemoryCompression), sizeof(bool));
+            f.write(reinterpret_cast<const char*>(&p.useTimerCoalescing), sizeof(bool));
+            f.write(reinterpret_cast<const char*>(&p.baselineFrameTimeMs), sizeof(double));
+            f.write(reinterpret_cast<const char*>(&p.lastUpdated), sizeof(uint64_t));
+        }
+    }
+}
+
+GameProfile PerformanceGuardian::GetProfile(const std::wstring& exeName) {
+    if (m_profiles.count(exeName)) return m_profiles[exeName];
+    return GameProfile(); // Default
 }
 
 void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
@@ -353,7 +409,8 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     session.creationTime = GetProcessCreationTimeHelper(pid);
     
     // Initialize Learning Engine for this session
-    g_adaptiveEngine.OnSessionStart(pid, exeName);
+    // [PHASE 6] Active learning disabled in Guardian. Profiles are static memory.
+    // g_adaptiveEngine.OnSessionStart(pid, exeName);
 
     // System State Guards (Services & Input)
     // RAII ensures these are restored even if the app crashes or session is aborted
@@ -363,10 +420,8 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     // Audio Isolation
     session.audioGuard = std::make_shared<AudioModeGuard>();
 
-    // Check if we have a valid profile from the engine
-    // [ARCH-FIX] Always apply stored profile. "Learning Mode" is now passive-only
-    // and should not block the application of previously known good settings.
-    GameProfile profile = g_adaptiveEngine.GetProfile(exeName);
+    // Check if we have a valid profile (Phase 6: Local Memory)
+    GameProfile profile = GetProfile(exeName);
     
     // Only log if we are actually applying something interesting
     if (profile.useHighIo || profile.useCorePinning || profile.useMemoryCompression) {
@@ -508,8 +563,7 @@ void PerformanceGuardian::OnPerformanceTick() {
 
     // Gate 2: Enforce Inaction - If system is healthy, do not learn, do not boost.
     if (decision.allowedActions != AllowedActionClass::None) {
-        // Only drive the learning loop if we are in a state that permits/requires action
-        g_adaptiveEngine.OnPerformanceTick();
+        // [PHASE 6] Optimizer runs in main loop, not here.
     }
 
     std::lock_guard lock(m_mtx);
@@ -577,7 +631,10 @@ void PerformanceGuardian::OnGameStop(DWORD pid) {
 		SetMemoryCompression(2);
 
         // Notify engine
-        g_adaptiveEngine.OnSessionStop(pid);
+        // g_adaptiveEngine.OnSessionStop(pid);
+
+        // Persist any profile updates (if any occurred)
+        SaveProfiles();
 
 		m_sessions.erase(it); // Destructor triggers RAII restoration
     }
@@ -599,7 +656,8 @@ void PerformanceGuardian::OnPresentEvent(DWORD pid, uint64_t timestamp) {
             session.frameHistory.push_back({timestamp, deltaMs});
             
             // Feed the learning engine
-            g_adaptiveEngine.IngestFrameData(pid, timestamp, deltaMs);
+            // [PHASE 6] Per-frame learning deferred.
+            // g_adaptiveEngine.IngestFrameData(pid, timestamp, deltaMs);
             
             // Diagnostic logging for C&C3 verification
             static int frameCount = 0;
@@ -779,7 +837,11 @@ bool PerformanceGuardian::HasActiveSessions() {
 }
 
 bool PerformanceGuardian::IsOptimizationAllowed(const std::wstring& exeName, const std::string& feature) {
-    return g_adaptiveEngine.IsOptimizationAllowed(exeName, feature); 
+    // Phase 6: Strict Profile adherence. If it's in the profile, it's allowed.
+    GameProfile p = GetProfile(exeName);
+    if (feature == "pin") return p.useCorePinning;
+    if (feature == "io") return p.useHighIo;
+    return true; // Default allow for safety if feature unknown
 }
 
 // User Transparency Dashboard
@@ -801,13 +863,9 @@ void PerformanceGuardian::GenerateSessionReport(const GameSession& session) {
         report += "Troubleshooting: CPU Fallback logic may be disabled or blocked.\n\n";
     }
 
-    if (g_adaptiveEngine.IsLearningActive(session.pid)) {
-        report += "Status: LEARNING MODE (Calibrating System)\n";
-        report += "Note: Optimizations were toggled for testing.\n";
-    } else {
-        report += "Status: OPTIMIZED\n";
-        report += "Active Tweaks: " + GetActiveOptimizations(session.exeName) + "\n";
-    }
+    // if (g_adaptiveEngine.IsLearningActive(session.pid)) ...
+    report += "Status: OPTIMIZED (Static Profile)\n";
+    report += "Active Tweaks: " + GetActiveOptimizations(session.exeName) + "\n";
 
     double avgFrameTime = 0.0;
     std::string dataSource = "Unknown";
@@ -855,7 +913,7 @@ std::string PerformanceGuardian::FormatDuration(uint64_t startMs) {
 }
 
 std::string PerformanceGuardian::GetActiveOptimizations(const std::wstring& exeName) {
-    GameProfile p = g_adaptiveEngine.GetProfile(exeName);
+    GameProfile p = GetProfile(exeName);
     std::vector<std::string> opts;
     
     if (p.useHighIo) opts.push_back("High I/O Priority");

@@ -28,7 +28,11 @@ public:
     // Pure function: Inputs -> Outputs. No hidden state. No side effects.
     GovernorDecision Decide(const SystemSignalSnapshot& snapshot);
 
+    // Phase 6: Policy Injection (The only allowed external influence)
+    void UpdatePolicy(const PolicyParameters& params);
+
 private:
+    PolicyParameters m_params; // Defaults defined in types.h constructor
     // Section 5.2: Normalized Signals
     struct NormalizedSignals {
         double cpu;    // 0.0 - 1.0

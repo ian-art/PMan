@@ -24,7 +24,7 @@
 #include "idle_affinity.h"
 #include "memory_optimizer.h"
 #include "input_guardian.h"
-#include "brain_rl_engine.h"
+#include "brain_rl_engine.h" // Defines PolicyOptimizer
 #include "hands_rl_engine.h" // Phase 11
 #include "governor.h"
 #include "consequence_evaluator.h"
@@ -38,7 +38,7 @@ PManContext::PManContext() {
     subs.idle       = std::make_unique<IdleAffinityManager>();
     subs.mem        = std::make_unique<MemoryOptimizer>();
     subs.input      = std::make_unique<InputGuardian>();
-    subs.adaptive   = std::make_unique<AdaptiveEngine>();
+    subs.optimizer  = std::make_unique<PolicyOptimizer>(); // Phase 6
     subs.governor   = std::make_unique<PerformanceGovernor>();
     subs.evaluator  = std::make_unique<ConsequenceEvaluator>();
     subs.arbiter    = std::make_unique<DecisionArbiter>(); // Phase 4

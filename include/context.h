@@ -46,7 +46,7 @@ class ExplorerBooster;
 class IdleAffinityManager;
 class MemoryOptimizer;
 class InputGuardian; 
-class AdaptiveEngine; 
+class PolicyOptimizer; // Phase 6
 class PerformanceGovernor;
 class ConsequenceEvaluator;
 class DecisionArbiter; // Phase 4
@@ -218,7 +218,7 @@ public:
         std::unique_ptr<IdleAffinityManager>   idle;
         std::unique_ptr<MemoryOptimizer>       mem;
         std::unique_ptr<InputGuardian>         input; 
-        std::unique_ptr<AdaptiveEngine>        adaptive;
+        std::unique_ptr<PolicyOptimizer>       optimizer; // Phase 6
         std::unique_ptr<PerformanceGovernor>   governor;
         std::unique_ptr<ConsequenceEvaluator>  evaluator; // Phase 3
         std::unique_ptr<DecisionArbiter>       arbiter;   // Phase 4

@@ -42,7 +42,7 @@
 #include "editor_manager.h"
 #include "lifecycle.h"
 #include "hands_rl_engine.h" // [FIX] Required for Executor::Shutdown
-#include "brain_rl_engine.h" // [FIX] Required for AdaptiveEngine::Shutdown
+#include "brain_rl_engine.h" // [FIX] Defines PolicyOptimizer
 #include "governor.h"
 #include "consequence_evaluator.h"
 #include "decision_arbiter.h"
@@ -216,6 +216,32 @@ static void RunAutonomousCycle() {
 
     // 5. Execute (Law 1: Arbiter Owns Reality)
     ExecuteDecision(decision);
+
+    // Phase 6: Learning Feedback Loop
+    // "The optimizer learns from decisions and outcomes"
+    static SystemSignalSnapshot lastState = {};
+    static ArbiterDecision lastDecision = ArbiterDecision::Maintain(DecisionReason::None);
+
+    if (lastDecision.decisionTime > 0) {
+        OptimizationFeedback feedback = {};
+        feedback.mode = govResult.mode; // Context from current decision (approximation)
+        feedback.dominant = govResult.dominant;
+        feedback.action = lastDecision.selectedAction;
+        
+        // Calculate Deltas (OutcomeDelta = Current - Previous)
+        feedback.cpuDelta = state.cpuLoad - lastState.cpuLoad;
+        feedback.memDelta = state.memoryPressure - lastState.memoryPressure;
+        feedback.diskDelta = state.diskQueueLen - lastState.diskQueueLen;
+        feedback.latencyDelta = state.latencyMs - lastState.latencyMs;
+        feedback.userInterrupted = state.userActive; // If user came back active during action
+
+        if (ctx.subs.optimizer) {
+            ctx.subs.optimizer->OnFeedback(feedback);
+        }
+    }
+
+    lastState = state;
+    lastDecision = decision;
 }
 
 // --- Background Worker for Async Tasks ---
@@ -1302,6 +1328,10 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     // Initialize Input Responsiveness Guard
     g_inputGuardian.Initialize();
 
+    // Initialize Phase 6 Policy Optimizer
+    PManContext::Get().subs.optimizer = std::make_unique<PolicyOptimizer>();
+    PManContext::Get().subs.optimizer->Initialize();
+
 	// Initialize Smart Memory Optimizer
     g_memoryOptimizer.Initialize();
 
@@ -1657,9 +1687,20 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 						// Moved ExplorerBooster to background thread to prevent blocking the Keyboard Hook
 						g_explorerBooster.OnTick();
 
-                        // Phase 5: Authoritative Control Loop
-                        // This is the SINGLE execution choke point for all autonomy.
-                        RunAutonomousCycle();
+					// Phase 5: Authoritative Control Loop
+                    RunAutonomousCycle();
+
+                    // Phase 6: Periodic Policy Optimization (Slow Loop)
+                    static uint64_t lastOpt = 0;
+                    if (GetTickCount64() - lastOpt > 60000) { // Every 1 minute
+                        if (auto& opt = PManContext::Get().subs.optimizer) {
+                            PolicyParameters newParams = opt->Optimize();
+                            if (auto& gov = PManContext::Get().subs.governor) {
+                                gov->UpdatePolicy(newParams);
+                            }
+                        }
+                        lastOpt = GetTickCount64();
+                    }
 
 						// Legacy/Advisory Updates (Data Collection Only)
 						g_perfGuardian.OnPerformanceTick();
@@ -1716,8 +1757,8 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     if (PManContext::Get().subs.executor) {
         PManContext::Get().subs.executor->Shutdown();
     }
-    if (PManContext::Get().subs.adaptive) {
-        PManContext::Get().subs.adaptive->Shutdown();
+    if (PManContext::Get().subs.optimizer) {
+        PManContext::Get().subs.optimizer->Shutdown();
     }
 	
     // Signal threads to wake up/stop

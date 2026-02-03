@@ -55,8 +55,8 @@
 // Input Guardian
 #define g_inputGuardian (*PManContext::Get().subs.input)
 
-// Adaptive Learning Engine
-#define g_adaptiveEngine (*PManContext::Get().subs.adaptive)
+// Phase 6: Policy Optimizer (The Tuner)
+#define g_policyOptimizer (*PManContext::Get().subs.optimizer)
 
 // Idle Core Parking
 #define g_idleAffinityMgr (*PManContext::Get().subs.idle)
