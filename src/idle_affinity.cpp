@@ -114,6 +114,9 @@ void IdleAffinityManager::UpdateConfig(bool enabled, int reservedCores, uint32_t
 
 bool IdleAffinityManager::IsSafeToPark()
 {
+    // [FIX] Master Switch: If Protection is Paused, do not touch affinity
+    if (g_userPaused.load()) return false;
+
     // [USER] Pause on Idle requested - prevent CPU limiting
     if (g_pauseIdle.load()) return false;
 
