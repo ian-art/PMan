@@ -48,6 +48,7 @@ class MemoryOptimizer;
 class InputGuardian; 
 class AdaptiveEngine; 
 class PerformanceGovernor;
+class ConsequenceEvaluator;
 class Executor;
 
 class PManContext {
@@ -218,6 +219,7 @@ public:
         std::unique_ptr<InputGuardian>         input; 
         std::unique_ptr<AdaptiveEngine>        adaptive;
         std::unique_ptr<PerformanceGovernor>   governor;
+        std::unique_ptr<ConsequenceEvaluator>  evaluator; // Phase 3
         // Phase 11: The Executor Subsystem
         std::unique_ptr<Executor>              executor;
     } subs;

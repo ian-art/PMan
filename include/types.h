@@ -339,6 +339,19 @@ struct SystemSignalSnapshot {
     bool userActive;           // Input within last X seconds
 };
 
+// Phase 3: Consequence Evaluator Types
+struct CostVector {
+    int cpuDelta;       // Contention (-5 to +5)
+    int diskDelta;      // Queue Pressure (-5 to +5)
+    int latencyRisk;    // Responsiveness Risk (0 to 10)
+    int recoveryCost;   // Time to return to baseline (0 to 10)
+};
+
+struct ConsequenceResult {
+    CostVector cost;
+    bool isSafe;        // If false, veto the action
+};
+
 struct GovernorDecision {
     SystemMode mode;
     DominantPressure dominant;

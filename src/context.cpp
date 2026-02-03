@@ -27,6 +27,7 @@
 #include "brain_rl_engine.h"
 #include "hands_rl_engine.h" // Phase 11
 #include "governor.h"
+#include "consequence_evaluator.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -38,6 +39,7 @@ PManContext::PManContext() {
     subs.input      = std::make_unique<InputGuardian>();
     subs.adaptive   = std::make_unique<AdaptiveEngine>();
     subs.governor   = std::make_unique<PerformanceGovernor>();
+    subs.evaluator  = std::make_unique<ConsequenceEvaluator>();
     subs.executor   = std::unique_ptr<Executor>(new Executor()); // Phase 11
 }
 
