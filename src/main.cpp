@@ -199,7 +199,7 @@ static void RunAutonomousCycle() {
     static SystemSignalSnapshot lastState = {};
     static ArbiterDecision lastDecision = ArbiterDecision::Maintain(DecisionReason::None);
     static GovernorDecision lastGovDecision = {SystemMode::Interactive, DominantPressure::None, AllowedActionClass::None};
-    static ConsequenceResult lastPrediction = {{0,0,0,0}, true};
+    static ConsequenceResult lastPrediction = {{0,0,0,0}, true, 1.0};
 
     // 1. Capture State
     SystemSignalSnapshot state = CaptureSnapshot();
@@ -229,6 +229,18 @@ static void RunAutonomousCycle() {
 
     // 4. Arbiter: Makes Final Decision (Law 1)
     ArbiterDecision decision = ctx.subs.arbiter->Decide(govResult, scores);
+
+    // Phase 5 Traceability: Log complete decision summary if not in steady state
+    // This captures Rejections, LowConfidence, and Actions. 
+    // We skip "NoActionNeeded" to prevent disk flooding while maintaining safety auditability.
+    if (decision.reason != DecisionReason::NoActionNeeded) {
+        std::string log = "[AUTONOMY] Gov:" + std::to_string((int)govResult.dominant) + 
+                          " Eval:" + std::to_string(scores.cost.cpuDelta) + 
+                          " Conf:" + std::to_string(scores.confidence) + 
+                          " -> Act:" + std::to_string((int)decision.selectedAction) + 
+                          " Reason:" + std::to_string((int)decision.reason);
+        Log(log);
+    }
 
     // 5. Execute (Law 1: Arbiter Owns Reality)
     ExecuteDecision(decision);

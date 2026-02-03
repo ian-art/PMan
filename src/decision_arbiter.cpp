@@ -19,6 +19,7 @@
 
 #include "decision_arbiter.h"
 #include "utils.h" // For time helpers if needed
+#include "constants.h"
 
 ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence) {
     ArbiterDecision decision;
@@ -30,6 +31,14 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
     DecisionReason rejectReason;
     if (!CheckHardRejection(govDecision, consequence, rejectReason)) {
         decision.reason = rejectReason;
+        return decision;
+    }
+
+    // Phase 7: Confidence-Driven Conservatism (Kill Switch)
+    // Rule: "if (prediction.confidence < CONFIDENCE_MIN) Arbiter must return NoAction"
+    if (consequence.confidence < CONFIDENCE_MIN) {
+        decision.selectedAction = BrainAction::Maintain;
+        decision.reason = DecisionReason::LowConfidence;
         return decision;
     }
 

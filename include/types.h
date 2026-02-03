@@ -350,6 +350,7 @@ struct CostVector {
 struct ConsequenceResult {
     CostVector cost;
     bool isSafe;        // If false, veto the action
+    double confidence = 1.0; // Phase 7: Prediction Confidence (Default 1.0 for Static)
 };
 
 struct GovernorDecision {
@@ -382,6 +383,7 @@ enum class DecisionReason : uint8_t {
     CooldownActive,        // Anti-oscillation timer active
     StalenessDetected,     // Input data was too old
     HardRuleViolation,     // Violation of system invariants
+    LowConfidence,         // Phase 7: Prediction too uncertain
     NoActionNeeded         // System is optimal, inaction is correct
 };
 

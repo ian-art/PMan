@@ -60,11 +60,14 @@ ConsequenceResult PredictiveModel::Correct(const ConsequenceResult& raw, SystemM
     
     // If no history, trust the static model 100%
     if (it == m_stats.end()) {
-        return raw;
+        ConsequenceResult safeRaw = raw;
+        safeRaw.confidence = 1.0; // Static model is baseline truth
+        return safeRaw;
     }
     
     const PredictionStats& stats = it->second;
     ConsequenceResult corrected = raw;
+    corrected.confidence = stats.confidence;
     
     // 1. Apply Mean Error Correction
     // If we consistently underestimate cost (positive error), add it to future predictions.
