@@ -988,6 +988,15 @@ void AntiInterferenceWatchdog()
             // ETW Health Check & Auto-Recovery
             if (g_caps.canUseEtw && g_running)
             {
+                // [FIX] Prevent False Positive timeout during Sleep/Resume
+                // If suspended, update the heartbeat to "now" so we don't trigger immediately on wake
+                if (g_isSuspended.load()) {
+                    g_lastEtwHeartbeat.store(GetTickCount64(), std::memory_order_relaxed);
+                    // Reset retry logic so we don't spiral
+                    static std::atomic<int> retryCount{0}; 
+                    continue; 
+                }
+
                 // [FIX] Scoped locally but static to persist across loop iterations
                 static std::atomic<int> retryCount{0};
                 static std::atomic<uint64_t> lastRestartAttempt{0};
