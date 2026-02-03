@@ -30,7 +30,7 @@
 #include "input_guardian.h"   // Input Responsiveness
 #include "idle_affinity.h"    // Idle Core Parking
 #include "session_cache.h"    // [CACHE]
-#include "brain_rl_engine.h"  // [ADAPTIVE]
+#include "policy_optimizer.h"  // [ADAPTIVE]
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>

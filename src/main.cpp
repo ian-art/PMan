@@ -41,8 +41,8 @@
 #include "sram_engine.h"
 #include "editor_manager.h"
 #include "lifecycle.h"
-#include "hands_rl_engine.h" // [FIX] Required for Executor::Shutdown
-#include "brain_rl_engine.h" // [FIX] Defines PolicyOptimizer
+#include "executor.h" // [FIX] Required for Executor::Shutdown
+#include "policy_optimizer.h" // [FIX] Defines PolicyOptimizer
 #include "governor.h"
 #include "consequence_evaluator.h"
 #include "predictive_model.h" // Phase 7

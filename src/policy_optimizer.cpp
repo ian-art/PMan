@@ -17,7 +17,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "brain_rl_engine.h"
+#include "policy_optimizer.h"
 #include "logger.h"
 #include "utils.h"
 #include <numeric>

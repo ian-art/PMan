@@ -24,8 +24,8 @@
 #include "idle_affinity.h"
 #include "memory_optimizer.h"
 #include "input_guardian.h"
-#include "brain_rl_engine.h" // Defines PolicyOptimizer
-#include "hands_rl_engine.h" // Phase 11
+#include "policy_optimizer.h" // Defines PolicyOptimizer
+#include "executor.h" // Phase 11
 #include "governor.h"
 #include "consequence_evaluator.h"
 #include "predictive_model.h" // Phase 7

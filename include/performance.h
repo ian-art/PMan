@@ -38,7 +38,7 @@ class ServiceSuspensionGuard;
 class InputModeGuard;
 class AudioModeGuard;
 
-// #include "brain_rl_engine.h" // Removed: Decoupled in Phase 6
+// #include "policy_optimizer.h" // Removed: Decoupled in Phase 6
 
 class PerformanceGuardian {
 private:
