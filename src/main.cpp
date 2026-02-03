@@ -201,6 +201,14 @@ static void RunAutonomousCycle() {
     static GovernorDecision lastGovDecision = {SystemMode::Interactive, DominantPressure::None, AllowedActionClass::None};
     static ConsequenceResult lastPrediction = {{0,0,0,0}, true, 1.0};
 
+    // [FIX] Stop autonomy cycles completely when paused
+    // This prevents log flooding and prevents "learning" from stale data when resuming
+    if (g_userPaused.load()) {
+        // Reset last decision to ensure we don't calculate feedback across the pause gap
+        lastDecision = ArbiterDecision::Maintain(DecisionReason::None);
+        return;
+    }
+
     // 1. Capture State
     SystemSignalSnapshot state = CaptureSnapshot();
 
