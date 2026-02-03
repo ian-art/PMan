@@ -373,6 +373,29 @@ enum class BrainAction : uint8_t {
 constexpr size_t ACTION_COUNT = static_cast<size_t>(BrainAction::Count);
 static_assert(ACTION_COUNT == 6, "BrainAction count must match Roadmap Phase 2.1");
 
+// Phase 4: Decision Arbiter Types
+enum class DecisionReason : uint8_t {
+    None = 0,
+    Approved,              // Action validated and safe
+    GovernorRestricted,    // Governor strictly forbade action
+    ConsequenceUnsafe,     // Predicted outcome was net-negative
+    CooldownActive,        // Anti-oscillation timer active
+    StalenessDetected,     // Input data was too old
+    HardRuleViolation,     // Violation of system invariants
+    NoActionNeeded         // System is optimal, inaction is correct
+};
+
+struct ArbiterDecision {
+    BrainAction selectedAction;
+    DecisionReason reason;
+    uint64_t decisionTime;
+    
+    // Helper for "Do Nothing" defaults
+    static ArbiterDecision Maintain(DecisionReason r) {
+        return { BrainAction::Maintain, r, 0 };
+    }
+};
+
 // Phase 11: Executor Intent Structure
 struct ActionIntent {
     BrainAction action;

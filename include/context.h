@@ -49,6 +49,7 @@ class InputGuardian;
 class AdaptiveEngine; 
 class PerformanceGovernor;
 class ConsequenceEvaluator;
+class DecisionArbiter; // Phase 4
 class Executor;
 
 class PManContext {
@@ -220,6 +221,7 @@ public:
         std::unique_ptr<AdaptiveEngine>        adaptive;
         std::unique_ptr<PerformanceGovernor>   governor;
         std::unique_ptr<ConsequenceEvaluator>  evaluator; // Phase 3
+        std::unique_ptr<DecisionArbiter>       arbiter;   // Phase 4
         // Phase 11: The Executor Subsystem
         std::unique_ptr<Executor>              executor;
     } subs;
