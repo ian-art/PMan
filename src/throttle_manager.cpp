@@ -58,6 +58,18 @@ void ThrottleManager::Initialize() {
 void ThrottleManager::OnNetworkStateChange(NetworkState newState) {
     std::lock_guard lock(m_mtx);
     
+    // [FIX] Master Switch: Ignore network fluctuations if paused
+    if (g_userPaused.load()) {
+        if (m_isThrottling) {
+            // Force disengage if we happened to be throttling when paused
+            m_isThrottling = false;
+            UpdateJobLimits(false);
+            UpdateProcessPriorities(false);
+            Log("[THROTTLE] Global Throttling DISENGAGED (User Paused)");
+        }
+        return;
+    }
+
     // Strategy: Throttling is ACTIVE only when Network is UNSTABLE.
     bool shouldThrottle = (newState == NetworkState::Unstable);
 
@@ -170,8 +182,10 @@ void ThrottleManager::UpdateJobLimits(bool enableThrottle) {
 
     if (!SetInformationJobObject(m_hJob, JobObjectCpuRateControlInformation, &cpuRate, sizeof(cpuRate))) {
         DWORD err = GetLastError();
-        // Ignore "Invalid Parameter" if we are trying to disable something already disabled
-        if (err != ERROR_INVALID_PARAMETER || enableThrottle) {
+        // [FIX] Ignore Error 87 (Invalid Parameter) regardless of enableThrottle state.
+        // Since we are setting ControlFlags=0 in both cases (Safe Mode), 
+        // this error just means "Nothing to clear" or "Already cleared".
+        if (err != ERROR_INVALID_PARAMETER) {
              Log("[THROTTLE] Failed to update Job Limits. Error: " + std::to_string(err));
         }
     }
