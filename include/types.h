@@ -473,4 +473,23 @@ struct OptimizationFeedback {
     bool userInterrupted;
 };
 
+// Phase 7: Prediction Accountability Types
+struct PredictionStats {
+    double meanErrorCpu = 0.0;
+    double meanErrorDisk = 0.0;
+    double meanErrorLatency = 0.0;
+    double variance = 0.0;
+    uint32_t sampleCount = 0;
+    double confidence = 1.0; // 1.0 = High Confidence, 0.0 = Low
+};
+
+struct PredictionLog {
+    SystemMode mode;
+    DominantPressure dominant;
+    AllowedActionClass action;
+    CostVector predicted;
+    CostVector actual; 
+    uint64_t timestamp;
+};
+
 #endif // PMAN_TYPES_H

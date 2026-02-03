@@ -49,6 +49,7 @@ class InputGuardian;
 class PolicyOptimizer; // Phase 6
 class PerformanceGovernor;
 class ConsequenceEvaluator;
+class PredictiveModel; // Phase 7
 class DecisionArbiter; // Phase 4
 class Executor;
 
@@ -221,6 +222,7 @@ public:
         std::unique_ptr<PolicyOptimizer>       optimizer; // Phase 6
         std::unique_ptr<PerformanceGovernor>   governor;
         std::unique_ptr<ConsequenceEvaluator>  evaluator; // Phase 3
+        std::unique_ptr<PredictiveModel>       model;     // Phase 7
         std::unique_ptr<DecisionArbiter>       arbiter;   // Phase 4
         // Phase 11: The Executor Subsystem
         std::unique_ptr<Executor>              executor;

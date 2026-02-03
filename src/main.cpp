@@ -45,6 +45,7 @@
 #include "brain_rl_engine.h" // [FIX] Defines PolicyOptimizer
 #include "governor.h"
 #include "consequence_evaluator.h"
+#include "predictive_model.h" // Phase 7
 #include "decision_arbiter.h"
 #include "context.h"
 #include <thread>
@@ -194,6 +195,12 @@ static void ExecuteDecision(const ArbiterDecision& decision) {
 }
 
 static void RunAutonomousCycle() {
+    // Phase 6 & 7 State (Declared at top for visibility)
+    static SystemSignalSnapshot lastState = {};
+    static ArbiterDecision lastDecision = ArbiterDecision::Maintain(DecisionReason::None);
+    static GovernorDecision lastGovDecision = {SystemMode::Interactive, DominantPressure::None, AllowedActionClass::None};
+    static ConsequenceResult lastPrediction = {{0,0,0,0}, true};
+
     // 1. Capture State
     SystemSignalSnapshot state = CaptureSnapshot();
 
@@ -211,20 +218,25 @@ static void RunAutonomousCycle() {
         govResult.allowedActions
     );
 
+    // Phase 7: Predictive Model Correction
+    // "Prediction error may only reduce confidence"
+    if (ctx.subs.model) {
+        scores = ctx.subs.model->Correct(scores, govResult.mode, govResult.dominant, govResult.allowedActions);
+    }
+    
+    // Store for next cycle's feedback
+    lastPrediction = scores;
+
     // 4. Arbiter: Makes Final Decision (Law 1)
     ArbiterDecision decision = ctx.subs.arbiter->Decide(govResult, scores);
 
     // 5. Execute (Law 1: Arbiter Owns Reality)
     ExecuteDecision(decision);
 
-    // Phase 6: Learning Feedback Loop
-    // "The optimizer learns from decisions and outcomes"
-    static SystemSignalSnapshot lastState = {};
-    static ArbiterDecision lastDecision = ArbiterDecision::Maintain(DecisionReason::None);
-
+    // Phase 6 & 7: Learning Feedback Loops
     if (lastDecision.decisionTime > 0) {
         OptimizationFeedback feedback = {};
-        feedback.mode = govResult.mode; // Context from current decision (approximation)
+        feedback.mode = govResult.mode; 
         feedback.dominant = govResult.dominant;
         feedback.action = lastDecision.selectedAction;
         
@@ -233,15 +245,32 @@ static void RunAutonomousCycle() {
         feedback.memDelta = state.memoryPressure - lastState.memoryPressure;
         feedback.diskDelta = state.diskQueueLen - lastState.diskQueueLen;
         feedback.latencyDelta = state.latencyMs - lastState.latencyMs;
-        feedback.userInterrupted = state.userActive; // If user came back active during action
+        feedback.userInterrupted = state.userActive; 
 
+        // Phase 6: Optimizer Feedback
         if (ctx.subs.optimizer) {
             ctx.subs.optimizer->OnFeedback(feedback);
+        }
+
+        // Phase 7: Predictive Model Feedback (Prediction vs Reality)
+        if (ctx.subs.model) {
+            // Only learn if we actually attempted the action corresponding to the prediction
+            if (lastDecision.selectedAction != BrainAction::Maintain) {
+                ctx.subs.model->Feedback(
+                    lastGovDecision.mode, 
+                    lastGovDecision.dominant, 
+                    lastGovDecision.allowedActions, 
+                    lastPrediction.cost, 
+                    feedback
+                );
+            }
         }
     }
 
     lastState = state;
     lastDecision = decision;
+    lastGovDecision = govResult;
+    // lastPrediction is set after calculation below
 }
 
 // --- Background Worker for Async Tasks ---

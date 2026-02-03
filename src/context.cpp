@@ -28,6 +28,7 @@
 #include "hands_rl_engine.h" // Phase 11
 #include "governor.h"
 #include "consequence_evaluator.h"
+#include "predictive_model.h" // Phase 7
 #include "decision_arbiter.h" // Phase 4
 
 // Constructor: Initialize Subsystems
@@ -41,7 +42,9 @@ PManContext::PManContext() {
     subs.optimizer  = std::make_unique<PolicyOptimizer>(); // Phase 6
     subs.governor   = std::make_unique<PerformanceGovernor>();
     subs.evaluator  = std::make_unique<ConsequenceEvaluator>();
+    subs.model      = std::make_unique<PredictiveModel>(); // Phase 7
     subs.arbiter    = std::make_unique<DecisionArbiter>(); // Phase 4
+    if (subs.model) subs.model->Initialize();
     subs.executor   = std::unique_ptr<Executor>(new Executor()); // Phase 11
 }
 
