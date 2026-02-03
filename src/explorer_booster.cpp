@@ -520,7 +520,7 @@ void ExplorerBooster::RevertBoosts(DWORD pid) {
     }
 
     // 2. Restore I/O Priority
-    SetProcessIoPriority(pid, 2); // Normal/Low
+    SetProcessIoPriority(pid, 0); // [FIX] Restore to Normal (0)
 
     // 3. Release Memory Guard
     ReleaseMemoryGuard(pid);

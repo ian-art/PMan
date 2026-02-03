@@ -299,8 +299,9 @@ void SetProcessIoPriority(DWORD pid, int mode)
     
     // Method 1: Try NtSetInformationProcess (Via Wrapper)
     ULONG ioPriority;
-    if (mode == 1) ioPriority = IoPriorityHigh;
-    else ioPriority = IoPriorityLow;
+    if (mode == 1) ioPriority = IoPriorityHigh;      // Game
+    else if (mode == 0) ioPriority = IoPriorityNormal; // Reset/Default
+    else ioPriority = IoPriorityLow;                 // Browser (Background bias)
 
     NTSTATUS status = NtWrapper::SetInformationProcess(
         hProcess,
