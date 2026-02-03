@@ -28,7 +28,6 @@
 #include "input_guardian.h"
 #include "globals.h"
 #include "governor.h"
-#include "governor.h" // Phase 2: Deterministic Governor
 #include <fstream>
 #include <numeric>
 #include <cmath>
