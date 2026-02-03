@@ -190,7 +190,7 @@ void ThrottleManager::ApplyThrottle(DWORD pid, ThrottleLevel level) {
     PowerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
     PowerThrottling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
 
-    // [FIX] Phase 12: Job Object Management for CPU Caps
+    // [FIX] Job Object Management for CPU Caps
     HANDLE hJob = nullptr;
     auto jobIt = m_processJobs.find(pid);
     if (jobIt != m_processJobs.end()) {
@@ -226,7 +226,7 @@ void ThrottleManager::ApplyThrottle(DWORD pid, ThrottleLevel level) {
         PowerThrottling.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED; // Turn ON EcoQoS
         SetPriorityClass(hProcess, BELOW_NORMAL_PRIORITY_CLASS);
         
-        // Soft Cap: 40% (Roadmap)
+        // Soft Cap: 40%
         if (hJob) {
             cpuInfo.ControlFlags = JOB_OBJECT_CPU_RATE_CONTROL_ENABLE;
             cpuInfo.CpuRate = 4000; // 40.00%
@@ -237,7 +237,7 @@ void ThrottleManager::ApplyThrottle(DWORD pid, ThrottleLevel level) {
         PowerThrottling.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED; // Turn ON EcoQoS
         SetPriorityClass(hProcess, IDLE_PRIORITY_CLASS);
         
-        // Hard Cap: 5% (Roadmap Phase 12 Requirement)
+        // Hard Cap: 5%
         if (hJob) {
             cpuInfo.ControlFlags = JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP;
             cpuInfo.CpuRate = 500; // 5.00%

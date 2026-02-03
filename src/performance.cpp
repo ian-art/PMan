@@ -409,7 +409,7 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     session.creationTime = GetProcessCreationTimeHelper(pid);
     
     // Initialize Learning Engine for this session
-    // [PHASE 6] Active learning disabled in Guardian. Profiles are static memory.
+    // Active learning disabled in Guardian. Profiles are static memory.
     // g_adaptiveEngine.OnSessionStart(pid, exeName);
 
     // System State Guards (Services & Input)
@@ -420,7 +420,7 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     // Audio Isolation
     session.audioGuard = std::make_shared<AudioModeGuard>();
 
-    // Check if we have a valid profile (Phase 6: Local Memory)
+    // Check if we have a valid profile (Local Memory)
     GameProfile profile = GetProfile(exeName);
     
     // Only log if we are actually applying something interesting
@@ -530,7 +530,7 @@ void PerformanceGuardian::OnPerformanceTick() {
 
     if (PManContext::Get().isSuspended.load()) return;
     
-    // --- PHASE 2: GOVERNOR DECISION (The Hard Gate) ---
+    // --- GOVERNOR DECISION (The Hard Gate) ---
     SystemSignalSnapshot snap = {};
     snap.cpuLoad = GetCpuLoad();
     
@@ -563,7 +563,7 @@ void PerformanceGuardian::OnPerformanceTick() {
 
     // Gate 2: Enforce Inaction - If system is healthy, do not learn, do not boost.
     if (decision.allowedActions != AllowedActionClass::None) {
-        // [PHASE 6] Optimizer runs in main loop, not here.
+        // Optimizer runs in main loop, not here.
     }
 
     std::lock_guard lock(m_mtx);
@@ -600,7 +600,7 @@ void PerformanceGuardian::OnPerformanceTick() {
             }
 
             if (!session.frameHistory.empty()) {
-                // Phase 2 Enforcement: Only analyze/boost if Governor permits intervention
+                // Enforcement: Only analyze/boost if Governor permits intervention
                 if (decision.allowedActions != AllowedActionClass::None) {
                     AnalyzeStutter(session, session.pid);
                 }
@@ -656,7 +656,7 @@ void PerformanceGuardian::OnPresentEvent(DWORD pid, uint64_t timestamp) {
             session.frameHistory.push_back({timestamp, deltaMs});
             
             // Feed the learning engine
-            // [PHASE 6] Per-frame learning deferred.
+            // Per-frame learning deferred.
             // g_adaptiveEngine.IngestFrameData(pid, timestamp, deltaMs);
             
             // Diagnostic logging for C&C3 verification
@@ -837,7 +837,7 @@ bool PerformanceGuardian::HasActiveSessions() {
 }
 
 bool PerformanceGuardian::IsOptimizationAllowed(const std::wstring& exeName, const std::string& feature) {
-    // Phase 6: Strict Profile adherence. If it's in the profile, it's allowed.
+    // Strict Profile adherence. If it's in the profile, it's allowed.
     GameProfile p = GetProfile(exeName);
     if (feature == "pin") return p.useCorePinning;
     if (feature == "io") return p.useHighIo;

@@ -25,7 +25,7 @@
 
 class DecisionArbiter {
 public:
-    // Phase 4: Public API
+    // Public API
     // Single Responsibility: Select exactly one outcome per cycle.
     // Deterministic, Auditable, Safe.
     ArbiterDecision Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence);

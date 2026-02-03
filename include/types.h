@@ -296,7 +296,7 @@ enum class ProcessNetClass {
     BulkBackground   // Indexers, Telemetry (Throttle Aggressively)
 };
 
-// Phase 1.5: Canonical Process Taxonomy
+// Canonical Process Taxonomy
 // Strictly 2 bits for embedding in SystemState
 enum class ProcessCategory : uint8_t {
     Interactive_Game    = 0b00,
@@ -305,7 +305,7 @@ enum class ProcessCategory : uint8_t {
     System_Critical     = 0b11
 };
 
-// Phase 2: Deterministic Governor Types
+// Deterministic Governor Types
 enum class DominantPressure : uint8_t {
     None = 0,
     Cpu,
@@ -339,7 +339,7 @@ struct SystemSignalSnapshot {
     bool userActive;           // Input within last X seconds
 };
 
-// Phase 3: Consequence Evaluator Types
+// Consequence Evaluator Types
 struct CostVector {
     int cpuDelta;       // Contention (-5 to +5)
     int diskDelta;      // Queue Pressure (-5 to +5)
@@ -350,7 +350,7 @@ struct CostVector {
 struct ConsequenceResult {
     CostVector cost;
     bool isSafe;        // If false, veto the action
-    double confidence = 1.0; // Phase 7: Prediction Confidence (Default 1.0 for Static)
+    double confidence = 1.0; // Prediction Confidence (Default 1.0 for Static)
 };
 
 struct GovernorDecision {
@@ -359,7 +359,7 @@ struct GovernorDecision {
     AllowedActionClass allowedActions;
 };
 
-// Phase 2.1: BrainAction Enum (Fixed & Auditable)
+// BrainAction Enum (Fixed & Auditable)
 enum class BrainAction : uint8_t {
     Maintain = 0,
     Throttle_Mild,
@@ -370,11 +370,11 @@ enum class BrainAction : uint8_t {
     Count // Compile-time fixed size
 };
 
-// Compile-time check for Phase 2.1 compliance
+// Compile-time check
 constexpr size_t ACTION_COUNT = static_cast<size_t>(BrainAction::Count);
-static_assert(ACTION_COUNT == 6, "BrainAction count must match Roadmap Phase 2.1");
+static_assert(ACTION_COUNT == 6, "BrainAction count");
 
-// Phase 4: Decision Arbiter Types
+// Decision Arbiter Types
 enum class DecisionReason : uint8_t {
     None = 0,
     Approved,              // Action validated and safe
@@ -383,7 +383,7 @@ enum class DecisionReason : uint8_t {
     CooldownActive,        // Anti-oscillation timer active
     StalenessDetected,     // Input data was too old
     HardRuleViolation,     // Violation of system invariants
-    LowConfidence,         // Phase 7: Prediction too uncertain
+    LowConfidence,         // Prediction too uncertain
     NoActionNeeded         // System is optimal, inaction is correct
 };
 
@@ -398,29 +398,29 @@ struct ArbiterDecision {
     }
 };
 
-// Phase 11: Executor Intent Structure
+// Executor Intent Structure
 struct ActionIntent {
     BrainAction action;
-    uint64_t nonce;         // For replay protection (Phase 16.4)
+    uint64_t nonce;         // For replay protection
     uint64_t timestamp;     // For staleness checks
     double confidence;      // From RL Engine
 };
 
-// Phase 11.4: Targeting System Data
+// Targeting System Data
 struct TargetSet {
     std::vector<ProcessIdentity> targets;
     ProcessCategory classification;
     uint64_t snapshotTime;
 };
 
-// Phase 16.5: Feedback Loop Data
+// Feedback Loop Data
 struct ActionResult {
     bool success;
     DWORD win32Error;
     double actualCpuAfter;
 };
 
-// Phase 6: Game Optimization Profile (Persisted Memory)
+// Game Optimization Profile (Persisted Memory)
 struct GameProfile {
     std::wstring exeName;
     bool useHighIo;
@@ -436,7 +436,7 @@ struct GameProfile {
         baselineFrameTimeMs(0.0), lastUpdated(0) {}
 };
 
-// Phase 6: Policy Parameters (Tunable by Optimizer)
+// Policy Parameters (Tunable by Optimizer)
 struct PolicyParameters {
     // Thresholds for Dominant Pressure (0.0 - 1.0)
     double cpuThreshold = 0.85;
@@ -463,7 +463,7 @@ struct PolicyParameters {
     bool operator!=(const PolicyParameters& other) const { return !(*this == other); }
 };
 
-// Phase 6: Learning Feedback Tuple
+// Learning Feedback Tuple
 struct OptimizationFeedback {
     SystemMode mode;
     DominantPressure dominant;
@@ -475,7 +475,7 @@ struct OptimizationFeedback {
     bool userInterrupted;
 };
 
-// Phase 7: Prediction Accountability Types
+// Prediction Accountability Types
 struct PredictionStats {
     double meanErrorCpu = 0.0;
     double meanErrorDisk = 0.0;

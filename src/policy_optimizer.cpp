@@ -25,7 +25,7 @@
 #include <algorithm>
 
 PolicyOptimizer::PolicyOptimizer() {
-    m_policyPath = GetLogPath() / L"policy_v1.bin";
+    m_policyPath = GetLogPath() / L"policy.bin";
 }
 
 PolicyOptimizer::~PolicyOptimizer() {
@@ -34,7 +34,7 @@ PolicyOptimizer::~PolicyOptimizer() {
 
 void PolicyOptimizer::Initialize() {
     LoadPolicy();
-    Log("[OPTIMIZER] Phase 6 Engine Initialized. Policy loaded.");
+    Log("[OPTIMIZER] Engine Initialized. Policy loaded.");
 }
 
 void PolicyOptimizer::Shutdown() {
@@ -52,7 +52,7 @@ void PolicyOptimizer::OnFeedback(const OptimizationFeedback& feedback) {
 }
 
 double PolicyOptimizer::CalculateRegret(const OptimizationFeedback& fb) {
-    // Section 7: Regret-Based Optimization
+    // Regret-Based Optimization
     // Regret = OutcomeCost(SelectedAction) - OutcomeCost(NoAction)
     
     // Cost Function: Weighted sum of deltas (Higher is worse)
@@ -108,7 +108,7 @@ PolicyParameters PolicyOptimizer::Optimize() {
 }
 
 void PolicyOptimizer::TuneParameters(double avgRegret, const OptimizationFeedback& recentAvg) {
-    // Section 5: Allowed Changes
+    // Allowed Changes
     // If Regret is high (System getting worse), tighten thresholds.
     
     if (avgRegret > 5.0) { // Arbitrary high regret threshold

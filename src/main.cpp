@@ -45,7 +45,7 @@
 #include "policy_optimizer.h" // [FIX] Defines PolicyOptimizer
 #include "governor.h"
 #include "consequence_evaluator.h"
-#include "predictive_model.h" // Phase 7
+#include "predictive_model.h" // Machine learning state prediction
 #include "decision_arbiter.h"
 #include "context.h"
 #include <thread>
@@ -124,7 +124,7 @@ static uint64_t g_resumeStabilizationTime = 0; // Replaces detached sleep thread
 // Removed LaunchProcessAsync (Dead Code / Unsafe Detach)
 // All process launches now use synchronous CreateProcessW or the unified background worker.
 
-// --- Phase 5: Authoritative Control Loop ---
+// --- Authoritative Control Loop ---
 
 // Helper: Calculate CPU Load locally since SysInfo wrapper is unavailable
 static double GetLocalCpuLoad() {
@@ -182,12 +182,12 @@ static void ExecuteDecision(const ArbiterDecision& decision) {
     std::string reasonStr = "ReasonID:" + std::to_string((int)decision.reason);
     Log("[AUTONOMY] Arbiter Selected: " + std::to_string((int)decision.selectedAction) + " | " + reasonStr);
 
-    // Execute via Phase 11 Executor (if available)
+    // Execute via Executor (if available)
     if (auto& executor = PManContext::Get().subs.executor) {
         ActionIntent intent;
         intent.action = decision.selectedAction;
         intent.timestamp = GetTickCount64();
-        intent.confidence = 1.0; // Deterministic phase has 100% confidence
+        intent.confidence = 1.0; // Deterministic has 100% confidence
         intent.nonce = intent.timestamp;
         
         executor->Execute(intent);
@@ -195,7 +195,7 @@ static void ExecuteDecision(const ArbiterDecision& decision) {
 }
 
 static void RunAutonomousCycle() {
-    // Phase 6 & 7 State (Declared at top for visibility)
+    // State variables for adaptive learning and prediction persistence
     static SystemSignalSnapshot lastState = {};
     static ArbiterDecision lastDecision = ArbiterDecision::Maintain(DecisionReason::None);
     static GovernorDecision lastGovDecision = {SystemMode::Interactive, DominantPressure::None, AllowedActionClass::None};
@@ -218,7 +218,7 @@ static void RunAutonomousCycle() {
         govResult.allowedActions
     );
 
-    // Phase 7: Predictive Model Correction
+    // Predictive Model Correction
     // "Prediction error may only reduce confidence"
     if (ctx.subs.model) {
         scores = ctx.subs.model->Correct(scores, govResult.mode, govResult.dominant, govResult.allowedActions);
@@ -230,7 +230,7 @@ static void RunAutonomousCycle() {
     // 4. Arbiter: Makes Final Decision (Law 1)
     ArbiterDecision decision = ctx.subs.arbiter->Decide(govResult, scores);
 
-    // Phase 5 Traceability: Log complete decision summary if not in steady state
+    // Traceability: Log complete decision summary if not in steady state
     // This captures Rejections, LowConfidence, and Actions. 
     // We skip "NoActionNeeded" to prevent disk flooding while maintaining safety auditability.
     if (decision.reason != DecisionReason::NoActionNeeded) {
@@ -245,7 +245,7 @@ static void RunAutonomousCycle() {
     // 5. Execute (Law 1: Arbiter Owns Reality)
     ExecuteDecision(decision);
 
-    // Phase 6 & 7: Learning Feedback Loops
+    // Learning Feedback Loops
     if (lastDecision.decisionTime > 0) {
         OptimizationFeedback feedback = {};
         feedback.mode = govResult.mode; 
@@ -259,12 +259,12 @@ static void RunAutonomousCycle() {
         feedback.latencyDelta = state.latencyMs - lastState.latencyMs;
         feedback.userInterrupted = state.userActive; 
 
-        // Phase 6: Optimizer Feedback
+        // Optimizer Feedback
         if (ctx.subs.optimizer) {
             ctx.subs.optimizer->OnFeedback(feedback);
         }
 
-        // Phase 7: Predictive Model Feedback (Prediction vs Reality)
+        // Predictive Model Feedback (Prediction vs Reality)
         if (ctx.subs.model) {
             // Only learn if we actually attempted the action corresponding to the prediction
             if (lastDecision.selectedAction != BrainAction::Maintain) {
@@ -1369,7 +1369,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     // Initialize Input Responsiveness Guard
     g_inputGuardian.Initialize();
 
-    // Initialize Phase 6 Policy Optimizer
+    // Initialize Policy Optimizer
     PManContext::Get().subs.optimizer = std::make_unique<PolicyOptimizer>();
     PManContext::Get().subs.optimizer->Initialize();
 
@@ -1728,10 +1728,10 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 						// Moved ExplorerBooster to background thread to prevent blocking the Keyboard Hook
 						g_explorerBooster.OnTick();
 
-					// Phase 5: Authoritative Control Loop
+					// Authoritative Control Loop
                     RunAutonomousCycle();
 
-                    // Phase 6: Periodic Policy Optimization (Slow Loop)
+                    // Periodic Policy Optimization (Slow Loop)
                     static uint64_t lastOpt = 0;
                     if (GetTickCount64() - lastOpt > 60000) { // Every 1 minute
                         if (auto& opt = PManContext::Get().subs.optimizer) {
@@ -1793,7 +1793,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     g_memoryOptimizer.Shutdown();
     SramEngine::Get().Shutdown();
 
-    // [FIX] Phase 11 & 8: Save Brain and Stop Executor
+    // [FIX] Save Brain and Stop Executor
     // This ensures brain.bin is written to disk
     if (PManContext::Get().subs.executor) {
         PManContext::Get().subs.executor->Shutdown();

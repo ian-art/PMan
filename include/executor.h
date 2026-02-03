@@ -27,7 +27,7 @@
 #include <shared_mutex>
 #include <unordered_map>
 
-// Phase 11.2: The "Scout" Pattern
+// Decoupled process snapshotting system to prevent UI blocking
 // Decoupled process snapshotting to prevent UI blocking
 class ProcessScout {
 public:
@@ -45,18 +45,18 @@ private:
     std::vector<Snapshot> m_cache;
 };
 
-// Phase 11: The Executor Hub (Nervous System)
+// Central subsystem for executing and managing system interventions
 class Executor {
     friend class PManContext; // Allow Context to instantiate private constructor
 
 public:
-    // Singleton Access (Phase 11.1)
+    // Thread-safe singleton accessor
     static Executor& Get();
 
     void Initialize();
     void Shutdown();
 
-    // Phase 16.4: Receipt for Rollback
+    // Structure tracking executed actions for potential reversion
     struct Receipt {
         uint64_t id;
         BrainAction action;
@@ -64,20 +64,20 @@ public:
         uint64_t timestamp;
     };
 
-    // Phase 11.1: Unified Command Interface
+    // Main entry point for dispatching corrective actions
     std::optional<Receipt> Execute(const ActionIntent& intent);
     
-    // Phase 11.1: Safety Reverts
+    // Reverts a specific action based on its transaction receipt
     bool Revert(const Receipt& receipt);
     void EmergencyRevertAll(); // "Nuclear option"
 
-    // Phase 11.5: Watchdog Timer
+    // Monitoring system to ensure the decision engine is active
     void Heartbeat(uint64_t brainTimestamp);
 
-    // Phase 16.5: Feedback Loop
+    // Reports the outcome of an action back to the optimization engine
     void SubmitActionResult(ActionResult result);
 
-    // [FIX] Phase 3.4: Privilege Separation (A/B Testing Interface)
+    // Secure interface for isolating experimental parameter tests
     // Must be PUBLIC to be called by Brain
     enum class TestType { IoPriority, CorePinning, MemoryCompression };
     bool ApplyTestProfile(DWORD pid, TestType type, int param);
@@ -88,16 +88,16 @@ public:
 private:
     Executor();
 
-    // Phase 11.3: Defense in Depth (Veto Layer)
+    // Final safety check preventing dangerous actions before execution
     bool HardValidate(const ActionIntent& intent, const TargetSet& targets);
 
-    // Phase 11.2: Targeting System
+    // Identifies specific process IDs matching the abstract action intent
     TargetSet ResolveTargets(BrainAction action);
 
-    // Phase 14.2: Service Safety
+    // Checks if a service is on the safe-to-suspend allowlist
     bool IsSafeToSuspend(const std::wstring& serviceName);
 
-    // Phase 11.5: Watchdog State
+    // // State variables for the keep-alive monitor
     std::thread m_watchdogThread;
     std::atomic<bool> m_watchdogRunning{false};
     void WatchdogLoop();

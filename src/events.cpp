@@ -366,7 +366,7 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
         }
         else if (opcode == 2) // Process End
         {
-            // [CIRCUIT BREAKER] Phase 16.3
+            // [CIRCUIT BREAKER]
             // Check if a critical process just died
             {
                 std::lock_guard lock(g_criticalPidsMtx);

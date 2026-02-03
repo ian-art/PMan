@@ -55,7 +55,7 @@
 // Input Guardian
 #define g_inputGuardian (*PManContext::Get().subs.input)
 
-// Phase 6: Policy Optimizer (The Tuner)
+// Policy Optimizer
 #define g_policyOptimizer (*PManContext::Get().subs.optimizer)
 
 // Idle Core Parking

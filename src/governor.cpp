@@ -31,14 +31,14 @@ PerformanceGovernor::NormalizedSignals PerformanceGovernor::Normalize(const Syst
     return sig;
 }
 
-// Phase 6: Policy Injection
+// Policy Injection
 void PerformanceGovernor::UpdatePolicy(const PolicyParameters& params) {
     m_params = params;
 }
 
 // 5.4 Dominant Pressure Selector
 DominantPressure PerformanceGovernor::SelectDominant(const NormalizedSignals& signals) {
-    // Phase 6: Use tunable parameters instead of constants
+    // Use tunable parameters instead of constants
     if (signals.latency > m_params.latencyThreshold) return DominantPressure::Latency;
     if (signals.memory > m_params.memThreshold) return DominantPressure::Memory;
     if (signals.disk > m_params.diskThreshold) return DominantPressure::Disk;
@@ -73,7 +73,7 @@ AllowedActionClass PerformanceGovernor::DetermineActions(SystemMode mode, Domina
     return AllowedActionClass::None;
 }
 
-// Section 6: Public API Implementation
+// Public API Implementation
 GovernorDecision PerformanceGovernor::Decide(const SystemSignalSnapshot& snapshot) {
     GovernorDecision decision;
     

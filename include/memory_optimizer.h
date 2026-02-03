@@ -40,13 +40,13 @@ public:
     // Main loop meant to be run in a dedicated thread
     void RunThread();
 
-    // Phase 13: Memory Muscles
+    // Memory Muscles
     enum class TrimIntensity {
         Gentle,  // Trim only if WorkingSet > 100MB
         Hard     // Unconditional trim + Standby List purge
     };
 
-    // Phase 13.1: One-Shot Trigger
+    // One-Shot Trigger
     void PerformSmartTrim(const std::vector<DWORD>& targets, TrimIntensity intensity);
 
 private:

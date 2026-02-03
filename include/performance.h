@@ -38,7 +38,7 @@ class ServiceSuspensionGuard;
 class InputModeGuard;
 class AudioModeGuard;
 
-// #include "policy_optimizer.h" // Removed: Decoupled in Phase 6
+// #include "policy_optimizer.h"
 
 class PerformanceGuardian {
 private:
@@ -88,7 +88,7 @@ private:
     std::mutex m_mtx;
     std::unordered_map<DWORD, GameSession> m_sessions;
     
-    // Phase 6: PerformanceGuardian now owns the Static Profiles (Memory)
+    // PerformanceGuardian now owns the Static Profiles (Memory)
     std::unordered_map<std::wstring, GameProfile> m_profiles;
     void LoadProfiles();
     void SaveProfiles();

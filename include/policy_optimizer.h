@@ -25,7 +25,7 @@
 #include <mutex>
 #include <filesystem>
 
-// Phase 6: The PolicyOptimizer
+// The PolicyOptimizer
 // "Names enforce behavior."
 class PolicyOptimizer {
 public:

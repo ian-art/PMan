@@ -34,7 +34,7 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
         return decision;
     }
 
-    // Phase 7: Confidence-Driven Conservatism (Kill Switch)
+    // Confidence-Driven Conservatism (Kill Switch)
     // Rule: "if (prediction.confidence < CONFIDENCE_MIN) Arbiter must return NoAction"
     if (consequence.confidence < CONFIDENCE_MIN) {
         decision.selectedAction = BrainAction::Maintain;

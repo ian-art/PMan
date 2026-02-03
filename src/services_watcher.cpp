@@ -35,11 +35,11 @@ void ServiceWatcher::Initialize() {
 static std::atomic<bool> s_scanInProgress{false};
 static std::thread s_workerThread; // Managed thread handle
 
-// Phase 14: Track suspended services for auto-resume
+// Track suspended services for auto-resume
 static std::vector<std::wstring> s_suspendedServices;
 static std::mutex s_suspendMtx;
 
-// Phase 14.2: The Allowlist (Safe & Heavy)
+// The Allowlist (Safe & Heavy)
 static const std::vector<std::wstring> SAFE_HEAVY_SERVICES = {
     L"SysMain",     // Superfetch (High Disk Usage)
     L"WSearch",     // Windows Search (High CPU/Disk)
@@ -71,7 +71,7 @@ void ServiceWatcher::OnTick() {
     });
 }
 
-// Phase 14.2: Check if other running services depend on this one
+// Check if other running services depend on this one
 static bool HasActiveDependents(SC_HANDLE hSvc) {
     DWORD bytesNeeded = 0;
     DWORD count = 0;
@@ -187,7 +187,7 @@ bool ServiceWatcher::IsProcessIdle(DWORD pid) {
 }
 
 // --------------------------------------------------------------------------
-// Phase 14: Service Muscles Implementation
+// Service Muscles Implementation
 // --------------------------------------------------------------------------
 
 bool ServiceWatcher::IsSafeToSuspend(const std::wstring& serviceName) {

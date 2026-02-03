@@ -46,11 +46,11 @@ class ExplorerBooster;
 class IdleAffinityManager;
 class MemoryOptimizer;
 class InputGuardian; 
-class PolicyOptimizer; // Phase 6
+class PolicyOptimizer; // Logic for adaptive parameter tuning
 class PerformanceGovernor;
 class ConsequenceEvaluator;
-class PredictiveModel; // Phase 7
-class DecisionArbiter; // Phase 4
+class PredictiveModel; // Machine learning model for state prediction
+class DecisionArbiter; // Logic for resolving conflicting priority requests
 class Executor;
 
 class PManContext {
@@ -219,12 +219,12 @@ public:
         std::unique_ptr<IdleAffinityManager>   idle;
         std::unique_ptr<MemoryOptimizer>       mem;
         std::unique_ptr<InputGuardian>         input; 
-        std::unique_ptr<PolicyOptimizer>       optimizer; // Phase 6
+        std::unique_ptr<PolicyOptimizer>       optimizer; // Runtime instance of the parameter optimizer
         std::unique_ptr<PerformanceGovernor>   governor;
-        std::unique_ptr<ConsequenceEvaluator>  evaluator; // Phase 3
-        std::unique_ptr<PredictiveModel>       model;     // Phase 7
-        std::unique_ptr<DecisionArbiter>       arbiter;   // Phase 4
-        // Phase 11: The Executor Subsystem
+        std::unique_ptr<ConsequenceEvaluator>  evaluator; // Engine for calculating the cost/benefit of potential actions
+        std::unique_ptr<PredictiveModel>       model;     // Active predictive model for system load
+        std::unique_ptr<DecisionArbiter>       arbiter;   // Central arbiter for final decision making
+        // Subsystem for safely executing and verifying actions
         std::unique_ptr<Executor>              executor;
     } subs;
 

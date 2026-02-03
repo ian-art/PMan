@@ -23,11 +23,11 @@
 #include <algorithm>
 
 void PredictiveModel::Initialize() {
-    Log("[INIT] Predictive Model (Phase 7) Initialized.");
+    Log("[INIT] Predictive Model Initialized.");
 }
 
 void PredictiveModel::Shutdown() {
-    // Phase 7: Persisted stats would be saved here
+    // Persisted stats would be saved here
 }
 
 CostVector PredictiveModel::QuantizeRealOutcome(const OptimizationFeedback& fb) {

@@ -22,7 +22,7 @@
 #include "logger.h"
 #include "throttle_manager.h"
 #include "memory_optimizer.h"
-#include "services_watcher.h" // Phase 14
+#include "services_watcher.h"
 #include "nt_wrapper.h"
 #include "tweaks.h" // For privilege separation calls
 #include <psapi.h>
@@ -30,7 +30,7 @@
 #include <shellapi.h> // For SHQueryUserNotificationState
 
 // --------------------------------------------------------------------------
-// Process Scout (Phase 11.2)
+// Process Enumeration and Classification Logic
 // --------------------------------------------------------------------------
 
 void ProcessScout::UpdateCache() {
@@ -56,7 +56,7 @@ void ProcessScout::UpdateCache() {
         snap.identity = { pid, {0, 0} }; 
         snap.timestamp = now;
         
-        // [FIX] Phase 1.5: Real Categorization
+        // Heuristic categorization of processes based on session and window state
         HWND hFg = GetForegroundWindow();
         DWORD fgPid = 0;
         GetWindowThreadProcessId(hFg, &fgPid);
@@ -86,7 +86,7 @@ std::vector<ProcessScout::Snapshot> ProcessScout::GetSnapshot() const {
 }
 
 // --------------------------------------------------------------------------
-// Executor Implementation (Phase 11.1)
+// Core Action Execution Logic
 // --------------------------------------------------------------------------
 
 Executor& Executor::Get() {
@@ -101,7 +101,7 @@ Executor::~Executor() { Shutdown(); }
 void Executor::Initialize() {
     Log("Executor: Initializing Nervous System...");
     
-    // [FIX] Phase 11.5: Watchdog Timer
+    // Initialize the safety monitoring thread
     m_watchdogRunning = true;
     m_watchdogThread = std::thread(&Executor::WatchdogLoop, this);
 }
@@ -130,10 +130,10 @@ void Executor::WatchdogLoop() {
 std::optional<Executor::Receipt> Executor::Execute(const ActionIntent& intent) {
     std::lock_guard<std::mutex> lock(m_stateMtx);
 
-    // 1. Resolve Targets (Phase 11.2)
+    // 1. Identify specific processes to target
     TargetSet targets = ResolveTargets(intent.action);
 
-    // 2. Validate (Phase 11.3)
+    // 2. Perform safety validation on targets
     if (!HardValidate(intent, targets)) {
         Log("Executor: Intent VETOED by HardValidate.");
         return std::nullopt;
@@ -165,7 +165,7 @@ std::optional<Executor::Receipt> Executor::Execute(const ActionIntent& intent) {
 
     if (!success) return std::nullopt;
 
-    // 4. Issue Receipt (Phase 16.4)
+    // 4. Generate a transaction record for potential rollback
     Receipt receipt;
     receipt.id = m_nextReceiptId++;
     receipt.action = intent.action;
@@ -176,19 +176,19 @@ std::optional<Executor::Receipt> Executor::Execute(const ActionIntent& intent) {
     return receipt;
 }
 
-// Phase 11.2: Targeting Logic
+// Logic to translate abstract intents into concrete process lists
 TargetSet Executor::ResolveTargets(BrainAction action) {
     TargetSet result;
     result.snapshotTime = GetTickCount64();
     
     // Fetch snapshot from Scout
-    // In Phase 11.2, this reads the cache.
+    // Criteria to select background work while excluding interactive apps
     // For safety, we trigger an update if the cache is stale (not implemented here for brevity).
     m_scout->UpdateCache(); 
     auto snapshot = m_scout->GetSnapshot();
 
     for (const auto& snap : snapshot) {
-        // Filter Logic (Roadmap Phase 11.2)
+        // Filter Logic
         // Target = (Category == Background_Work)
         // Exclude = (Category == Interactive_Game || System_Critical || Interactive_Desktop)
         
@@ -218,7 +218,7 @@ TargetSet Executor::ResolveTargets(BrainAction action) {
     return result;
 }
 
-// Phase 11.3: Defense in Depth (Veto Layer)
+// Hard-coded safety rules to prevent system instability
 bool Executor::HardValidate(const ActionIntent& intent, const TargetSet& targets) {
     // Rule 1: External Governor (Game Mode) Check
     // ... (Existing Game Mode check) ...
@@ -234,7 +234,7 @@ bool Executor::HardValidate(const ActionIntent& intent, const TargetSet& targets
             if (intent.action == BrainAction::Throttle_Aggressive) return false;
         }
 
-        // [FIX] Affinity Mask 0 Validation (Roadmap 6 Enhancement)
+        // [FIX] Validates process state to avoid touching zombies or locked threads
         // Prevent touching processes with invalid or locked affinity states
         HANDLE hCheck = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, target.pid);
         if (hCheck) {
@@ -255,7 +255,7 @@ bool Executor::HardValidate(const ActionIntent& intent, const TargetSet& targets
     return true;
 }
 
-// Phase 3.4: Privilege Separation Implementation
+// Implementation of isolated experimental parameters
 bool Executor::ApplyTestProfile(DWORD pid, TestType type, int param) {
     // This runs in the "Executor" context (Elevated/Service).
     // [ARCH-FIX] SAFETY WARNING: This bypasses the Deterministic Controller.
@@ -299,14 +299,14 @@ bool Executor::ApplyThrottle(const TargetSet& targets, bool aggressive) {
 }
 
 bool Executor::ApplyMemoryTrim(const TargetSet& targets, bool aggressive) {
-    // Phase 13 Integration
+    // Integration with the Memory Optimizer subsystem
     std::vector<DWORD> pids;
     for (const auto& t : targets.targets) pids.push_back(t.pid);
 
     auto& mem = PManContext::Get().subs.mem;
     if (mem) {
         // Access via Friend or Public API? 
-        // We added PerformSmartTrim in Phase 13.
+        // We added PerformSmartTrim
         // We cast to access the new method if it's not in the unique_ptr type yet (it is).
         mem->PerformSmartTrim(pids, aggressive ? MemoryOptimizer::TrimIntensity::Hard : MemoryOptimizer::TrimIntensity::Gentle);
     }
@@ -314,7 +314,7 @@ bool Executor::ApplyMemoryTrim(const TargetSet& targets, bool aggressive) {
 }
 
 bool Executor::ApplyServiceSuspension(const TargetSet& /*targets*/) {
-    // Phase 14: Service Muscles
+    // Logic for suspending non-essential services
     // Note: We ignore the 'targets' list because Service Suspension is a global policy 
     // defined by the AllowedList in ServiceWatcher. We don't target arbitrary services.
     ServiceWatcher::SuspendAllowedServices();
@@ -342,7 +342,7 @@ bool Executor::Revert(const Receipt& receipt) {
         }
     }
     else if (receipt.action == BrainAction::Suspend_Services) {
-        // Phase 14.3: Auto-Resume
+        // Automatically resumes previously suspended services
         ServiceWatcher::ResumeSuspendedServices();
     }
     // Memory trim cannot be reverted (it's destructive), which is fine.
@@ -350,7 +350,7 @@ bool Executor::Revert(const Receipt& receipt) {
     return true;
 }
 
-// Phase 16.5: Feedback Loop (Implementation)
+// Logic for processing and logging action outcomes
 void Executor::SubmitActionResult(ActionResult result) {
     std::lock_guard<std::mutex> lock(m_stateMtx);
     
@@ -361,7 +361,7 @@ void Executor::SubmitActionResult(ActionResult result) {
     if (!result.success) {
         Log("Executor: Action Failed! Error=" + std::to_string(result.win32Error));
         
-        // Phase 16.2: Penalty Injection
+        // Calculates negative reinforcement for failed actions
         // If we were fully connected via IPC, we would send a negative reward 
         // back to the Brain here.
     } else {

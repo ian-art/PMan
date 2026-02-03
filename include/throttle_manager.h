@@ -36,14 +36,14 @@ public:
     // Policy to enroll a process
     void ManageProcess(DWORD pid);
 
-    // Phase 12: Granular Throttle Levels
+    // Granular Throttle Levels
     enum class ThrottleLevel {
         None,
         Mild,       // Priority: Below Normal, EcoQoS: On
         Aggressive  // Priority: Idle, Hard CPU Cap: 5-10%
     };
 
-    // Phase 12.2: Executor Integration Point
+    // Executor Integration Point
     void ApplyThrottle(DWORD pid, ThrottleLevel level);
 
 private:
@@ -61,7 +61,7 @@ private:
     bool IsInCooldown(DWORD pid);
     std::unordered_map<DWORD, uint64_t> m_cooldowns; // PID -> Timestamp (end time)
 
-    // [FIX] Per-process Job Objects for granular CPU capping (Phase 12)
+    // [FIX] Per-process Job Objects for granular CPU capping
     // Allows aggressive 5% Hard Cap vs Mild 40% Soft Cap
     std::unordered_map<DWORD, HANDLE> m_processJobs;
 

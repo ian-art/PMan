@@ -30,14 +30,14 @@ public:
     static void Initialize();
     static void OnTick();
 
-    // Phase 14: Service Muscles (Brain-Controlled)
+    // Service Muscles (Brain-Controlled)
     static void SuspendAllowedServices();
     static void ResumeSuspendedServices();
 
 private:
     static void ScanAndTrimManualServices();
     
-    // Phase 14.2: Dependency Safety
+    // Dependency Safety
     static bool IsSafeToSuspend(const std::wstring& serviceName);
     
     static bool IsServiceRunningAndIdle(const std::wstring& serviceName);

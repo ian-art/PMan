@@ -25,11 +25,11 @@
 #include "memory_optimizer.h"
 #include "input_guardian.h"
 #include "policy_optimizer.h" // Defines PolicyOptimizer
-#include "executor.h" // Phase 11
+#include "executor.h"
 #include "governor.h"
 #include "consequence_evaluator.h"
-#include "predictive_model.h" // Phase 7
-#include "decision_arbiter.h" // Phase 4
+#include "predictive_model.h"
+#include "decision_arbiter.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -39,13 +39,13 @@ PManContext::PManContext() {
     subs.idle       = std::make_unique<IdleAffinityManager>();
     subs.mem        = std::make_unique<MemoryOptimizer>();
     subs.input      = std::make_unique<InputGuardian>();
-    subs.optimizer  = std::make_unique<PolicyOptimizer>(); // Phase 6
+    subs.optimizer  = std::make_unique<PolicyOptimizer>();
     subs.governor   = std::make_unique<PerformanceGovernor>();
     subs.evaluator  = std::make_unique<ConsequenceEvaluator>();
-    subs.model      = std::make_unique<PredictiveModel>(); // Phase 7
-    subs.arbiter    = std::make_unique<DecisionArbiter>(); // Phase 4
+    subs.model      = std::make_unique<PredictiveModel>();
+    subs.arbiter    = std::make_unique<DecisionArbiter>();
     if (subs.model) subs.model->Initialize();
-    subs.executor   = std::unique_ptr<Executor>(new Executor()); // Phase 11
+    subs.executor   = std::unique_ptr<Executor>(new Executor());
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)

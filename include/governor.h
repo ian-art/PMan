@@ -24,16 +24,16 @@
 
 class PerformanceGovernor {
 public:
-    // Section 6: Public API (Hard Contract)
+    // Stateless interface for determining system state and allowed actions
     // Pure function: Inputs -> Outputs. No hidden state. No side effects.
     GovernorDecision Decide(const SystemSignalSnapshot& snapshot);
 
-    // Phase 6: Policy Injection (The only allowed external influence)
+    // Updates internal thresholds based on feedback from the Policy Optimizer
     void UpdatePolicy(const PolicyParameters& params);
 
 private:
     PolicyParameters m_params; // Defaults defined in types.h constructor
-    // Section 5.2: Normalized Signals
+    // Structure for standardized sensor data (0.0-1.0)
     struct NormalizedSignals {
         double cpu;    // 0.0 - 1.0
         double disk;   // 0.0 - 1.0
@@ -41,7 +41,7 @@ private:
         double latency;// 0.0 - 1.0
     };
 
-    // Section 5.1 - 5.6: Logic Pipeline
+    // Internal pipeline for processing signals and determining states
     NormalizedSignals Normalize(const SystemSignalSnapshot& raw);
     DominantPressure SelectDominant(const NormalizedSignals& signals);
     SystemMode ResolveMode(const NormalizedSignals& signals, bool userActive, bool thermal);

@@ -36,7 +36,7 @@ static constexpr DWORD   VAL_BROWSER    = 0x26; // Short Variable, High Boost (D
 static constexpr DWORD   VAL_BACKGROUND = 0x18; // Long Fixed, No Boost (Deep Idle/Maintenance)
 static constexpr DWORD   IOCP_SHUTDOWN_KEY = 0xFFFFFFFF;
 
-// Phase 7: Confidence Threshold (Kill Switch)
+// Minimum probability score (0.0-1.0) required for the predictive model to autonomously execute an action
 static constexpr double CONFIDENCE_MIN = 0.3;
 
 // Internal Operation Modes

@@ -235,7 +235,7 @@ void SramEngine::EvaluateState() {
     m_lastDwmSnapshot = m_dwmFramesMissed; // Update history
 
     // 2. Normalize Metrics (0.0 - 1.0)
-    // Thresholds based on roadmap: <16ms (Good), >100ms (Critical)
+    // Thresholds: <16ms (Good), >100ms (Critical)
     float n_ui    = NormalizeMetric((float)m_uiLatencyMs, 16.0f, 100.0f);
     
     // DWM: >0 drops is bad. >3 drops (in 250ms) is critical.
