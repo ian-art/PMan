@@ -43,6 +43,10 @@
 #include "lifecycle.h"
 #include "hands_rl_engine.h" // [FIX] Required for Executor::Shutdown
 #include "brain_rl_engine.h" // [FIX] Required for AdaptiveEngine::Shutdown
+#include "governor.h"
+#include "consequence_evaluator.h"
+#include "decision_arbiter.h"
+#include "context.h"
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -118,6 +122,101 @@ static uint64_t g_resumeStabilizationTime = 0; // Replaces detached sleep thread
 
 // Removed LaunchProcessAsync (Dead Code / Unsafe Detach)
 // All process launches now use synchronous CreateProcessW or the unified background worker.
+
+// --- Phase 5: Authoritative Control Loop ---
+
+// Helper: Calculate CPU Load locally since SysInfo wrapper is unavailable
+static double GetLocalCpuLoad() {
+    static uint64_t prevTotal = 0, prevIdle = 0;
+    FILETIME idle, kernel, user;
+    if (!GetSystemTimes(&idle, &kernel, &user)) return 0.0;
+
+    uint64_t tIdle = ((uint64_t)idle.dwHighDateTime << 32) | idle.dwLowDateTime;
+    uint64_t tKernel = ((uint64_t)kernel.dwHighDateTime << 32) | kernel.dwLowDateTime;
+    uint64_t tUser = ((uint64_t)user.dwHighDateTime << 32) | user.dwLowDateTime;
+    uint64_t tTotal = tKernel + tUser;
+
+    uint64_t diffTotal = tTotal - prevTotal;
+    uint64_t diffIdle = tIdle - prevIdle;
+
+    prevTotal = tTotal;
+    prevIdle = tIdle;
+
+    if (diffTotal == 0) return 0.0;
+    return (1.0 - ((double)diffIdle / diffTotal)) * 100.0;
+}
+
+static SystemSignalSnapshot CaptureSnapshot() {
+    SystemSignalSnapshot snap = {};
+    
+    // 1. CPU Load (Fixed: Use local helper)
+    snap.cpuLoad = GetLocalCpuLoad();
+
+    // 2. Memory Pressure
+    MEMORYSTATUSEX mem = { sizeof(mem) };
+    if (GlobalMemoryStatusEx(&mem)) {
+        snap.memoryPressure = (double)mem.dwMemoryLoad;
+    }
+
+    // 3. Disk & Latency
+    // Note: Assuming SysInfo exposes these, otherwise default to safe 0
+    snap.diskQueueLen = 0.0; // Placeholder for PDH Queue Length
+    snap.latencyMs = PManContext::Get().telem.lastDpcLatency.load();
+
+    // 4. Thermal & User Activity
+    snap.isThermalThrottling = false; // Placeholder for ThermalZone API
+    
+    // Check if user has been active in the last 30 seconds
+    uint64_t lastInput = g_explorerBooster.GetLastUserActivity();
+    snap.userActive = (GetTickCount64() - lastInput) < 30000;
+
+    return snap;
+}
+
+static void ExecuteDecision(const ArbiterDecision& decision) {
+    // Law 4: Inaction must be explicit (BrainAction::Maintain)
+    if (decision.selectedAction == BrainAction::Maintain) return;
+
+    // Log the authoritative decision
+    std::string reasonStr = "ReasonID:" + std::to_string((int)decision.reason);
+    Log("[AUTONOMY] Arbiter Selected: " + std::to_string((int)decision.selectedAction) + " | " + reasonStr);
+
+    // Execute via Phase 11 Executor (if available)
+    if (auto& executor = PManContext::Get().subs.executor) {
+        ActionIntent intent;
+        intent.action = decision.selectedAction;
+        intent.timestamp = GetTickCount64();
+        intent.confidence = 1.0; // Deterministic phase has 100% confidence
+        intent.nonce = intent.timestamp;
+        
+        executor->Execute(intent);
+    }
+}
+
+static void RunAutonomousCycle() {
+    // 1. Capture State
+    SystemSignalSnapshot state = CaptureSnapshot();
+
+    auto& ctx = PManContext::Get();
+    // Safety: Ensure subsystems are initialized
+    if (!ctx.subs.governor || !ctx.subs.evaluator || !ctx.subs.arbiter) return;
+
+    // 2. Governor: Proposes Action Classes (Law 2)
+    GovernorDecision govResult = ctx.subs.governor->Decide(state);
+
+    // 3. Evaluator: Predicts Consequences (Law 3)
+    ConsequenceResult scores = ctx.subs.evaluator->Evaluate(
+        govResult.mode, 
+        govResult.dominant, 
+        govResult.allowedActions
+    );
+
+    // 4. Arbiter: Makes Final Decision (Law 1)
+    ArbiterDecision decision = ctx.subs.arbiter->Decide(govResult, scores);
+
+    // 5. Execute (Law 1: Arbiter Owns Reality)
+    ExecuteDecision(decision);
+}
 
 // --- Background Worker for Async Tasks ---
 static std::thread g_backgroundWorker;
@@ -1557,6 +1656,12 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                     g_backgroundTasks.push_back([]{
 						// Moved ExplorerBooster to background thread to prevent blocking the Keyboard Hook
 						g_explorerBooster.OnTick();
+
+                        // Phase 5: Authoritative Control Loop
+                        // This is the SINGLE execution choke point for all autonomy.
+                        RunAutonomousCycle();
+
+						// Legacy/Advisory Updates (Data Collection Only)
 						g_perfGuardian.OnPerformanceTick();
                         
                         // [FIX] Move heavy window checks to background to prevent main thread stutter
