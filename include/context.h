@@ -55,6 +55,7 @@ class Executor;
 class ShadowExecutor; // Simulation Layer
 class RealitySampler; // Reality Measurement Layer
 class PredictionLedger; // Prediction Error Statistics
+class ConfidenceTracker; // Long-term Belief Stability
 
 class PManContext {
 public:
@@ -232,6 +233,7 @@ public:
         std::unique_ptr<ShadowExecutor>        shadow;    // Shadow Execution Layer
         std::unique_ptr<RealitySampler>        reality;   // Reality Measurement Layer
         std::unique_ptr<PredictionLedger>      ledger;    // Prediction Error Statistics
+        std::unique_ptr<ConfidenceTracker>     confidence;// Long-term Belief Stability
     } subs;
 
 private:

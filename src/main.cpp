@@ -50,6 +50,7 @@
 #include "shadow_executor.h"
 #include "reality_sampler.h"
 #include "prediction_ledger.h"
+#include "confidence_tracker.h"
 #include "context.h"
 #include <thread>
 #include <tlhelp32.h>
@@ -244,8 +245,15 @@ static void RunAutonomousCycle() {
         error = ctx.subs.ledger->Compute(shadowDelta, observed);
     }
 
-    // 9. Logger (Trace full decision chain + Reality + Error)
-    // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Reality -> Error"
+    // 9. ConfidenceTracker (Observe Error)
+    ConfidenceMetrics confMetrics = {0.0, 0.0, 0.0};
+    if (ctx.subs.confidence) {
+        ctx.subs.confidence->Observe(error);
+        confMetrics = ctx.subs.confidence->GetMetrics();
+    }
+
+    // 10. Logger (Trace full decision chain + Reality + Error + Confidence)
+    // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Reality -> Error -> Confidence"
     std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
                       " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
                       " ArbAct:" + std::to_string((int)decision.selectedAction) + 
@@ -258,6 +266,9 @@ static void RunAutonomousCycle() {
                       " Error:[" + std::to_string(error.cpuError) + 
                       "," + std::to_string(error.thermalError) + 
                       "," + std::to_string(error.latencyError) + "]" +
+                      " ConfidenceVar:[" + std::to_string(confMetrics.cpuVariance) +
+                      "," + std::to_string(confMetrics.thermalVariance) +
+                      "," + std::to_string(confMetrics.latencyVariance) + "]" +
                       " Rsn:" + std::to_string((int)decision.reason);
     Log(log);
 }
