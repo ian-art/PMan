@@ -25,18 +25,21 @@
 struct SandboxResult {
     bool executed;
     bool reversible;
+    bool committed;
     const char* reason;
 };
 
 class SandboxExecutor {
 public:
-    // Zero-Risk Authority Probe
-    // Attempts to physically execute the decision on a safe target (Self)
-    // and strictly validates reversibility.
-    SandboxResult TryExecute(const ArbiterDecision& decision);
+    // Zero-Risk Authority Gate
+    // Executes Reversible Actions (Throttle_Mild) on Self.
+    // If approved, COMMITS the action (no rollback).
+    SandboxResult TryExecute(ArbiterDecision& decision);
 
-    // Guaranteed State Restoration
+    // Guaranteed State Restoration (Manual override only)
     void Rollback();
+
+    ~SandboxExecutor();
 
 private:
     bool IsReversible(BrainAction action) const;
@@ -45,6 +48,10 @@ private:
     bool m_actionApplied = false;
     DWORD m_originalPriorityClass = 0;
     HANDLE m_hTarget = nullptr;
+
+    // Time-Bound Authority Lease
+    uint64_t m_leaseStart = 0;
+    static constexpr uint64_t MAX_LEASE_MS = 5000; // 5 Seconds Max Duration
 };
 
 #endif // PMAN_SANDBOX_EXECUTOR_H

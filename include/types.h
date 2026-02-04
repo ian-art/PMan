@@ -391,10 +391,16 @@ struct ArbiterDecision {
     BrainAction selectedAction;
     DecisionReason reason;
     uint64_t decisionTime;
+    bool isReversible = false; // Authority Grant (Default: False)
     
     // Helper for "Do Nothing" defaults
     static ArbiterDecision Maintain(DecisionReason r) {
-        return { BrainAction::Maintain, r, 0 };
+        ArbiterDecision d;
+        d.selectedAction = BrainAction::Maintain;
+        d.reason = r;
+        d.decisionTime = 0;
+        d.isReversible = false;
+        return d;
     }
 };
 

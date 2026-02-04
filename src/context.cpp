@@ -34,6 +34,7 @@
 #include "reality_sampler.h"
 #include "prediction_ledger.h"
 #include "confidence_tracker.h"
+#include "sandbox_executor.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -54,6 +55,7 @@ PManContext::PManContext() {
     subs.reality    = std::make_unique<RealitySampler>();
     subs.ledger     = std::make_unique<PredictionLedger>();
     subs.confidence = std::make_unique<ConfidenceTracker>();
+    subs.sandbox    = std::make_unique<SandboxExecutor>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)

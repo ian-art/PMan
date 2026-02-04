@@ -232,17 +232,19 @@ static void RunAutonomousCycle() {
         shadowDelta = ctx.subs.shadow->Simulate(decision, telemetry);
     }
 
-    // 6. Sandbox Executor (Zero-Risk Authority Probe)
-    // Physically execute the action on a safe target, then immediately rollback.
-    // This proves authority without lasting side effects.
-    SandboxExecutor sandbox;
-    SandboxResult sbResult = sandbox.TryExecute(decision);
-    sandbox.Rollback(); // IMMEDIATE Rollback
+    // 6. Sandbox Executor (Time-Bound Authority Lease)
+    // Physically execute (or maintain) the action on a safe target.
+    // Checks lease expiry and enforces automatic reversion.
+    SandboxResult sbResult = { false, false, false, "None" };
+    if (ctx.subs.sandbox) {
+        sbResult = ctx.subs.sandbox->TryExecute(decision);
+    }
 
-    // 7. Force No Action (The system cannot change system state)
-    // [FIX] Explicitly force inaction to prevent accidental execution.
-    // This satisfies the "NoAction by omission is not enough" requirement.
-    decision.selectedAction = BrainAction::Maintain;
+    // 7. Conditional Execution (The "1 Bit" of Authority)
+    // If the action was not marked reversible (and committed) by Sandbox, force inaction.
+    if (!decision.isReversible) {
+        decision.selectedAction = BrainAction::Maintain;
+    }
 
     // 8. RealitySampler (Measure actual outcome)
     // Capture state AFTER the tick (and potential action, if it were enabled)
@@ -274,7 +276,7 @@ static void RunAutonomousCycle() {
                       " Shadow:[" + std::to_string(shadowDelta.cpuLoadDelta) + 
                       "," + std::to_string(shadowDelta.thermalDelta) + 
                       "," + std::to_string(shadowDelta.latencyDelta) + "]" +
-                      " Sandbox:[" + (sbResult.executed ? "Executed" : "Rejected") +
+                      " Sandbox:[" + (sbResult.committed ? "Committed" : "RolledBack/Rejected") +
                       "," + (sbResult.reversible ? "Rev" : "NonRev") +
                       "," + (sbResult.reason) + "]" +
                       " Observed:[" + std::to_string(observed.cpuLoadDelta) + 
