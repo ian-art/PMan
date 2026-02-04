@@ -47,6 +47,7 @@
 #include "consequence_evaluator.h"
 #include "predictive_model.h" // Machine learning state prediction
 #include "decision_arbiter.h"
+#include "shadow_executor.h"
 #include "context.h"
 #include <thread>
 #include <tlhelp32.h>
@@ -215,16 +216,25 @@ static void RunAutonomousCycle() {
     // 4. DecisionArbiter (Decide)
     ArbiterDecision decision = ctx.subs.arbiter->Decide(priorities, consequences);
 
-    // 5. Force No Action (The system cannot change system state)
+    // 5. ShadowExecutor (Simulate Only)
+    PredictedStateDelta shadowDelta = {0, 0, 0};
+    if (ctx.subs.shadow) {
+        shadowDelta = ctx.subs.shadow->Simulate(decision, telemetry);
+    }
+
+    // 6. Force No Action (The system cannot change system state)
     // [FIX] Explicitly force inaction to prevent accidental execution.
     // This satisfies the "NoAction by omission is not enough" requirement.
     decision.selectedAction = BrainAction::Maintain;
 
-    // 6. Logger (Trace full decision chain)
-    // "Logs show Governor -> Evaluator -> Arbiter every cycle"
+    // 7. Logger (Trace full decision chain)
+    // "Logs show Governor -> Evaluator -> Arbiter -> Shadow every cycle"
     std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
                       " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
                       " ArbAct:" + std::to_string((int)decision.selectedAction) + 
+                      " Shadow:[" + std::to_string(shadowDelta.cpuLoadDelta) + 
+                      "," + std::to_string(shadowDelta.thermalDelta) + 
+                      "," + std::to_string(shadowDelta.latencyDelta) + "]" +
                       " Rsn:" + std::to_string((int)decision.reason);
     Log(log);
 }

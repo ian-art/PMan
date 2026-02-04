@@ -30,6 +30,7 @@
 #include "consequence_evaluator.h"
 #include "predictive_model.h"
 #include "decision_arbiter.h"
+#include "shadow_executor.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -46,6 +47,7 @@ PManContext::PManContext() {
     subs.arbiter    = std::make_unique<DecisionArbiter>();
     if (subs.model) subs.model->Initialize();
     subs.executor   = std::unique_ptr<Executor>(new Executor());
+    subs.shadow     = std::make_unique<ShadowExecutor>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)

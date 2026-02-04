@@ -52,6 +52,7 @@ class ConsequenceEvaluator;
 class PredictiveModel; // Machine learning model for state prediction
 class DecisionArbiter; // Logic for resolving conflicting priority requests
 class Executor;
+class ShadowExecutor; // Simulation Layer
 
 class PManContext {
 public:
@@ -226,6 +227,7 @@ public:
         std::unique_ptr<DecisionArbiter>       arbiter;   // Central arbiter for final decision making
         // Subsystem for safely executing and verifying actions
         std::unique_ptr<Executor>              executor;
+        std::unique_ptr<ShadowExecutor>        shadow;    // Shadow Execution Layer
     } subs;
 
 private:
