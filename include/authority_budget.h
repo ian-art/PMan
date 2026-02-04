@@ -38,10 +38,15 @@ public:
     // Getters for logging
     int GetUsed() const;
     int GetMax() const;
+    bool IsExhausted() const;
+
+    // Manual Recovery (Auditable)
+    void ResetByExternalSignal();
 
 private:
     int m_maxBudget;
     int m_usedBudget;
+    bool m_exhausted;
 };
 
 #endif // PMAN_AUTHORITY_BUDGET_H

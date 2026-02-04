@@ -259,17 +259,24 @@ static void RunAutonomousCycle() {
 
     // [NEW] Authority Budget (Cumulative Cost Limiter)
     // Check if we can afford the action cost BEFORE trying to execute.
-    // If budget is exhausted, we force Maintain.
     int actionCost = 0;
     bool budgetExhausted = false;
     if (ctx.subs.budget) {
-        actionCost = ctx.subs.budget->GetCost(decision.selectedAction);
-        if (!ctx.subs.budget->CanSpend(actionCost)) {
-            // Veto: Budget exhausted. Force Maintain.
-            decision.selectedAction = BrainAction::Maintain;
-            decision.reason = DecisionReason::GovernorRestricted; 
-            decision.isReversible = false; // Revoke authority
-            budgetExhausted = true;
+        // 1. Check Hard Exhaustion State
+        if (ctx.subs.budget->IsExhausted()) {
+             decision.selectedAction = BrainAction::Maintain;
+             decision.reason = DecisionReason::GovernorRestricted;
+             decision.isReversible = false;
+             budgetExhausted = true;
+        } 
+        // 2. Check Affordability
+        else {
+             actionCost = ctx.subs.budget->GetCost(decision.selectedAction);
+             if (!ctx.subs.budget->CanSpend(actionCost)) {
+                 decision.selectedAction = BrainAction::Maintain;
+                 decision.reason = DecisionReason::GovernorRestricted;
+                 decision.isReversible = false;
+             }
         }
     }
 
@@ -318,8 +325,8 @@ static void RunAutonomousCycle() {
     // 10. Logger (Trace full decision chain + Reality + Error + Confidence + Sandbox + Budget)
     std::string budgetLog = "";
     if (ctx.subs.budget) {
-        if (budgetExhausted) {
-            budgetLog = " Budget:[Rejected(Exhausted)]";
+        if (ctx.subs.budget->IsExhausted()) {
+            budgetLog = " Budget:[Exhausted -> Authority Locked]";
         } else {
             budgetLog = " Budget:[" + std::to_string(ctx.subs.budget->GetUsed()) + 
                         "/" + std::to_string(ctx.subs.budget->GetMax()) + "]";
@@ -1735,6 +1742,12 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                     g_sessionCache.store(nullptr, std::memory_order_release);
                     Sleep(250);
                     LoadConfig();
+                    
+                    // [RECOVERY] Reset Budget on External Signal (Config Reload)
+                    // This allows operators to restore authority without restarting the process.
+                    if (PManContext::Get().subs.budget) {
+                        PManContext::Get().subs.budget->ResetByExternalSignal();
+                    }
                 });
             }
             g_backgroundCv.notify_one();

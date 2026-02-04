@@ -18,16 +18,23 @@
  */
 
 #include "authority_budget.h"
+#include "logger.h"
 
-AuthorityBudget::AuthorityBudget() : m_maxBudget(100), m_usedBudget(0) {}
+AuthorityBudget::AuthorityBudget() : m_maxBudget(100), m_usedBudget(0), m_exhausted(false) {}
 
 bool AuthorityBudget::CanSpend(int cost) const {
+    // Hard Lock: No spending allowed if exhausted
+    if (m_exhausted) return false;
     return (m_usedBudget + cost) <= m_maxBudget;
 }
 
 void AuthorityBudget::Spend(int cost) {
     if (CanSpend(cost)) {
         m_usedBudget += cost;
+        // Hard Exhaustion: Lock the budget if limit is reached
+        if (m_usedBudget >= m_maxBudget) {
+            m_exhausted = true;
+        }
     }
 }
 
@@ -44,3 +51,10 @@ int AuthorityBudget::GetCost(BrainAction action) const {
 
 int AuthorityBudget::GetUsed() const { return m_usedBudget; }
 int AuthorityBudget::GetMax() const { return m_maxBudget; }
+bool AuthorityBudget::IsExhausted() const { return m_exhausted; }
+
+void AuthorityBudget::ResetByExternalSignal() {
+    m_usedBudget = 0;
+    m_exhausted = false;
+    Log("Budget: Reset (ExternalSignal)");
+}
