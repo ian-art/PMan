@@ -19,11 +19,8 @@
 
 #include "shadow_executor.h"
 
-PredictedStateDelta ShadowExecutor::Simulate(const ArbiterDecision& decision, const SystemSignalSnapshot& telemetry) {
-    // Deterministic mathematical projection.
-    // No system calls, no OS APIs, no memory of past runs.
-    
-    PredictedStateDelta delta = {0, 0, 0};
+PredictedStateDelta ShadowExecutor::Simulate(const ArbiterDecision& decision, const SystemSignalSnapshot& /*telemetry*/) {
+    PredictedStateDelta delta = { 0, 0, 0 };
 
     switch (decision.selectedAction) {
         case BrainAction::Maintain:

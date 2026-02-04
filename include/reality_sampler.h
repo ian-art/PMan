@@ -22,12 +22,6 @@
 
 #include "types.h"
 
-struct ObservedStateDelta {
-    int cpuLoadDelta;
-    int thermalDelta;
-    int latencyDelta;
-};
-
 class RealitySampler {
 public:
     // Pure measurement: Before -> After -> Delta.

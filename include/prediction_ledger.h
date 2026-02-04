@@ -24,9 +24,9 @@
 #include "reality_sampler.h" // For ObservedStateDelta
 
 struct PredictionError {
-    int cpuError;
-    int thermalError;
-    int latencyError;
+    double cpuError;
+    double thermalError;
+    double latencyError;
 };
 
 class PredictionLedger {

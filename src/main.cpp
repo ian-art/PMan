@@ -181,25 +181,7 @@ static SystemSignalSnapshot CaptureSnapshot() {
     return snap;
 }
 
-static void ExecuteDecision(const ArbiterDecision& decision) {
-    // Law 4: Inaction must be explicit (BrainAction::Maintain)
-    if (decision.selectedAction == BrainAction::Maintain) return;
-
-    // Log the authoritative decision
-    std::string reasonStr = "ReasonID:" + std::to_string((int)decision.reason);
-    Log("[AUTONOMY] Arbiter Selected: " + std::to_string((int)decision.selectedAction) + " | " + reasonStr);
-
-    // Execute via Executor (if available)
-    if (auto& executor = PManContext::Get().subs.executor) {
-        ActionIntent intent;
-        intent.action = decision.selectedAction;
-        intent.timestamp = GetTickCount64();
-        intent.confidence = 1.0; // Deterministic has 100% confidence
-        intent.nonce = intent.timestamp;
-        
-        executor->Execute(intent);
-    }
-}
+// [REMOVED] ExecuteDecision (Unused: Logic moved to RunAutonomousCycle/SandboxExecutor)
 
 // Persistent state for Outcome Guard (Previous Tick)
 static PredictedStateDelta g_lastPredicted = {0,0,0};

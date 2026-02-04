@@ -22,12 +22,6 @@
 
 #include "types.h"
 
-struct PredictedStateDelta {
-    int cpuLoadDelta;
-    int thermalDelta;
-    int latencyDelta;
-};
-
 class ShadowExecutor {
 public:
     // Pure simulation: Inputs -> Outputs. No side effects.

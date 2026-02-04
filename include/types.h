@@ -404,6 +404,20 @@ struct ArbiterDecision {
     }
 };
 
+// --- Prediction & Reality Types ---
+
+struct PredictedStateDelta {
+    double cpuLoadDelta;
+    double thermalDelta;
+    double latencyDelta;
+};
+
+struct ObservedStateDelta {
+    double cpuLoadDelta;
+    double thermalDelta;
+    double latencyDelta;
+};
+
 // Executor Intent Structure
 struct ActionIntent {
     BrainAction action;
