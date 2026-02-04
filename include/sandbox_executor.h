@@ -40,6 +40,9 @@ public:
     // Guaranteed State Restoration (Manual override only)
     void Rollback();
 
+    // State Query for Safety Layers
+    bool IsLeaseActive() const;
+
     ~SandboxExecutor();
 
 private:

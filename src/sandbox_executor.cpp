@@ -159,6 +159,10 @@ void SandboxExecutor::Rollback() {
     }
 }
 
+bool SandboxExecutor::IsLeaseActive() const {
+    return m_actionApplied;
+}
+
 SandboxExecutor::~SandboxExecutor() {
     // Destructor ensures Handle hygiene, but DOES NOT revert priority if committed.
     if (m_hTarget) {

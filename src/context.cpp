@@ -36,6 +36,7 @@
 #include "confidence_tracker.h"
 #include "sandbox_executor.h"
 #include "intent_tracker.h"
+#include "outcome_guard.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -58,6 +59,7 @@ PManContext::PManContext() {
     subs.confidence = std::make_unique<ConfidenceTracker>();
     subs.sandbox    = std::make_unique<SandboxExecutor>();
     subs.intent     = std::make_unique<IntentTracker>();
+    subs.guard      = std::make_unique<OutcomeGuard>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)

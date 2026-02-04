@@ -53,6 +53,7 @@
 #include "confidence_tracker.h"
 #include "sandbox_executor.h"
 #include "intent_tracker.h" // [FIX] Added missing include
+#include "outcome_guard.h"
 #include "context.h"
 #include <thread>
 #include <tlhelp32.h>
@@ -200,11 +201,30 @@ static void ExecuteDecision(const ArbiterDecision& decision) {
     }
 }
 
+// Persistent state for Outcome Guard (Previous Tick)
+static PredictedStateDelta g_lastPredicted = {0,0,0};
+static ObservedStateDelta g_lastObserved = {0,0,0};
+
 static void RunAutonomousCycle() {
+    auto& ctx = PManContext::Get();
+
+    // 0. Outcome-Based Early Termination (Reactive Rollback Guard)
+    // "Stop immediately if this is going badly."
+    // We check if the active lease (from previous tick) is causing actual harm.
+    if (ctx.subs.sandbox && ctx.subs.guard) {
+        if (ctx.subs.sandbox->IsLeaseActive()) {
+            if (ctx.subs.guard->ShouldAbort(g_lastPredicted, g_lastObserved)) {
+                // Reality diverged dangerously -> IMMEDIATE STOP
+                ctx.subs.sandbox->Rollback(); // Triggers Cooldown
+                Log("Abort: OutcomeMismatch (Observed worse than predicted)");
+            }
+        }
+    }
+
     // 1. SystemTelemetry (Capture State)
     SystemSignalSnapshot telemetry = CaptureSnapshot();
 
-    auto& ctx = PManContext::Get();
+    // auto& ctx = PManContext::Get(); // [FIX] Removed redefinition (declared at top of function)
     // Safety: Ensure subsystems are initialized
     if (!ctx.subs.governor || !ctx.subs.evaluator || !ctx.subs.arbiter) return;
 
@@ -315,6 +335,10 @@ static void RunAutonomousCycle() {
                       " (" + std::to_string(intentCount) + "/3)]" +
                       " Rsn:" + std::to_string((int)decision.reason);
     Log(log);
+
+    // Update persistent state for next tick's Outcome Guard
+    g_lastPredicted = shadowDelta;
+    g_lastObserved = observed;
 }
 
 // --- Background Worker for Async Tasks ---
