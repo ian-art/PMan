@@ -59,6 +59,7 @@ class ConfidenceTracker; // Long-term Belief Stability
 class SandboxExecutor;   // Zero-Risk Authority Gate
 class IntentTracker;     // Intent Persistence Gate
 class OutcomeGuard;      // Reactive Rollback Guard
+class AuthorityBudget;   // Cumulative Cost Limiter
 
 class PManContext {
 public:
@@ -240,6 +241,7 @@ public:
         std::unique_ptr<SandboxExecutor>       sandbox;   // Zero-Risk Authority Gate
         std::unique_ptr<IntentTracker>         intent;    // Intent Persistence Gate
         std::unique_ptr<OutcomeGuard>          guard;     // Reactive Rollback Guard
+        std::unique_ptr<AuthorityBudget>       budget;    // Authority Budget
     } subs;
 
 private:

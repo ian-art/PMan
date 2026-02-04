@@ -54,6 +54,7 @@
 #include "sandbox_executor.h"
 #include "intent_tracker.h" // [FIX] Added missing include
 #include "outcome_guard.h"
+#include "authority_budget.h"
 #include "context.h"
 #include <thread>
 #include <tlhelp32.h>
@@ -256,12 +257,34 @@ static void RunAutonomousCycle() {
         shadowDelta = ctx.subs.shadow->Simulate(decision, telemetry);
     }
 
+    // [NEW] Authority Budget (Cumulative Cost Limiter)
+    // Check if we can afford the action cost BEFORE trying to execute.
+    // If budget is exhausted, we force Maintain.
+    int actionCost = 0;
+    bool budgetExhausted = false;
+    if (ctx.subs.budget) {
+        actionCost = ctx.subs.budget->GetCost(decision.selectedAction);
+        if (!ctx.subs.budget->CanSpend(actionCost)) {
+            // Veto: Budget exhausted. Force Maintain.
+            decision.selectedAction = BrainAction::Maintain;
+            decision.reason = DecisionReason::GovernorRestricted; 
+            decision.isReversible = false; // Revoke authority
+            budgetExhausted = true;
+        }
+    }
+
     // 6. Sandbox Executor (Time-Bound Authority Lease)
     // Physically execute (or maintain) the action on a safe target.
     // Checks lease expiry and enforces automatic reversion.
     SandboxResult sbResult = { false, false, false, "None" };
     if (ctx.subs.sandbox) {
         sbResult = ctx.subs.sandbox->TryExecute(decision);
+
+        // [NEW] Budget Spending
+        // Only spend if the action was committed and wasn't forced to Maintain by budget check
+        if (sbResult.committed && !budgetExhausted) {
+             if (ctx.subs.budget) ctx.subs.budget->Spend(actionCost);
+        }
     }
 
     // 7. Conditional Execution (The "1 Bit" of Authority)
@@ -292,10 +315,21 @@ static void RunAutonomousCycle() {
         confMetrics = ctx.subs.confidence->GetMetrics();
     }
 
-    // 10. Logger (Trace full decision chain + Reality + Error + Confidence + Sandbox)
+    // 10. Logger (Trace full decision chain + Reality + Error + Confidence + Sandbox + Budget)
+    std::string budgetLog = "";
+    if (ctx.subs.budget) {
+        if (budgetExhausted) {
+            budgetLog = " Budget:[Rejected(Exhausted)]";
+        } else {
+            budgetLog = " Budget:[" + std::to_string(ctx.subs.budget->GetUsed()) + 
+                        "/" + std::to_string(ctx.subs.budget->GetMax()) + "]";
+        }
+    }
+
     // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Sandbox -> Reality -> Error -> Confidence"
     std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
                       " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
+                      budgetLog +
                       " ArbAct:" + std::to_string((int)decision.selectedAction) + 
                       " Shadow:[" + std::to_string(shadowDelta.cpuLoadDelta) + 
                       "," + std::to_string(shadowDelta.thermalDelta) + 

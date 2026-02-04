@@ -37,6 +37,7 @@
 #include "sandbox_executor.h"
 #include "intent_tracker.h"
 #include "outcome_guard.h"
+#include "authority_budget.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -60,6 +61,7 @@ PManContext::PManContext() {
     subs.sandbox    = std::make_unique<SandboxExecutor>();
     subs.intent     = std::make_unique<IntentTracker>();
     subs.guard      = std::make_unique<OutcomeGuard>();
+    subs.budget     = std::make_unique<AuthorityBudget>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)
