@@ -49,6 +49,7 @@
 #include "decision_arbiter.h"
 #include "shadow_executor.h"
 #include "reality_sampler.h"
+#include "prediction_ledger.h"
 #include "context.h"
 #include <thread>
 #include <tlhelp32.h>
@@ -237,8 +238,14 @@ static void RunAutonomousCycle() {
         observed = ctx.subs.reality->Measure(telemetry, telemetry_after);
     }
 
-    // 8. Logger (Trace full decision chain + Reality)
-    // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Reality"
+    // 8. PredictionLedger (Compute Error)
+    PredictionError error = {0, 0, 0};
+    if (ctx.subs.ledger) {
+        error = ctx.subs.ledger->Compute(shadowDelta, observed);
+    }
+
+    // 9. Logger (Trace full decision chain + Reality + Error)
+    // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Reality -> Error"
     std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
                       " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
                       " ArbAct:" + std::to_string((int)decision.selectedAction) + 
@@ -248,6 +255,9 @@ static void RunAutonomousCycle() {
                       " Observed:[" + std::to_string(observed.cpuLoadDelta) + 
                       "," + std::to_string(observed.thermalDelta) + 
                       "," + std::to_string(observed.latencyDelta) + "]" +
+                      " Error:[" + std::to_string(error.cpuError) + 
+                      "," + std::to_string(error.thermalError) + 
+                      "," + std::to_string(error.latencyError) + "]" +
                       " Rsn:" + std::to_string((int)decision.reason);
     Log(log);
 }

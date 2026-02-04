@@ -54,6 +54,7 @@ class DecisionArbiter; // Logic for resolving conflicting priority requests
 class Executor;
 class ShadowExecutor; // Simulation Layer
 class RealitySampler; // Reality Measurement Layer
+class PredictionLedger; // Prediction Error Statistics
 
 class PManContext {
 public:
@@ -230,6 +231,7 @@ public:
         std::unique_ptr<Executor>              executor;
         std::unique_ptr<ShadowExecutor>        shadow;    // Shadow Execution Layer
         std::unique_ptr<RealitySampler>        reality;   // Reality Measurement Layer
+        std::unique_ptr<PredictionLedger>      ledger;    // Prediction Error Statistics
     } subs;
 
 private:
