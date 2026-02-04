@@ -51,6 +51,7 @@
 #include "reality_sampler.h"
 #include "prediction_ledger.h"
 #include "confidence_tracker.h"
+#include "sandbox_executor.h"
 #include "context.h"
 #include <thread>
 #include <tlhelp32.h>
@@ -231,12 +232,19 @@ static void RunAutonomousCycle() {
         shadowDelta = ctx.subs.shadow->Simulate(decision, telemetry);
     }
 
-    // 6. Force No Action (The system cannot change system state)
+    // 6. Sandbox Executor (Zero-Risk Authority Probe)
+    // Physically execute the action on a safe target, then immediately rollback.
+    // This proves authority without lasting side effects.
+    SandboxExecutor sandbox;
+    SandboxResult sbResult = sandbox.TryExecute(decision);
+    sandbox.Rollback(); // IMMEDIATE Rollback
+
+    // 7. Force No Action (The system cannot change system state)
     // [FIX] Explicitly force inaction to prevent accidental execution.
     // This satisfies the "NoAction by omission is not enough" requirement.
     decision.selectedAction = BrainAction::Maintain;
 
-    // 7. RealitySampler (Measure actual outcome)
+    // 8. RealitySampler (Measure actual outcome)
     // Capture state AFTER the tick (and potential action, if it were enabled)
     SystemSignalSnapshot telemetry_after = CaptureSnapshot();
     
@@ -258,14 +266,17 @@ static void RunAutonomousCycle() {
         confMetrics = ctx.subs.confidence->GetMetrics();
     }
 
-    // 10. Logger (Trace full decision chain + Reality + Error + Confidence)
-    // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Reality -> Error -> Confidence"
+    // 10. Logger (Trace full decision chain + Reality + Error + Confidence + Sandbox)
+    // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Sandbox -> Reality -> Error -> Confidence"
     std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
                       " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
                       " ArbAct:" + std::to_string((int)decision.selectedAction) + 
                       " Shadow:[" + std::to_string(shadowDelta.cpuLoadDelta) + 
                       "," + std::to_string(shadowDelta.thermalDelta) + 
                       "," + std::to_string(shadowDelta.latencyDelta) + "]" +
+                      " Sandbox:[" + (sbResult.executed ? "Executed" : "Rejected") +
+                      "," + (sbResult.reversible ? "Rev" : "NonRev") +
+                      "," + (sbResult.reason) + "]" +
                       " Observed:[" + std::to_string(observed.cpuLoadDelta) + 
                       "," + std::to_string(observed.thermalDelta) + 
                       "," + std::to_string(observed.latencyDelta) + "]" +
