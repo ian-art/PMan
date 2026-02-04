@@ -21,7 +21,7 @@
 #include "utils.h" // For time helpers if needed
 #include "constants.h"
 
-ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence) {
+ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence, const ConfidenceMetrics& confidence) {
     ArbiterDecision decision;
     decision.decisionTime = GetTickCount64();
     decision.selectedAction = BrainAction::Maintain; // Default to safe inaction
@@ -34,7 +34,17 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
         return decision;
     }
 
-    // Confidence-Driven Conservatism (Kill Switch)
+    // Confidence-Driven Conservatism (Variance Kill Switch)
+    // Rule: High historical variance -> FORCE NoAction
+    if (confidence.cpuVariance > MAX_CPU_VARIANCE ||
+        confidence.thermalVariance > MAX_THERM_VARIANCE ||
+        confidence.latencyVariance > MAX_LAT_VARIANCE) {
+        decision.selectedAction = BrainAction::Maintain;
+        decision.reason = DecisionReason::LowConfidence;
+        return decision;
+    }
+
+    // Model Confidence Check (Prediction Specific)
     // Rule: "if (prediction.confidence < CONFIDENCE_MIN) Arbiter must return NoAction"
     if (consequence.confidence < CONFIDENCE_MIN) {
         decision.selectedAction = BrainAction::Maintain;

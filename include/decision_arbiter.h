@@ -21,6 +21,7 @@
 #define PMAN_DECISION_ARBITER_H
 
 #include "types.h"
+#include "confidence_tracker.h"
 #include <unordered_map>
 
 class DecisionArbiter {
@@ -28,7 +29,7 @@ public:
     // Public API
     // Single Responsibility: Select exactly one outcome per cycle.
     // Deterministic, Auditable, Safe.
-    ArbiterDecision Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence);
+    ArbiterDecision Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence, const ConfidenceMetrics& confidence);
 
     // Reset internal cooldown states (e.g., on configuration reload)
     void Reset();
@@ -47,6 +48,11 @@ private:
 
     // Constants
     static constexpr uint64_t ACTION_COOLDOWN_MS = 5000; // 5 seconds minimum between identical heavy actions
+
+    // Confidence Limits (Conservative Kill Switch)
+    static constexpr double MAX_CPU_VARIANCE = 25.0;     // High variance in CPU load predictions
+    static constexpr double MAX_THERM_VARIANCE = 5.0;    // High variance in thermal predictions
+    static constexpr double MAX_LAT_VARIANCE = 50.0;     // High variance in latency predictions
 };
 
 #endif // PMAN_DECISION_ARBITER_H

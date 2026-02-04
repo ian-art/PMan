@@ -206,6 +206,12 @@ static void RunAutonomousCycle() {
     // Safety: Ensure subsystems are initialized
     if (!ctx.subs.governor || !ctx.subs.evaluator || !ctx.subs.arbiter) return;
 
+    // Pre-Fetch Confidence State (for Decision gating)
+    ConfidenceMetrics currentConfidence = {0.0, 0.0, 0.0};
+    if (ctx.subs.confidence) {
+        currentConfidence = ctx.subs.confidence->GetMetrics();
+    }
+
     // 2. PerformanceGovernor (Evaluate Telemetry)
     GovernorDecision priorities = ctx.subs.governor->Decide(telemetry);
 
@@ -217,7 +223,7 @@ static void RunAutonomousCycle() {
     );
 
     // 4. DecisionArbiter (Decide)
-    ArbiterDecision decision = ctx.subs.arbiter->Decide(priorities, consequences);
+    ArbiterDecision decision = ctx.subs.arbiter->Decide(priorities, consequences, currentConfidence);
 
     // 5. ShadowExecutor (Simulate Only)
     PredictedStateDelta shadowDelta = {0, 0, 0};
