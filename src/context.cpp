@@ -31,6 +31,7 @@
 #include "predictive_model.h"
 #include "decision_arbiter.h"
 #include "shadow_executor.h"
+#include "reality_sampler.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -48,6 +49,7 @@ PManContext::PManContext() {
     if (subs.model) subs.model->Initialize();
     subs.executor   = std::unique_ptr<Executor>(new Executor());
     subs.shadow     = std::make_unique<ShadowExecutor>();
+    subs.reality    = std::make_unique<RealitySampler>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)

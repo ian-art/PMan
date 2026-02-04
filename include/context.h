@@ -53,6 +53,7 @@ class PredictiveModel; // Machine learning model for state prediction
 class DecisionArbiter; // Logic for resolving conflicting priority requests
 class Executor;
 class ShadowExecutor; // Simulation Layer
+class RealitySampler; // Reality Measurement Layer
 
 class PManContext {
 public:
@@ -228,6 +229,7 @@ public:
         // Subsystem for safely executing and verifying actions
         std::unique_ptr<Executor>              executor;
         std::unique_ptr<ShadowExecutor>        shadow;    // Shadow Execution Layer
+        std::unique_ptr<RealitySampler>        reality;   // Reality Measurement Layer
     } subs;
 
 private:

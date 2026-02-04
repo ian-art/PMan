@@ -48,6 +48,7 @@
 #include "predictive_model.h" // Machine learning state prediction
 #include "decision_arbiter.h"
 #include "shadow_executor.h"
+#include "reality_sampler.h"
 #include "context.h"
 #include <thread>
 #include <tlhelp32.h>
@@ -227,14 +228,26 @@ static void RunAutonomousCycle() {
     // This satisfies the "NoAction by omission is not enough" requirement.
     decision.selectedAction = BrainAction::Maintain;
 
-    // 7. Logger (Trace full decision chain)
-    // "Logs show Governor -> Evaluator -> Arbiter -> Shadow every cycle"
+    // 7. RealitySampler (Measure actual outcome)
+    // Capture state AFTER the tick (and potential action, if it were enabled)
+    SystemSignalSnapshot telemetry_after = CaptureSnapshot();
+    
+    ObservedStateDelta observed = {0, 0, 0};
+    if (ctx.subs.reality) {
+        observed = ctx.subs.reality->Measure(telemetry, telemetry_after);
+    }
+
+    // 8. Logger (Trace full decision chain + Reality)
+    // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Reality"
     std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
                       " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
                       " ArbAct:" + std::to_string((int)decision.selectedAction) + 
                       " Shadow:[" + std::to_string(shadowDelta.cpuLoadDelta) + 
                       "," + std::to_string(shadowDelta.thermalDelta) + 
                       "," + std::to_string(shadowDelta.latencyDelta) + "]" +
+                      " Observed:[" + std::to_string(observed.cpuLoadDelta) + 
+                      "," + std::to_string(observed.thermalDelta) + 
+                      "," + std::to_string(observed.latencyDelta) + "]" +
                       " Rsn:" + std::to_string((int)decision.reason);
     Log(log);
 }
