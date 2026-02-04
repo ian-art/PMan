@@ -52,6 +52,7 @@
 #include "prediction_ledger.h"
 #include "confidence_tracker.h"
 #include "sandbox_executor.h"
+#include "intent_tracker.h" // [FIX] Added missing include
 #include "context.h"
 #include <thread>
 #include <tlhelp32.h>
@@ -226,6 +227,27 @@ static void RunAutonomousCycle() {
     // 4. DecisionArbiter (Decide)
     ArbiterDecision decision = ctx.subs.arbiter->Decide(priorities, consequences, currentConfidence);
 
+    // [NEW] Intent Persistence (Consecutive-Approval Gate)
+    // Filter out single-tick noise. Stability required before reaching Sandbox.
+    bool intentStable = true;
+    uint32_t intentCount = 0;
+    bool intentReset = false;
+    BrainAction rawIntent = decision.selectedAction;
+
+    if (ctx.subs.intent) {
+        ctx.subs.intent->Observe(rawIntent);
+        intentStable = ctx.subs.intent->IsStable(3); // N = 3 Ticks (Conservative)
+        intentCount = ctx.subs.intent->GetCount();
+        intentReset = ctx.subs.intent->WasReset();
+
+        if (!intentStable) {
+            // Veto: Intent not yet stable. Force Maintain.
+            decision.selectedAction = BrainAction::Maintain;
+            decision.reason = DecisionReason::None; // Mask reason as we are waiting
+            decision.isReversible = false; // Revoke authority
+        }
+    }
+
     // 5. ShadowExecutor (Simulate Only)
     PredictedStateDelta shadowDelta = {0, 0, 0};
     if (ctx.subs.shadow) {
@@ -289,6 +311,8 @@ static void RunAutonomousCycle() {
                       " ConfidenceVar:[" + std::to_string(confMetrics.cpuVariance) +
                       "," + std::to_string(confMetrics.thermalVariance) +
                       "," + std::to_string(confMetrics.latencyVariance) + "]" +
+                      " Intent:[" + (intentReset ? "Reset" : std::to_string((int)rawIntent)) + 
+                      " (" + std::to_string(intentCount) + "/3)]" +
                       " Rsn:" + std::to_string((int)decision.reason);
     Log(log);
 }

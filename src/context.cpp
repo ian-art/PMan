@@ -35,6 +35,7 @@
 #include "prediction_ledger.h"
 #include "confidence_tracker.h"
 #include "sandbox_executor.h"
+#include "intent_tracker.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -56,6 +57,7 @@ PManContext::PManContext() {
     subs.ledger     = std::make_unique<PredictionLedger>();
     subs.confidence = std::make_unique<ConfidenceTracker>();
     subs.sandbox    = std::make_unique<SandboxExecutor>();
+    subs.intent     = std::make_unique<IntentTracker>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)

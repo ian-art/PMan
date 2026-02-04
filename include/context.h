@@ -57,6 +57,7 @@ class RealitySampler; // Reality Measurement Layer
 class PredictionLedger; // Prediction Error Statistics
 class ConfidenceTracker; // Long-term Belief Stability
 class SandboxExecutor;   // Zero-Risk Authority Gate
+class IntentTracker;     // Intent Persistence Gate
 
 class PManContext {
 public:
@@ -236,6 +237,7 @@ public:
         std::unique_ptr<PredictionLedger>      ledger;    // Prediction Error Statistics
         std::unique_ptr<ConfidenceTracker>     confidence;// Long-term Belief Stability
         std::unique_ptr<SandboxExecutor>       sandbox;   // Zero-Risk Authority Gate
+        std::unique_ptr<IntentTracker>         intent;    // Intent Persistence Gate
     } subs;
 
 private:
