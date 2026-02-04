@@ -195,102 +195,38 @@ static void ExecuteDecision(const ArbiterDecision& decision) {
 }
 
 static void RunAutonomousCycle() {
-    // State variables for adaptive learning and prediction persistence
-    static SystemSignalSnapshot lastState = {};
-    static ArbiterDecision lastDecision = ArbiterDecision::Maintain(DecisionReason::None);
-    static GovernorDecision lastGovDecision = {SystemMode::Interactive, DominantPressure::None, AllowedActionClass::None};
-    static ConsequenceResult lastPrediction = {{0,0,0,0}, true, 1.0};
-
-    // [FIX] Stop autonomy cycles completely when paused
-    // This prevents log flooding and prevents "learning" from stale data when resuming
-    if (g_userPaused.load()) {
-        // Reset last decision to ensure we don't calculate feedback across the pause gap
-        lastDecision = ArbiterDecision::Maintain(DecisionReason::None);
-        return;
-    }
-
-    // 1. Capture State
-    SystemSignalSnapshot state = CaptureSnapshot();
+    // 1. SystemTelemetry (Capture State)
+    SystemSignalSnapshot telemetry = CaptureSnapshot();
 
     auto& ctx = PManContext::Get();
     // Safety: Ensure subsystems are initialized
     if (!ctx.subs.governor || !ctx.subs.evaluator || !ctx.subs.arbiter) return;
 
-    // 2. Governor: Proposes Action Classes (Law 2)
-    GovernorDecision govResult = ctx.subs.governor->Decide(state);
+    // 2. PerformanceGovernor (Evaluate Telemetry)
+    GovernorDecision priorities = ctx.subs.governor->Decide(telemetry);
 
-    // 3. Evaluator: Predicts Consequences (Law 3)
-    ConsequenceResult scores = ctx.subs.evaluator->Evaluate(
-        govResult.mode, 
-        govResult.dominant, 
-        govResult.allowedActions
+    // 3. ConsequenceEvaluator (Predict Consequences)
+    ConsequenceResult consequences = ctx.subs.evaluator->Evaluate(
+        priorities.mode, 
+        priorities.dominant, 
+        priorities.allowedActions
     );
 
-    // Predictive Model Correction
-    // "Prediction error may only reduce confidence"
-    if (ctx.subs.model) {
-        scores = ctx.subs.model->Correct(scores, govResult.mode, govResult.dominant, govResult.allowedActions);
-    }
-    
-    // Store for next cycle's feedback
-    lastPrediction = scores;
+    // 4. DecisionArbiter (Decide)
+    ArbiterDecision decision = ctx.subs.arbiter->Decide(priorities, consequences);
 
-    // 4. Arbiter: Makes Final Decision (Law 1)
-    ArbiterDecision decision = ctx.subs.arbiter->Decide(govResult, scores);
+    // 5. Force No Action (The system cannot change system state)
+    // [FIX] Explicitly force inaction to prevent accidental execution.
+    // This satisfies the "NoAction by omission is not enough" requirement.
+    decision.selectedAction = BrainAction::Maintain;
 
-    // Traceability: Log complete decision summary if not in steady state
-    // This captures Rejections, LowConfidence, and Actions. 
-    // We skip "NoActionNeeded" to prevent disk flooding while maintaining safety auditability.
-    if (decision.reason != DecisionReason::NoActionNeeded) {
-        std::string log = "[AUTONOMY] Gov:" + std::to_string((int)govResult.dominant) + 
-                          " Eval:" + std::to_string(scores.cost.cpuDelta) + 
-                          " Conf:" + std::to_string(scores.confidence) + 
-                          " -> Act:" + std::to_string((int)decision.selectedAction) + 
-                          " Reason:" + std::to_string((int)decision.reason);
-        Log(log);
-    }
-
-    // 5. Execute (Law 1: Arbiter Owns Reality)
-    ExecuteDecision(decision);
-
-    // Learning Feedback Loops
-    if (lastDecision.decisionTime > 0) {
-        OptimizationFeedback feedback = {};
-        feedback.mode = govResult.mode; 
-        feedback.dominant = govResult.dominant;
-        feedback.action = lastDecision.selectedAction;
-        
-        // Calculate Deltas (OutcomeDelta = Current - Previous)
-        feedback.cpuDelta = state.cpuLoad - lastState.cpuLoad;
-        feedback.memDelta = state.memoryPressure - lastState.memoryPressure;
-        feedback.diskDelta = state.diskQueueLen - lastState.diskQueueLen;
-        feedback.latencyDelta = state.latencyMs - lastState.latencyMs;
-        feedback.userInterrupted = state.userActive; 
-
-        // Optimizer Feedback
-        if (ctx.subs.optimizer) {
-            ctx.subs.optimizer->OnFeedback(feedback);
-        }
-
-        // Predictive Model Feedback (Prediction vs Reality)
-        if (ctx.subs.model) {
-            // Only learn if we actually attempted the action corresponding to the prediction
-            if (lastDecision.selectedAction != BrainAction::Maintain) {
-                ctx.subs.model->Feedback(
-                    lastGovDecision.mode, 
-                    lastGovDecision.dominant, 
-                    lastGovDecision.allowedActions, 
-                    lastPrediction.cost, 
-                    feedback
-                );
-            }
-        }
-    }
-
-    lastState = state;
-    lastDecision = decision;
-    lastGovDecision = govResult;
-    // lastPrediction is set after calculation below
+    // 6. Logger (Trace full decision chain)
+    // "Logs show Governor -> Evaluator -> Arbiter every cycle"
+    std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
+                      " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
+                      " ArbAct:" + std::to_string((int)decision.selectedAction) + 
+                      " Rsn:" + std::to_string((int)decision.reason);
+    Log(log);
 }
 
 // --- Background Worker for Async Tasks ---
