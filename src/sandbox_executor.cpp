@@ -21,13 +21,13 @@
 #include "logger.h"
 
 SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
-    SandboxResult result = { false, false, false, "None" };
+    SandboxResult result = { false, false, false, "None", 0 };
 
     // 0. Lease Management: Automatic Reversion (Voluntary)
     // If the Arbiter requests Maintain, we must release any active lease immediately.
     if (decision.selectedAction == BrainAction::Maintain) {
         if (m_actionApplied) {
-            Rollback(); // Revert to baseline
+            Rollback(); // Revert to baseline (Triggers Cooldown)
             
             result.executed = false;
             result.reversible = true;
@@ -61,7 +61,7 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     if (m_actionApplied) {
         uint64_t now = GetTickCount64();
         if ((now - m_leaseStart) > MAX_LEASE_MS) {
-            Rollback(); // Force Revert
+            Rollback(); // Force Revert (Triggers Cooldown)
             
             result.executed = false;
             result.reversible = true;
@@ -77,6 +77,19 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         result.committed = true;
         result.reason = "LeaseRenewed";
         decision.isReversible = true;
+        return result;
+    }
+
+    // 3. Cooldown Enforcement (Rate-of-Change Limiter)
+    // If we are NOT holding state, we must check if we are in a cooldown period.
+    uint64_t now = GetTickCount64();
+    if (!m_actionApplied && (now - m_lastReleaseTime < COOLDOWN_MS)) {
+        result.executed = false;
+        result.reversible = true;
+        result.committed = false;
+        result.reason = "CooldownActive";
+        result.cooldownRemaining = COOLDOWN_MS - (now - m_lastReleaseTime);
+        decision.isReversible = false; // Deny authority
         return result;
     }
 
@@ -140,6 +153,9 @@ void SandboxExecutor::Rollback() {
     if (m_actionApplied && m_hTarget) {
         SetPriorityClass(m_hTarget, m_originalPriorityClass);
         m_actionApplied = false;
+        
+        // Cooldown Start: Mark the exact moment authority was revoked.
+        m_lastReleaseTime = GetTickCount64();
     }
 }
 

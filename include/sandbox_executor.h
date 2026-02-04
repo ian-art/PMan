@@ -27,6 +27,7 @@ struct SandboxResult {
     bool reversible;
     bool committed;
     const char* reason;
+    uint64_t cooldownRemaining = 0;
 };
 
 class SandboxExecutor {
@@ -52,6 +53,10 @@ private:
     // Time-Bound Authority Lease
     uint64_t m_leaseStart = 0;
     static constexpr uint64_t MAX_LEASE_MS = 5000; // 5 Seconds Max Duration
+
+    // Authority Cooldown (Rate-of-Change Limiter)
+    uint64_t m_lastReleaseTime = 0;
+    static constexpr uint64_t COOLDOWN_MS = 10000; // 10 Seconds
 };
 
 #endif // PMAN_SANDBOX_EXECUTOR_H

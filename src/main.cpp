@@ -279,6 +279,7 @@ static void RunAutonomousCycle() {
                       " Sandbox:[" + (sbResult.committed ? "Committed" : "RolledBack/Rejected") +
                       "," + (sbResult.reversible ? "Rev" : "NonRev") +
                       "," + (sbResult.reason) + "]" +
+                      (sbResult.cooldownRemaining > 0 ? " Cooldown:[Active (remaining=" + std::to_string(sbResult.cooldownRemaining) + "ms)]" : "") +
                       " Observed:[" + std::to_string(observed.cpuLoadDelta) + 
                       "," + std::to_string(observed.thermalDelta) + 
                       "," + std::to_string(observed.latencyDelta) + "]" +
