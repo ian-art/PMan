@@ -688,8 +688,16 @@ void IocpConfigWatcher()
                 if (bytes > 0)
                 {
 					PFILE_NOTIFY_INFORMATION info = reinterpret_cast<PFILE_NOTIFY_INFORMATION>(buf);
+                    BYTE* endOfData = buf + bytes;
+
                     while (true)
                     {
+                        // [FIX] Bounds Check 1: Ensure header fits in buffer
+                        if (reinterpret_cast<BYTE*>(info) + sizeof(FILE_NOTIFY_INFORMATION) > endOfData) break;
+                        
+                        // [FIX] Bounds Check 2: Ensure filename fits in buffer
+                        if (reinterpret_cast<BYTE*>(info->FileName) + info->FileNameLength > endOfData) break;
+
                         std::wstring fileName(info->FileName, info->FileNameLength / sizeof(wchar_t));
 						if (ContainsIgnoreCase(fileName, CONFIG_FILENAME) || 
                             ContainsIgnoreCase(fileName, CUSTOM_LAUNCHERS_FILENAME) ||
@@ -700,8 +708,14 @@ void IocpConfigWatcher()
                         }
                         
                         if (info->NextEntryOffset == 0) break;
-                        info = reinterpret_cast<PFILE_NOTIFY_INFORMATION>(
+                        
+                        PFILE_NOTIFY_INFORMATION nextInfo = reinterpret_cast<PFILE_NOTIFY_INFORMATION>(
                             reinterpret_cast<BYTE*>(info) + info->NextEntryOffset);
+                        
+                        // [FIX] Bounds Check 3: Ensure next entry pointer is valid
+                        if (reinterpret_cast<BYTE*>(nextInfo) >= endOfData) break;
+
+                        info = nextInfo;
                     }
                 }
                 else
