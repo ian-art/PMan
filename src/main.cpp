@@ -1525,6 +1525,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         Log("[INIT] Policy Contract loaded. Hash: " + PManContext::Get().subs.policy->GetHash());
     } else {
         Log("[INIT] WARNING: policy.json missing or invalid. Using hardcoded safe defaults.");
+        Log("[INIT] No policy.json found. Authority is DISABLED. To enable autonomy, provide a valid policy.json.");
     }
 
 	// Initialize Smart Memory Optimizer
