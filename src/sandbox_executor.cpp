@@ -75,8 +75,8 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         return result;
     }
 
-    // 1. Strict Allowlist (Reversibility Check - Only Throttle_Mild)
-    if (decision.selectedAction != BrainAction::Throttle_Mild) {
+    // 1. Strict Allowlist (Reversibility Check - Only Throttle_Mild and Shield_Foreground)
+    if (decision.selectedAction != BrainAction::Throttle_Mild && decision.selectedAction != BrainAction::Shield_Foreground) {
         result.executed = false;
         result.reversible = false; // Strictly forbidden
         result.committed = false;
@@ -122,8 +122,18 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         return result;
     }
 
-    // 3. Target Selection (Zero-Risk Probe: Target Self)
-    m_hTarget = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentProcessId());
+    // 3. Target Selection
+    DWORD targetPid = GetCurrentProcessId();
+    if (decision.selectedAction == BrainAction::Shield_Foreground) {
+        GetWindowThreadProcessId(GetForegroundWindow(), &targetPid);
+        // Safety: Do not target self or system idle
+        if (targetPid <= 4 || targetPid == GetCurrentProcessId()) {
+             result.executed = false; result.reversible = true; result.committed = false;
+             result.reason = "InvalidTarget"; decision.isReversible = false; return result;
+        }
+    }
+
+    m_hTarget = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
     if (!m_hTarget) {
         result.executed = false;
         result.reversible = true;
@@ -151,6 +161,9 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     if (decision.selectedAction == BrainAction::Throttle_Mild) {
         success = SetPriorityClass(m_hTarget, BELOW_NORMAL_PRIORITY_CLASS);
     } 
+    else if (decision.selectedAction == BrainAction::Shield_Foreground) {
+        success = SetPriorityClass(m_hTarget, ABOVE_NORMAL_PRIORITY_CLASS);
+    }
     
     if (success) {
         m_actionApplied = true;

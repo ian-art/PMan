@@ -41,6 +41,7 @@ static int ActionFromString(const std::string& s) {
     if (s.find("Suspend_Services") != std::string::npos) return (int)BrainAction::Suspend_Services;
     if (s.find("Release_Pressure") != std::string::npos) return (int)BrainAction::Release_Pressure;
     if (s.find("Boost_Process") != std::string::npos) return (int)BrainAction::Release_Pressure; // Alias
+    if (s.find("Shield_Foreground") != std::string::npos) return (int)BrainAction::Shield_Foreground;
     if (s.find("Maintain") != std::string::npos) return (int)BrainAction::Maintain;
     return -1;
 }
