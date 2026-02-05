@@ -2164,6 +2164,10 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     if (PManContext::Get().subs.optimizer) {
         PManContext::Get().subs.optimizer->Shutdown();
     }
+    // [FIX] Save the Brain before exiting
+    if (PManContext::Get().subs.model) {
+        PManContext::Get().subs.model->Shutdown();
+    }
 	
     // Signal threads to wake up/stop
     if (g_hShutdownEvent) SetEvent(g_hShutdownEvent.get()); // Wakes Watchdog immediately
