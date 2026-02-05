@@ -19,15 +19,51 @@
 
 #include "predictive_model.h"
 #include "logger.h"
+#include "utils.h"
 #include <cmath>
 #include <algorithm>
+#include <fstream>
+#include <filesystem>
 
 void PredictiveModel::Initialize() {
     Log("[INIT] Predictive Model Initialized.");
+
+    std::lock_guard<std::mutex> lock(m_mtx);
+    std::filesystem::path path = GetLogPath() / L"brain.bin";
+
+    if (std::filesystem::exists(path)) {
+        std::ifstream f(path, std::ios::binary);
+        if (f.is_open()) {
+            size_t size = 0;
+            f.read(reinterpret_cast<char*>(&size), sizeof(size));
+
+            for (size_t i = 0; i < size; ++i) {
+                ModelKey key = {};
+                PredictionStats stats = {};
+                f.read(reinterpret_cast<char*>(&key), sizeof(ModelKey));
+                f.read(reinterpret_cast<char*>(&stats), sizeof(PredictionStats));
+                m_stats[key] = stats;
+            }
+            Log("[BRAIN] Loaded " + std::to_string(size) + " learned patterns.");
+        }
+    }
 }
 
 void PredictiveModel::Shutdown() {
-    // Persisted stats would be saved here
+    std::lock_guard<std::mutex> lock(m_mtx);
+    std::filesystem::path path = GetLogPath() / L"brain.bin";
+    std::ofstream f(path, std::ios::binary);
+
+    if (f.is_open()) {
+        size_t size = m_stats.size();
+        f.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+        for (const auto& [key, stats] : m_stats) {
+            f.write(reinterpret_cast<const char*>(&key), sizeof(ModelKey));
+            f.write(reinterpret_cast<const char*>(&stats), sizeof(PredictionStats));
+        }
+        Log("[BRAIN] Saved " + std::to_string(size) + " patterns to brain.bin");
+    }
 }
 
 CostVector PredictiveModel::QuantizeRealOutcome(const OptimizationFeedback& fb) {
