@@ -35,6 +35,23 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         return result; 
     }
 
+    // [PASSIVE MODE GUARD]
+    // If Passive Mode is active (Pause Idle), strictly forbid affinity/topology changes.
+    // We only allow Priority changes (Throttle_Mild) or Maintain.
+    if (PManContext::Get().conf.pauseIdle) {
+        bool isAllowedInPassive = (decision.selectedAction == BrainAction::Maintain || 
+                                   decision.selectedAction == BrainAction::Throttle_Mild);
+        
+        if (!isAllowedInPassive) {
+            result.executed = false;
+            result.reversible = true; // Can retry later
+            result.committed = false;
+            result.reason = "PassiveModeRestricted";
+            decision.isReversible = false;
+            return result;
+        }
+    }
+
     // 0. Lease Management: Automatic Reversion (Voluntary)
     // If the Arbiter requests Maintain, we must release any active lease immediately.
     if (decision.selectedAction == BrainAction::Maintain) {
