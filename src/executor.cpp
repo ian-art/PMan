@@ -29,6 +29,56 @@
 #include <algorithm>
 #include <shellapi.h> // For SHQueryUserNotificationState
 
+// [DCM] Universal Security Product Detection (Heuristic)
+// We define a local compatible struct to check Process Protection Level (PPL)
+// This allows identifying Defender, McAfee, CrowdStrike, etc. without hardcoded names.
+typedef struct _PROCESS_PROTECTION_LEVEL_INFORMATION_COMPAT {
+    DWORD ProtectionLevel;
+} PROCESS_PROTECTION_LEVEL_INFORMATION_COMPAT;
+
+static bool IsProtectedProcess(DWORD pid) {
+    if (pid <= 4) return true; 
+
+    // Heuristic 1: If we can't open it for Limited Info, it's likely a protected Anti-Malware service
+    UniqueHandle hProcess(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (!hProcess) {
+        return (GetLastError() == ERROR_ACCESS_DENIED);
+    }
+
+    // Heuristic 2: Check standard Windows Protection Level
+    PROCESS_PROTECTION_LEVEL_INFORMATION_COMPAT ppl = {0};
+    // ProcessProtectionLevelInfo = 11
+    if (GetProcessInformation(hProcess.get(), (PROCESS_INFORMATION_CLASS)11, &ppl, sizeof(ppl))) {
+        // ProtectionLevel > 0 means it is a Signed/Protected System or Antimalware process
+        return (ppl.ProtectionLevel != 0);
+    }
+    return false;
+}
+
+// [DCM] Foreground Shielding Implementation
+// Boosts the foreground window's Priority and IO Priority to "Shield" it from background AV scans.
+static bool ApplyForegroundShield_Impl(DWORD pid) {
+    if (pid <= 4) return false;
+    
+    // Safety: Never boost a Protected Process (AV) even if it steals focus
+    if (IsProtectedProcess(pid)) return false;
+
+    HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
+    if (hProc) {
+        // 1. Boost CPU Priority (Transient)
+        SetPriorityClass(hProc, ABOVE_NORMAL_PRIORITY_CLASS);
+        
+        // 2. Boost IO Priority (Critical for contending with AV Scans)
+        // FIX: Explicit cast required for strict C++ enum conversion
+        IO_PRIORITY_HINT ioPri = (IO_PRIORITY_HINT)IoPriorityHigh;
+        NtWrapper::SetInformationProcess(hProc, ProcessIoPriority, &ioPri, sizeof(ioPri));
+        
+        CloseHandle(hProc);
+        return true;
+    }
+    return false;
+}
+
 // --------------------------------------------------------------------------
 // Process Enumeration and Classification Logic
 // --------------------------------------------------------------------------
@@ -169,6 +219,20 @@ std::optional<Executor::Receipt> Executor::Execute(const ActionIntent& intent) {
             EmergencyRevertAll();
             success = true;
             break;
+        case BrainAction::Shield_Foreground:
+            // [DCM] Universal Foreground Shielding
+            // Triggered when "Universal AV Awareness" detects background pressure.
+            {
+                DWORD fgPid = 0;
+                GetWindowThreadProcessId(GetForegroundWindow(), &fgPid);
+                if (fgPid > 4 && ApplyForegroundShield_Impl(fgPid)) {
+                    // Record the target specifically so we can Revert (Unboost) it later
+                    targets.targets.clear(); // Clear generic targets
+                    targets.targets.push_back({fgPid, {0, 0}}); 
+                    success = true;
+                }
+            }
+            break;
         default:
             break;
     }
@@ -242,6 +306,13 @@ bool Executor::HardValidate(const ActionIntent& intent, const TargetSet& targets
         DWORD sessionId = 0;
         if (ProcessIdToSessionId(target.pid, &sessionId) && sessionId == 0) {
             if (intent.action == BrainAction::Throttle_Aggressive) return false;
+        }
+
+        // [DCM] Universal AV Safety: Never Throttling/Trimming Protected Processes
+        // This ensures we never accidentally fight with Defender, McAfee, etc.
+        if (IsProtectedProcess(target.pid)) {
+             Log("[SEC] VETO: Attempted to touch Protected/AV Process PID " + std::to_string(target.pid));
+             return false;
         }
 
         // [FIX] Validates process state to avoid touching zombies or locked threads
@@ -354,6 +425,20 @@ bool Executor::Revert(const Receipt& receipt) {
     else if (receipt.action == BrainAction::Suspend_Services) {
         // Automatically resumes previously suspended services
         ServiceWatcher::ResumeSuspendedServices();
+    }
+    else if (receipt.action == BrainAction::Shield_Foreground) {
+        // [DCM] Revert Foreground Shielding (Restore Normal Priority)
+        for (const auto& target : receipt.affectedTargets) {
+            HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION, FALSE, target.pid);
+            if (hProc) {
+                SetPriorityClass(hProc, NORMAL_PRIORITY_CLASS);
+                
+                // FIX: Explicit cast required for strict C++ enum conversion
+                IO_PRIORITY_HINT ioPri = (IO_PRIORITY_HINT)IoPriorityNormal;
+                NtWrapper::SetInformationProcess(hProc, ProcessIoPriority, &ioPri, sizeof(ioPri));
+                CloseHandle(hProc);
+            }
+        }
     }
     // Memory trim cannot be reverted (it's destructive), which is fine.
     

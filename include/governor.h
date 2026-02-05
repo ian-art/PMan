@@ -44,7 +44,7 @@ private:
     // Internal pipeline for processing signals and determining states
     NormalizedSignals Normalize(const SystemSignalSnapshot& raw);
     DominantPressure SelectDominant(const NormalizedSignals& signals);
-    SystemMode ResolveMode(const NormalizedSignals& signals, bool userActive, bool thermal);
+    SystemMode ResolveMode(const NormalizedSignals& signals, bool userActive, bool thermal, bool security);
     AllowedActionClass DetermineActions(SystemMode mode, DominantPressure pressure);
 };
 

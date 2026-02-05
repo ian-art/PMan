@@ -47,9 +47,18 @@ DominantPressure PerformanceGovernor::SelectDominant(const NormalizedSignals& si
 }
 
 // 5.5 System Mode Resolver
-SystemMode PerformanceGovernor::ResolveMode(const NormalizedSignals& signals, bool userActive, bool thermal) {
+SystemMode PerformanceGovernor::ResolveMode(const NormalizedSignals& signals, bool userActive, bool thermal, bool security) {
     if (thermal) return SystemMode::ThermalRecovery;
+    
+    // [DCM] Security Co-existence Logic
+    // If user is active BUT security software is hammering the system,
+    // we enter a special Interactive sub-state (handled by DominantPressure::Security later)
+    // For now, we force Interactive to ensure we prioritize the user.
     if (userActive) return SystemMode::Interactive;
+    
+    // If not active, but AV is scanning, treat as Maintenance
+    if (security) return SystemMode::BackgroundMaintenance;
+
     if (signals.cpu > 0.5 || signals.disk > 0.4) return SystemMode::SustainedLoad;
     return SystemMode::BackgroundMaintenance;
 }
@@ -59,6 +68,10 @@ AllowedActionClass PerformanceGovernor::DetermineActions(SystemMode mode, Domina
     if (mode == SystemMode::ThermalRecovery) return AllowedActionClass::ThermalSafety;
     
     if (mode == SystemMode::Interactive) {
+        // [DCM] If Security Pressure is the dominant factor during interaction,
+        // we authorize the Foreground Shield (SecurityMitigation)
+        if (pressure == DominantPressure::Security) return AllowedActionClass::SecurityMitigation;
+
         if (pressure == DominantPressure::None) return AllowedActionClass::None;
         if (pressure == DominantPressure::Latency || pressure == DominantPressure::Cpu) return AllowedActionClass::Scheduling;
         if (pressure == DominantPressure::Disk) return AllowedActionClass::IoPrioritization;
@@ -82,9 +95,16 @@ GovernorDecision PerformanceGovernor::Decide(const SystemSignalSnapshot& snapsho
     
     // 2. Identify Pressure
     decision.dominant = SelectDominant(sig);
+
+    // [DCM] Override Dominant Pressure if Security Signal is High
+    // We treat Security Pressure as a "Super-Dominant" factor that overrides normal resource pressure
+    // because fighting AV IO is futile; we must shield instead.
+    if (snapshot.isSecurityPressure) {
+        decision.dominant = DominantPressure::Security; // Requires DominantPressure::Security in Types.h
+    }
     
     // 3. Resolve Mode
-    decision.mode = ResolveMode(sig, snapshot.userActive, snapshot.isThermalThrottling);
+    decision.mode = ResolveMode(sig, snapshot.userActive, snapshot.isThermalThrottling, snapshot.isSecurityPressure);
     
     // 4. Gate Actions
     decision.allowedActions = DetermineActions(decision.mode, decision.dominant);

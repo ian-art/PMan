@@ -312,7 +312,8 @@ enum class DominantPressure : uint8_t {
     Disk,
     Memory,
     Latency,
-    Thermal
+    Thermal,
+    Security // [DCM] Universal AV Activity
 };
 
 enum class SystemMode : uint8_t {
@@ -327,7 +328,8 @@ enum class AllowedActionClass : uint8_t {
     Scheduling,        // Thread priorities, affinities
     IoPrioritization,  // I/O priorities
     MemoryReclaim,     // Working set trimming
-    ThermalSafety      // Throttling only
+    ThermalSafety,     // Throttling only
+    SecurityMitigation // [DCM] Universal Foreground Shielding
 };
 
 struct SystemSignalSnapshot {
@@ -337,6 +339,7 @@ struct SystemSignalSnapshot {
     double latencyMs;          // Input/Audio latency
     bool isThermalThrottling;
     bool userActive;           // Input within last X seconds
+    bool isSecurityPressure;   // [DCM] Heuristic: High CPU/Disk from Protected Process (AV)
 };
 
 // Consequence Evaluator Types
@@ -367,12 +370,13 @@ enum class BrainAction : uint8_t {
     Optimize_Memory,
     Suspend_Services,
     Release_Pressure,
+    Shield_Foreground, // [DCM] Universal Foreground Shielding (Boost FG + IO)
     Count // Compile-time fixed size
 };
 
 // Compile-time check
 constexpr size_t ACTION_COUNT = static_cast<size_t>(BrainAction::Count);
-static_assert(ACTION_COUNT == 6, "BrainAction count");
+static_assert(ACTION_COUNT == 7, "BrainAction count");
 
 // Decision Arbiter Types
 enum class DecisionReason : uint8_t {
