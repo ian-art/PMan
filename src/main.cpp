@@ -208,6 +208,9 @@ static ObservedStateDelta g_lastObserved = {0,0,0};
 static void RunAutonomousCycle() {
     auto& ctx = PManContext::Get();
 
+    // [FIX] Stop decision loop if protection is paused
+    if (ctx.isPaused.load()) return;
+
     // 0. Outcome-Based Early Termination (Reactive Rollback Guard)
     // "Stop immediately if this is going badly."
     // We check if the active lease (from previous tick) is causing actual harm.
