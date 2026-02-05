@@ -19,9 +19,21 @@
 
 #include "sandbox_executor.h"
 #include "logger.h"
+#include "context.h"
 
 SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     SandboxResult result = { false, false, false, "None", 0 };
+
+    // [FAULT INJECTION]
+    if (PManContext::Get().fault.sandboxError) {
+        result.executed = false;
+        result.reversible = false;
+        result.committed = false;
+        result.reason = "Fault:ExecutionError";
+        decision.isReversible = false;
+        Log("[FAULT] SandboxExecutor: Execution Error Simulated.");
+        return result; 
+    }
 
     // 0. Lease Management: Automatic Reversion (Voluntary)
     // If the Arbiter requests Maintain, we must release any active lease immediately.

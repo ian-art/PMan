@@ -87,6 +87,15 @@ public:
     std::atomic<uint64_t> policyState{0};
     std::atomic<DWORD> lastRamCleanPid{0};
 
+    // -- Adversarial Resilience (Fault Injection) --
+    struct FaultState {
+        std::atomic<bool> ledgerWriteFail{false};
+        std::atomic<bool> budgetCorruption{false};
+        std::atomic<bool> sandboxError{false};
+        std::atomic<bool> intentInvalid{false};
+        std::atomic<bool> confidenceInvalid{false};
+    } fault;
+
     // -- Session State --
     std::atomic<DWORD> lastGamePid{0};
     std::atomic<int>   lastMode{0};

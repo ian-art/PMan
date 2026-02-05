@@ -18,6 +18,7 @@
  */
 
 #include "intent_tracker.h"
+#include "context.h"
 
 IntentTracker::IntentTracker() {
     m_state.lastAction = BrainAction::Maintain;
@@ -41,6 +42,11 @@ void IntentTracker::Observe(BrainAction proposed) {
 }
 
 bool IntentTracker::IsStable(uint32_t requiredTicks) const {
+    // [FAULT INJECTION]
+    if (PManContext::Get().fault.intentInvalid) {
+        return false;
+    }
+
     if (requiredTicks == 0) return true;
     return m_state.consecutiveCount >= requiredTicks;
 }

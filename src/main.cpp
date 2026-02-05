@@ -105,7 +105,16 @@ static UINT g_wmTaskbarCreated = 0;
 #define IDI_TRAY_FRAME_6 206
 #define IDI_TRAY_FRAME_7 207
 #define IDI_TRAY_FRAME_8 208
+
 #define ID_TRAY_EXPORT_LOG 5001 // Unique ID for Audit Export
+
+// --- Fault Injection IDs ---
+#define ID_TRAY_FAULT_BASE        6000
+#define ID_TRAY_FAULT_LEDGER      6001
+#define ID_TRAY_FAULT_BUDGET      6002
+#define ID_TRAY_FAULT_SANDBOX     6003
+#define ID_TRAY_FAULT_INTENT      6004
+#define ID_TRAY_FAULT_CONFIDENCE  6005
 
 // --- Tray Animation Globals ---
 #define IDI_TRAY_ORANGE_FRAME_1 209
@@ -259,8 +268,7 @@ static void RunAutonomousCycle() {
         shadowDelta = ctx.subs.shadow->Simulate(decision, telemetry);
     }
 
-    //  Provenance Integrity Check (Hard Constraint)
-    // "Failure to write justification must abort authority spend"
+    // [NEW] Provenance Integrity Check (Hard Constraint)
     if (ctx.subs.provenance && !ctx.subs.provenance->IsProvenanceSecure()) {
         decision.selectedAction = BrainAction::Maintain;
         decision.reason = DecisionReason::HardRuleViolation; 
@@ -268,22 +276,19 @@ static void RunAutonomousCycle() {
         Log("Abort: Provenance Ledger Unhealthy");
     }
 
-    //  Authority Budget & Pre-Execution Capture
+    // [NEW] Authority Budget & Pre-Execution Capture
     int actionCost = 0;
     int budgetBefore = 0;
     bool budgetExhausted = false;
+    
     if (ctx.subs.budget) {
-        budgetBefore = ctx.subs.budget->GetUsed(); // Capture for Provenance
-
-        // 1. Check Hard Exhaustion State
+        budgetBefore = ctx.subs.budget->GetUsed();
         if (ctx.subs.budget->IsExhausted()) {
              decision.selectedAction = BrainAction::Maintain;
              decision.reason = DecisionReason::GovernorRestricted;
              decision.isReversible = false;
              budgetExhausted = true;
-        } 
-        // 2. Check Affordability
-        else {
+        } else {
              actionCost = ctx.subs.budget->GetCost(decision.selectedAction);
              if (!ctx.subs.budget->CanSpend(actionCost)) {
                  decision.selectedAction = BrainAction::Maintain;
@@ -300,7 +305,7 @@ static void RunAutonomousCycle() {
     if (ctx.subs.sandbox) {
         sbResult = ctx.subs.sandbox->TryExecute(decision);
 
-        //  Budget Spending
+        // [NEW] Budget Spending
         // Only spend if the action was committed and wasn't forced to Maintain by budget check
         if (sbResult.committed && !budgetExhausted) {
              if (ctx.subs.budget) ctx.subs.budget->Spend(actionCost);
@@ -331,6 +336,50 @@ static void RunAutonomousCycle() {
         justification.finalCommitted = sbResult.committed;
         
         ctx.subs.provenance->Record(justification);
+    }
+
+    // [NEW] Decision Provenance Recording (The Receipt)
+    bool faultActive = ctx.fault.ledgerWriteFail || ctx.fault.budgetCorruption || 
+                       ctx.fault.sandboxError || ctx.fault.intentInvalid || 
+                       ctx.fault.confidenceInvalid;
+
+    if (ctx.subs.provenance) {
+        bool shouldRecord = (decision.selectedAction != BrainAction::Maintain && sbResult.executed);
+        
+        // Force record if a fault is active (Audit Proof of Failure)
+        if (faultActive) shouldRecord = true;
+
+        if (shouldRecord) {
+            DecisionJustification justification;
+            justification.actionType = decision.selectedAction;
+            justification.timestamp = GetTickCount64();
+            
+            // Confidence Snapshot
+            justification.cpuVariance = currentConfidence.cpuVariance;
+            justification.thermalVariance = currentConfidence.thermalVariance;
+            justification.latencyVariance = currentConfidence.latencyVariance;
+            
+            // Context
+            justification.intentStabilityCount = intentCount;
+            justification.authorityBudgetBefore = budgetBefore;
+            justification.authorityCost = actionCost;
+            
+            // Outcomes
+            justification.sandboxResult = sbResult;
+            
+            // Mark Reason if fault active
+            if (faultActive) {
+                justification.sandboxResult.reason = "Fault:Active";
+                justification.finalCommitted = false; // Faults force failure
+                Log("[FAULT] Recording Fault Event in Provenance Ledger.");
+            } else {
+                justification.finalCommitted = sbResult.committed;
+            }
+
+            justification.rollbackGuardTriggered = false; // We reached execution, so guard was passive
+            
+            ctx.subs.provenance->Record(justification);
+        }
     }
 
     // 7. Conditional Execution (The "1 Bit" of Authority)
@@ -374,6 +423,8 @@ static void RunAutonomousCycle() {
 
     // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Sandbox -> Reality -> Error -> Confidence"
     std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
+                      " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
+                      budgetLog +
                       " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
                       budgetLog +
                       " ArbAct:" + std::to_string((int)decision.selectedAction) + 
@@ -1049,6 +1100,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_EXPORT_LOG, L"Export Authority Log (JSON)");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hDashMenu, L"Monitor & Logs");
 
+            // --- Fault Injection Submenu (Adversarial Testing) ---
+            HMENU hFaultMenu = CreatePopupMenu();
+            auto& f = PManContext::Get().fault;
+            AppendMenuW(hFaultMenu, MF_STRING | (f.ledgerWriteFail ? MF_CHECKED : 0), ID_TRAY_FAULT_LEDGER, L"Simulate Ledger Write Fail");
+            AppendMenuW(hFaultMenu, MF_STRING | (f.budgetCorruption ? MF_CHECKED : 0), ID_TRAY_FAULT_BUDGET, L"Simulate Budget Corruption");
+            AppendMenuW(hFaultMenu, MF_STRING | (f.sandboxError ? MF_CHECKED : 0), ID_TRAY_FAULT_SANDBOX, L"Simulate Sandbox Error");
+            AppendMenuW(hFaultMenu, MF_STRING | (f.intentInvalid ? MF_CHECKED : 0), ID_TRAY_FAULT_INTENT, L"Simulate Invalid Intent");
+            AppendMenuW(hFaultMenu, MF_STRING | (f.confidenceInvalid ? MF_CHECKED : 0), ID_TRAY_FAULT_CONFIDENCE, L"Simulate Invalid Confidence");
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hFaultMenu, L"Fault Injection (Debug)");
+
             // --- Theme Selection Submenu ---
             HMENU hThemeMenu = CreatePopupMenu();
             AppendMenuW(hThemeMenu, MF_STRING | (g_iconTheme == L"Default" ? MF_CHECKED : 0), ID_TRAY_THEME_BASE, L"Default (Embedded)");
@@ -1139,6 +1200,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             DestroyMenu(hDashMenu);
             DestroyMenu(hThemeMenu);
             DestroyMenu(hHelpMenu);
+            DestroyMenu(hFaultMenu);
             DestroyMenu(hMenu);
         }
         return 0;
@@ -1147,6 +1209,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     {
         DWORD wmId = LOWORD(wParam);
         
+        // --- Fault Handler ---
+        if (wmId >= ID_TRAY_FAULT_BASE && wmId <= ID_TRAY_FAULT_CONFIDENCE) {
+            auto& f = PManContext::Get().fault;
+            if (wmId == ID_TRAY_FAULT_LEDGER) f.ledgerWriteFail = !f.ledgerWriteFail;
+            else if (wmId == ID_TRAY_FAULT_BUDGET) f.budgetCorruption = !f.budgetCorruption;
+            else if (wmId == ID_TRAY_FAULT_SANDBOX) f.sandboxError = !f.sandboxError;
+            else if (wmId == ID_TRAY_FAULT_INTENT) f.intentInvalid = !f.intentInvalid;
+            else if (wmId == ID_TRAY_FAULT_CONFIDENCE) f.confidenceInvalid = !f.confidenceInvalid;
+            Log("[FAULT] Fault Injection State Toggled.");
+        }
+
         // --- Theme Handler ---
         if (wmId >= ID_TRAY_THEME_BASE && wmId < ID_TRAY_THEME_BASE + 100) {
             std::wstring newTheme = L"Default";
@@ -1809,7 +1882,6 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                     LoadConfig();
                     
                     // [RECOVERY] Reset Budget on External Signal (Config Reload)
-                    // This allows operators to restore authority without restarting the process.
                     if (PManContext::Get().subs.budget) {
                         PManContext::Get().subs.budget->ResetByExternalSignal();
                     }

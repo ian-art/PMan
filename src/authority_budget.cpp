@@ -19,10 +19,18 @@
 
 #include "authority_budget.h"
 #include "logger.h"
+#include "context.h"
 
 AuthorityBudget::AuthorityBudget() : m_maxBudget(100), m_usedBudget(0), m_exhausted(false) {}
 
 bool AuthorityBudget::CanSpend(int cost) const {
+    // [FAULT INJECTION]
+    if (PManContext::Get().fault.budgetCorruption) {
+        // We do not modify state here, just deny spending.
+        // The main loop will log the denial.
+        return false;
+    }
+
     // Hard Lock: No spending allowed if exhausted
     if (m_exhausted) return false;
     return (m_usedBudget + cost) <= m_maxBudget;

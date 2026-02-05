@@ -18,6 +18,8 @@
  */
 
 #include "confidence_tracker.h"
+#include "context.h"
+#include <limits> // For quiet_NaN
 
 void ConfidenceTracker::RunningStat::Push(double x) {
     m_n++;
@@ -46,6 +48,15 @@ void ConfidenceTracker::Observe(const PredictionError& error) {
 }
 
 ConfidenceMetrics ConfidenceTracker::GetMetrics() const {
+    // [FAULT INJECTION]
+    if (PManContext::Get().fault.confidenceInvalid) {
+        return {
+            std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::quiet_NaN()
+        };
+    }
+
     return {
         m_cpuStat.Variance(),
         m_thermalStat.Variance(),

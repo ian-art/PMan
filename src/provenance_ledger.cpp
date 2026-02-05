@@ -20,6 +20,7 @@
 #include "provenance_ledger.h"
 #include "logger.h"
 #include "utils.h" // Required for WideToUtf8
+#include "context.h" // Required for FaultState
 #include <string>
 #include <fstream>
 #include <iomanip>
@@ -38,6 +39,13 @@ bool ProvenanceLedger::IsProvenanceSecure() const {
 
 void ProvenanceLedger::Record(const DecisionJustification& record) {
     std::lock_guard<std::mutex> lock(m_mutex);
+
+    // [FAULT INJECTION]
+    if (PManContext::Get().fault.ledgerWriteFail) {
+        m_healthy = false;
+        Log("[FAULT] ProvenanceLedger: Write Failure Simulated. Ledger marked unhealthy.");
+        return; 
+    }
 
     if (!m_healthy) return;
 
