@@ -150,7 +150,12 @@ BrainAction DecisionArbiter::MapIntentToAction(const GovernorDecision& gov) {
     
     switch (gov.allowedActions) {
         case AllowedActionClass::MemoryReclaim:
-            // Only optimize memory if strictly allowed
+            // Context-Aware Selection:
+            // If the system is under load (User Active / High CPU), use Gentle trim to avoid stutter.
+            // If the system is in Background Maintenance (Idle), use Hard trim for maximum reclamation.
+            if (gov.mode == SystemMode::SustainedLoad || gov.mode == SystemMode::Interactive) {
+                return BrainAction::Optimize_Memory_Gentle;
+            }
             return BrainAction::Optimize_Memory;
 
         case AllowedActionClass::ThermalSafety:
