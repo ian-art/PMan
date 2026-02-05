@@ -34,12 +34,22 @@
 // --------------------------------------------------------------------------
 
 void ProcessScout::UpdateCache() {
+    // [FIX] Dynamic Process Enumeration: Loop and resize to handle >4096 processes
     std::vector<DWORD> pids(4096);
-    DWORD bytesReturned;
+    DWORD bytesReturned = 0;
     
-    // Use standard EnumProcesses for the scout loop
-    if (!EnumProcesses(pids.data(), sizeof(DWORD) * 4096, &bytesReturned)) {
-        return;
+    while (true) {
+        if (!EnumProcesses(pids.data(), static_cast<DWORD>(pids.size() * sizeof(DWORD)), &bytesReturned)) {
+            Log("[EXECUTOR] EnumProcesses failed.");
+            return;
+        }
+
+        // Check for truncation: If buffer is completely full, it might be truncated.
+        if (bytesReturned == pids.size() * sizeof(DWORD)) {
+            pids.resize(pids.size() * 2);
+            continue;
+        }
+        break;
     }
 
     DWORD count = bytesReturned / sizeof(DWORD);
