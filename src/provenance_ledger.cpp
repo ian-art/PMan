@@ -19,7 +19,10 @@
 
 #include "provenance_ledger.h"
 #include "logger.h"
+#include "utils.h" // Required for WideToUtf8
 #include <string>
+#include <fstream>
+#include <iomanip>
 
 ProvenanceLedger::ProvenanceLedger() : m_healthy(true) {
     m_ledger.reserve(1024);
@@ -62,5 +65,40 @@ void ProvenanceLedger::Record(const DecisionJustification& record) {
         // Hard Failure: If we cannot record, we must flag the system as insecure.
         m_healthy = false;
         Log("[CRITICAL] Provenance Ledger write failed. Authority Locked.");
+    }
+}
+
+void ProvenanceLedger::ExportLog(const std::wstring& filePath) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    try {
+        std::ofstream file(filePath);
+        if (!file.is_open()) {
+            Log("[AUDIT] Failed to open file for export: " + WideToUtf8(filePath.c_str()));
+            return;
+        }
+
+        file << "[\n";
+        for (size_t i = 0; i < m_ledger.size(); ++i) {
+            const auto& rec = m_ledger[i];
+            file << "  {\n";
+            file << "    \"tick\": " << rec.timestamp << ",\n";
+            file << "    \"action\": " << (int)rec.actionType << ",\n";
+            file << "    \"conf_variance\": [" 
+                 << rec.cpuVariance << ", " 
+                 << rec.thermalVariance << ", " 
+                 << rec.latencyVariance << "],\n";
+            file << "    \"intent_stable_count\": " << rec.intentStabilityCount << ",\n";
+            file << "    \"budget_before\": " << rec.authorityBudgetBefore << ",\n";
+            file << "    \"cost\": " << rec.authorityCost << ",\n";
+            file << "    \"sandbox_committed\": " << (rec.finalCommitted ? "true" : "false") << ",\n";
+            file << "    \"sandbox_reason\": \"" << (rec.sandboxResult.reason ? rec.sandboxResult.reason : "None") << "\"\n";
+            file << "  }" << (i < m_ledger.size() - 1 ? "," : "") << "\n";
+        }
+        file << "]\n";
+        
+        Log("[AUDIT] Authority Log exported to: " + WideToUtf8(filePath.c_str()));
+    } catch (...) {
+        Log("[AUDIT] Exception during audit export.");
     }
 }

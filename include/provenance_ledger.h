@@ -58,9 +58,12 @@ public:
     // Append-Only Write
     void Record(const DecisionJustification& justification);
 
+    // Read-Only Audit Export (Snapshot to File)
+    void ExportLog(const std::wstring& filePath) const;
+
 private:
     std::vector<DecisionJustification> m_ledger;
-    std::mutex m_mutex;
+    mutable std::mutex m_mutex; // Mutable to allow locking in const methods
     bool m_healthy;
 };
 

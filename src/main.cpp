@@ -105,6 +105,7 @@ static UINT g_wmTaskbarCreated = 0;
 #define IDI_TRAY_FRAME_6 206
 #define IDI_TRAY_FRAME_7 207
 #define IDI_TRAY_FRAME_8 208
+#define ID_TRAY_EXPORT_LOG 5001 // Unique ID for Audit Export
 
 // --- Tray Animation Globals ---
 #define IDI_TRAY_ORANGE_FRAME_1 209
@@ -1044,6 +1045,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             HMENU hDashMenu = CreatePopupMenu();
             AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_LIVE_LOG, L"Live Log Viewer");
             AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_OPEN_DIR, L"Open Log Folder");
+            AppendMenuW(hDashMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_EXPORT_LOG, L"Export Authority Log (JSON)");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hDashMenu, L"Monitor & Logs");
 
             // --- Theme Selection Submenu ---
@@ -1164,6 +1167,30 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         }
         else if (wmId == ID_TRAY_OPEN_DIR) {
             ShellExecuteW(nullptr, L"open", GetLogPath().c_str(), nullptr, nullptr, SW_SHOW);
+        }
+        else if (wmId == ID_TRAY_EXPORT_LOG) {
+            // Generate timestamped filename
+            auto now = std::chrono::system_clock::now();
+            auto t = std::chrono::system_clock::to_time_t(now);
+            std::tm tm;
+            localtime_s(&tm, &t);
+            
+            wchar_t filename[64];
+            wcsftime(filename, 64, L"audit_dump_%Y%m%d_%H%M%S.json", &tm);
+            
+            std::filesystem::path path = GetLogPath() / filename;
+            
+            if (PManContext::Get().subs.provenance) {
+                PManContext::Get().subs.provenance->ExportLog(path);
+                
+                // Optional: Show balloon tip to confirm
+                wcsncpy_s(g_nid.szInfoTitle, L"Audit Export Complete", _TRUNCATE);
+                wcsncpy_s(g_nid.szInfo, filename, _TRUNCATE);
+                g_nid.uFlags |= NIF_INFO;
+                g_nid.dwInfoFlags = NIIF_INFO;
+                Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+                g_nid.uFlags &= ~NIF_INFO; // Clear flag
+            }
         }
 		else if (wmId == ID_TRAY_EDIT_CONFIG) {
             EditorManager::OpenFile(CONFIG_FILENAME);
