@@ -39,6 +39,7 @@
 #include "outcome_guard.h"
 #include "authority_budget.h"
 #include "provenance_ledger.h"
+#include "policy_contract.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -64,6 +65,7 @@ PManContext::PManContext() {
     subs.guard      = std::make_unique<OutcomeGuard>();
     subs.budget     = std::make_unique<AuthorityBudget>();
     subs.provenance = std::make_unique<ProvenanceLedger>();
+    subs.policy     = std::make_unique<PolicyGuard>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)

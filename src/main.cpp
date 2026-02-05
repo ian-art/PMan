@@ -56,6 +56,7 @@
 #include "outcome_guard.h"
 #include "authority_budget.h"
 #include "provenance_ledger.h"
+#include "policy_contract.h"
 #include "context.h"
 #include <thread>
 #include <tlhelp32.h>
@@ -241,6 +242,20 @@ static void RunAutonomousCycle() {
     // 4. DecisionArbiter (Decide)
     ArbiterDecision decision = ctx.subs.arbiter->Decide(priorities, consequences, currentConfidence);
 
+    // [GATE] Policy Enforcement Layer
+    // "Stronger than confidence, intent, or learning."
+    if (ctx.subs.policy) {
+        if (!ctx.subs.policy->Validate(decision.selectedAction, currentConfidence.cpuVariance, currentConfidence.latencyVariance)) {
+            // Force Maintain on violation
+            decision.selectedAction = BrainAction::Maintain;
+            decision.reason = DecisionReason::HardRuleViolation;
+            decision.isReversible = false;
+            
+            // Log violation
+            Log("[POLICY_VIOLATION] Action rejected by contract (Hash: " + ctx.subs.policy->GetHash() + ")");
+        }
+    }
+
     //  Intent Persistence (Consecutive-Approval Gate)
     // Filter out single-tick noise. Stability required before reaching Sandbox.
     bool intentStable = true;
@@ -334,6 +349,7 @@ static void RunAutonomousCycle() {
         justification.sandboxResult = sbResult;
         justification.rollbackGuardTriggered = false; // We reached execution, so guard was passive
         justification.finalCommitted = sbResult.committed;
+        justification.policyHash = ctx.subs.policy ? ctx.subs.policy->GetHash() : "NONE";
         
         ctx.subs.provenance->Record(justification);
     }
@@ -366,6 +382,7 @@ static void RunAutonomousCycle() {
             
             // Outcomes
             justification.sandboxResult = sbResult;
+            justification.policyHash = ctx.subs.policy ? ctx.subs.policy->GetHash() : "NONE";
             
             // Mark Reason if fault active
             if (faultActive) {
@@ -1589,6 +1606,16 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     // Initialize Policy Optimizer
     PManContext::Get().subs.optimizer = std::make_unique<PolicyOptimizer>();
     PManContext::Get().subs.optimizer->Initialize();
+
+    // Initialize Policy Contract (Boundary Formalization)
+    PManContext::Get().subs.policy = std::make_unique<PolicyGuard>();
+    // Note: If policy.json is missing, it fails open (safe defaults) or logs warning. 
+    // It is read-only and will never be created by the system.
+    if (PManContext::Get().subs.policy->Load(GetLogPath() / L"policy.json")) {
+        Log("[INIT] Policy Contract loaded. Hash: " + PManContext::Get().subs.policy->GetHash());
+    } else {
+        Log("[INIT] WARNING: policy.json missing or invalid. Using hardcoded safe defaults.");
+    }
 
 	// Initialize Smart Memory Optimizer
     g_memoryOptimizer.Initialize();

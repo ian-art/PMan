@@ -64,7 +64,8 @@ void ProvenanceLedger::Record(const DecisionJustification& record) {
         json += "\"intent\": " + std::to_string(record.intentStabilityCount) + ", ";
         json += "\"budget_pre\": " + std::to_string(record.authorityBudgetBefore) + ", ";
         json += "\"cost\": " + std::to_string(record.authorityCost) + ", ";
-        json += "\"committed\": " + std::string(record.finalCommitted ? "true" : "false");
+        json += "\"committed\": " + std::string(record.finalCommitted ? "true" : "false") + ", ";
+        json += "\"policy_hash\": \"" + record.policyHash + "\"";
         json += "}";
 
         Log("[PROVENANCE] " + json);
@@ -100,7 +101,8 @@ void ProvenanceLedger::ExportLog(const std::wstring& filePath) const {
             file << "    \"budget_before\": " << rec.authorityBudgetBefore << ",\n";
             file << "    \"cost\": " << rec.authorityCost << ",\n";
             file << "    \"sandbox_committed\": " << (rec.finalCommitted ? "true" : "false") << ",\n";
-            file << "    \"sandbox_reason\": \"" << (rec.sandboxResult.reason ? rec.sandboxResult.reason : "None") << "\"\n";
+            file << "    \"sandbox_reason\": \"" << (rec.sandboxResult.reason ? rec.sandboxResult.reason : "None") << "\",\n";
+            file << "    \"policy_hash\": \"" << rec.policyHash << "\"\n";
             file << "  }" << (i < m_ledger.size() - 1 ? "," : "") << "\n";
         }
         file << "]\n";

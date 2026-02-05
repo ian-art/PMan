@@ -45,6 +45,9 @@ struct DecisionJustification {
     SandboxResult sandboxResult;
     bool rollbackGuardTriggered; // Should be false if executed
     bool finalCommitted;
+    
+    // Policy Contract Context
+    std::string policyHash; 
 };
 
 class ProvenanceLedger {
