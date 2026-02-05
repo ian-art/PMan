@@ -48,6 +48,9 @@ struct DecisionJustification {
     
     // Policy Contract Context
     std::string policyHash; 
+
+    // Counterfactual Accountability
+    std::vector<CounterfactualRecord> counterfactuals;
 };
 
 class ProvenanceLedger {

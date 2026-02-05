@@ -24,58 +24,81 @@
 ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence, const ConfidenceMetrics& confidence) {
     ArbiterDecision decision;
     decision.decisionTime = GetTickCount64();
-    decision.selectedAction = BrainAction::Maintain; // Default to safe inaction
-    decision.reason = DecisionReason::None;
+    
+    // 1. Identify Candidate
+    BrainAction intentAction = MapIntentToAction(govDecision);
+    
+    // 2. Evaluate Constraints
+    bool hardReject = false;
+    bool confReject = false;
+    bool cooldownReject = false;
+    DecisionReason rejectReason = DecisionReason::None;
 
-    // 1. Hard Rejection Rules (Safety First)
-    DecisionReason rejectReason;
+    // A. Hard Rules
     if (!CheckHardRejection(govDecision, consequence, rejectReason)) {
-        decision.reason = rejectReason;
-        return decision;
+        hardReject = true;
+    }
+    // B. Confidence Rules
+    else if (confidence.cpuVariance > MAX_CPU_VARIANCE ||
+             confidence.thermalVariance > MAX_THERM_VARIANCE ||
+             confidence.latencyVariance > MAX_LAT_VARIANCE ||
+             consequence.confidence < CONFIDENCE_MIN) {
+        confReject = true;
+        rejectReason = DecisionReason::LowConfidence;
+    }
+    // C. Cooldown Rules (Only check if we actually have an intent)
+    else if (intentAction != BrainAction::Maintain && !CheckCooldown(intentAction, rejectReason)) {
+        cooldownReject = true;
     }
 
-    // Confidence-Driven Conservatism (Variance Kill Switch)
-    // Rule: High historical variance -> FORCE NoAction
-    if (confidence.cpuVariance > MAX_CPU_VARIANCE ||
-        confidence.thermalVariance > MAX_THERM_VARIANCE ||
-        confidence.latencyVariance > MAX_LAT_VARIANCE) {
-        decision.selectedAction = BrainAction::Maintain;
-        decision.reason = DecisionReason::LowConfidence;
-        return decision;
-    }
-
-    // Model Confidence Check (Prediction Specific)
-    // Rule: "if (prediction.confidence < CONFIDENCE_MIN) Arbiter must return NoAction"
-    if (consequence.confidence < CONFIDENCE_MIN) {
-        decision.selectedAction = BrainAction::Maintain;
-        decision.reason = DecisionReason::LowConfidence;
-        return decision;
-    }
-
-    // 2. Map Governor Intent to Specific Action
-    BrainAction candidateAction = MapIntentToAction(govDecision);
-
-    // 3. Validation: If mapping resulted in Maintain, we are done
-    if (candidateAction == BrainAction::Maintain) {
-        decision.selectedAction = BrainAction::Maintain;
-        decision.reason = DecisionReason::NoActionNeeded;
-        return decision;
-    }
-
-    // 4. Cooldown Enforcement (Anti-Oscillation)
-    // "No oscillation within a cooldown window"
-    if (!CheckCooldown(candidateAction, rejectReason)) {
+    // 3. Determine Final Selection
+    if (hardReject || confReject || cooldownReject) {
         decision.selectedAction = BrainAction::Maintain;
         decision.reason = rejectReason;
-        return decision;
+    } else {
+        decision.selectedAction = intentAction;
+        if (intentAction == BrainAction::Maintain) {
+            decision.reason = DecisionReason::NoActionNeeded;
+        } else {
+            decision.reason = DecisionReason::Approved;
+            // Update state
+            m_cooldowns[intentAction] = decision.decisionTime;
+        }
     }
 
-    // 5. Final Approval
-    decision.selectedAction = candidateAction;
-    decision.reason = DecisionReason::Approved;
+    // 4. Generate Counterfactuals (The "Why not?" List)
+    // "Which other actions were considered, and exactly why they were rejected."
+    for (int i = 0; i < (int)BrainAction::Count; ++i) {
+        BrainAction alt = (BrainAction)i;
+        
+        // Skip the chosen action (it's in the main record)
+        if (alt == decision.selectedAction) continue;
 
-    // Update state for successful action
-    m_cooldowns[candidateAction] = decision.decisionTime;
+        RejectionReason reason;
+
+        if (alt == intentAction) {
+            // This was the Governor's choice, but WE rejected it.
+            if (hardReject) reason = RejectionReason::PolicyViolation; // Unsafe consequence or gov restriction
+            else if (confReject) reason = RejectionReason::LowConfidence;
+            else if (cooldownReject) reason = RejectionReason::CooldownActive;
+            else reason = RejectionReason::PolicyViolation; // Fallback
+        } else {
+            // This was NOT the Governor's choice.
+            // Why? Because the Governor chose something else (LowerBenefit) 
+            // OR because the Governor strictly forbid it (PolicyViolation).
+            
+            // Check if explicitly forbidden by AllowedActionClass
+            bool explicitForbidden = false;
+            if (govDecision.allowedActions == AllowedActionClass::None) explicitForbidden = true;
+            // (Refinement: Could map BrainAction back to AllowedActionClass to check more granularly, 
+            // but for now, if it wasn't the mapped intent, it's LowerBenefit unless global lock).
+            
+            if (explicitForbidden) reason = RejectionReason::PolicyViolation;
+            else reason = RejectionReason::LowerBenefit;
+        }
+
+        decision.rejectedAlternatives.push_back({alt, reason});
+    }
 
     return decision;
 }

@@ -243,21 +243,25 @@ static void RunAutonomousCycle() {
     ArbiterDecision decision = ctx.subs.arbiter->Decide(priorities, consequences, currentConfidence);
 
     // [GATE] Policy Enforcement Layer
-    // "Stronger than confidence, intent, or learning."
-    if (ctx.subs.policy) {
+    if (ctx.subs.policy && decision.selectedAction != BrainAction::Maintain) {
         if (!ctx.subs.policy->Validate(decision.selectedAction, currentConfidence.cpuVariance, currentConfidence.latencyVariance)) {
-            // Force Maintain on violation
+            // Demote to Counterfactuals
+            decision.rejectedAlternatives.push_back({decision.selectedAction, RejectionReason::PolicyViolation});
+            
+            // Remove Maintain from rejected list (since we are selecting it)
+            auto it = std::remove_if(decision.rejectedAlternatives.begin(), decision.rejectedAlternatives.end(), 
+                [](const CounterfactualRecord& r){ return r.action == BrainAction::Maintain; });
+            decision.rejectedAlternatives.erase(it, decision.rejectedAlternatives.end());
+
+            // Force Maintain
             decision.selectedAction = BrainAction::Maintain;
             decision.reason = DecisionReason::HardRuleViolation;
             decision.isReversible = false;
-            
-            // Log violation
-            Log("[POLICY_VIOLATION] Action rejected by contract (Hash: " + ctx.subs.policy->GetHash() + ")");
+            Log("[POLICY_VIOLATION] Action rejected by contract.");
         }
     }
 
     //  Intent Persistence (Consecutive-Approval Gate)
-    // Filter out single-tick noise. Stability required before reaching Sandbox.
     bool intentStable = true;
     uint32_t intentCount = 0;
     bool intentReset = false;
@@ -265,15 +269,23 @@ static void RunAutonomousCycle() {
 
     if (ctx.subs.intent) {
         ctx.subs.intent->Observe(rawIntent);
-        intentStable = ctx.subs.intent->IsStable(3); // N = 3 Ticks (Conservative)
+        intentStable = ctx.subs.intent->IsStable(3);
         intentCount = ctx.subs.intent->GetCount();
         intentReset = ctx.subs.intent->WasReset();
 
-        if (!intentStable) {
-            // Veto: Intent not yet stable. Force Maintain.
+        if (!intentStable && decision.selectedAction != BrainAction::Maintain) {
+            // Demote to Counterfactuals
+            decision.rejectedAlternatives.push_back({decision.selectedAction, RejectionReason::UnstableIntent});
+            
+            // Remove Maintain from rejected list
+            auto it = std::remove_if(decision.rejectedAlternatives.begin(), decision.rejectedAlternatives.end(), 
+                [](const CounterfactualRecord& r){ return r.action == BrainAction::Maintain; });
+            decision.rejectedAlternatives.erase(it, decision.rejectedAlternatives.end());
+
+            // Veto
             decision.selectedAction = BrainAction::Maintain;
-            decision.reason = DecisionReason::None; // Mask reason as we are waiting
-            decision.isReversible = false; // Revoke authority
+            decision.reason = DecisionReason::None; 
+            decision.isReversible = false;
         }
     }
 
@@ -296,20 +308,32 @@ static void RunAutonomousCycle() {
     int budgetBefore = 0;
     bool budgetExhausted = false;
     
-    if (ctx.subs.budget) {
+	if (ctx.subs.budget) {
         budgetBefore = ctx.subs.budget->GetUsed();
+        bool rejectBudget = false;
+        
         if (ctx.subs.budget->IsExhausted()) {
-             decision.selectedAction = BrainAction::Maintain;
-             decision.reason = DecisionReason::GovernorRestricted;
-             decision.isReversible = false;
+             rejectBudget = true;
              budgetExhausted = true;
         } else {
              actionCost = ctx.subs.budget->GetCost(decision.selectedAction);
              if (!ctx.subs.budget->CanSpend(actionCost)) {
-                 decision.selectedAction = BrainAction::Maintain;
-                 decision.reason = DecisionReason::GovernorRestricted;
-                 decision.isReversible = false;
+                 rejectBudget = true;
              }
+        }
+
+        if (rejectBudget && decision.selectedAction != BrainAction::Maintain) {
+             // Demote to Counterfactuals
+             decision.rejectedAlternatives.push_back({decision.selectedAction, RejectionReason::BudgetInsufficient});
+             
+             // Remove Maintain from rejected list
+             auto it = std::remove_if(decision.rejectedAlternatives.begin(), decision.rejectedAlternatives.end(), 
+                 [](const CounterfactualRecord& r){ return r.action == BrainAction::Maintain; });
+             decision.rejectedAlternatives.erase(it, decision.rejectedAlternatives.end());
+
+             decision.selectedAction = BrainAction::Maintain;
+             decision.reason = DecisionReason::GovernorRestricted;
+             decision.isReversible = false;
         }
     }
 
@@ -383,6 +407,23 @@ static void RunAutonomousCycle() {
             // Outcomes
             justification.sandboxResult = sbResult;
             justification.policyHash = ctx.subs.policy ? ctx.subs.policy->GetHash() : "NONE";
+            justification.counterfactuals = decision.rejectedAlternatives;
+
+            // [HARD SAFETY] Counterfactual Integrity Check
+            if (justification.counterfactuals.empty() && justification.actionType == BrainAction::Maintain) {
+                // If we are Maintaining, we MUST have reasons why we rejected others. 
+                // Empty list implies we didn't check, which is an authority failure.
+                // Exception: If universe size is 1 (impossible here).
+                
+                // Note: If we selected an action (not Maintain), list might be empty if universe is small, 
+                // but with 6 actions, there should always be rejected ones.
+                
+                if (PManContext::Get().subs.provenance) {
+                    // Force Fault
+                    PManContext::Get().fault.ledgerWriteFail = true;
+                    Log("[CRITICAL] Counterfactual Capture Failed. Authority Revoked.");
+                }
+            }
             
             // Mark Reason if fault active
             if (faultActive) {

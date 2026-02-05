@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-
+ 
 #include "provenance_ledger.h"
 #include "logger.h"
 #include "utils.h" // Required for WideToUtf8
@@ -24,6 +24,21 @@
 #include <string>
 #include <fstream>
 #include <iomanip>
+
+static std::string ReasonToString(RejectionReason r) {
+    switch(r) {
+        case RejectionReason::HigherCost: return "HigherCost";
+        case RejectionReason::LowerBenefit: return "LowerBenefit";
+        case RejectionReason::PolicyViolation: return "PolicyViolation";
+        case RejectionReason::LowConfidence: return "LowConfidence";
+        case RejectionReason::UnstableIntent: return "UnstableIntent";
+        case RejectionReason::CooldownActive: return "CooldownActive";
+        case RejectionReason::BudgetInsufficient: return "BudgetInsufficient";
+        case RejectionReason::SandboxRejected: return "SandboxRejected";
+        case RejectionReason::ManualOverride: return "ManualOverride";
+        default: return "Unknown";
+    }
+}
 
 ProvenanceLedger::ProvenanceLedger() : m_healthy(true) {
     m_ledger.reserve(1024);
@@ -98,11 +113,19 @@ void ProvenanceLedger::ExportLog(const std::wstring& filePath) const {
                  << rec.thermalVariance << ", " 
                  << rec.latencyVariance << "],\n";
             file << "    \"intent_stable_count\": " << rec.intentStabilityCount << ",\n";
-            file << "    \"budget_before\": " << rec.authorityBudgetBefore << ",\n";
-            file << "    \"cost\": " << rec.authorityCost << ",\n";
+            file << "    \"budget_before\": " << rec.authorityBudgetBefore << ",\n";file << "    \"cost\": " << rec.authorityCost << ",\n";
             file << "    \"sandbox_committed\": " << (rec.finalCommitted ? "true" : "false") << ",\n";
             file << "    \"sandbox_reason\": \"" << (rec.sandboxResult.reason ? rec.sandboxResult.reason : "None") << "\",\n";
-            file << "    \"policy_hash\": \"" << rec.policyHash << "\"\n";
+            file << "    \"policy_hash\": \"" << rec.policyHash << "\",\n";
+            
+            file << "    \"counterfactuals\": [\n";
+            for (size_t j = 0; j < rec.counterfactuals.size(); ++j) {
+                const auto& cf = rec.counterfactuals[j];
+                file << "      { \"action\": " << (int)cf.action << ", \"reason\": \"" << ReasonToString(cf.reason) << "\" }"
+                     << (j < rec.counterfactuals.size() - 1 ? "," : "") << "\n";
+            }
+            file << "    ]\n";
+
             file << "  }" << (i < m_ledger.size() - 1 ? "," : "") << "\n";
         }
         file << "]\n";

@@ -387,11 +387,32 @@ enum class DecisionReason : uint8_t {
     NoActionNeeded         // System is optimal, inaction is correct
 };
 
+// Counterfactual Accountability Types
+enum class RejectionReason : uint8_t {
+    HigherCost,
+    LowerBenefit,
+    PolicyViolation,
+    LowConfidence,
+    UnstableIntent,
+    CooldownActive,
+    BudgetInsufficient,
+    SandboxRejected,
+    ManualOverride // For user pauses/locks
+};
+
+struct CounterfactualRecord {
+    BrainAction action;
+    RejectionReason reason;
+};
+
 struct ArbiterDecision {
     BrainAction selectedAction;
     DecisionReason reason;
     uint64_t decisionTime;
     bool isReversible = false; // Authority Grant (Default: False)
+    
+    // The "Why not?" Ledger
+    std::vector<CounterfactualRecord> rejectedAlternatives;
     
     // Helper for "Do Nothing" defaults
     static ArbiterDecision Maintain(DecisionReason r) {
