@@ -57,6 +57,7 @@
 #include "authority_budget.h"
 #include "provenance_ledger.h"
 #include "policy_contract.h"
+#include "external_verdict.h"
 #include "context.h"
 #include <thread>
 #include <tlhelp32.h>
@@ -248,17 +249,52 @@ static void RunAutonomousCycle() {
             // Demote to Counterfactuals
             decision.rejectedAlternatives.push_back({decision.selectedAction, RejectionReason::PolicyViolation});
             
-            // Remove Maintain from rejected list (since we are selecting it)
             auto it = std::remove_if(decision.rejectedAlternatives.begin(), decision.rejectedAlternatives.end(), 
                 [](const CounterfactualRecord& r){ return r.action == BrainAction::Maintain; });
             decision.rejectedAlternatives.erase(it, decision.rejectedAlternatives.end());
 
-            // Force Maintain
             decision.selectedAction = BrainAction::Maintain;
             decision.reason = DecisionReason::HardRuleViolation;
             decision.isReversible = false;
             Log("[POLICY_VIOLATION] Action rejected by contract.");
         }
+    }
+
+    // [GATE] External Verdict Interface (Jurisdictional Boundary)
+    // "The system is not sovereign. It is a licensed operator."
+    VerdictResult verdictResult = { false, "NONE", 0, "" };
+    if (ctx.subs.verdict) {
+        verdictResult = ctx.subs.verdict->Check(decision.selectedAction, GetTickCount64());
+
+        if (!verdictResult.allowed) {
+             // Demote to Counterfactuals
+             if (decision.selectedAction != BrainAction::Maintain) {
+                 decision.rejectedAlternatives.push_back({decision.selectedAction, RejectionReason::ExternalDenial});
+             }
+
+             // Remove Maintain from rejected list
+             auto it = std::remove_if(decision.rejectedAlternatives.begin(), decision.rejectedAlternatives.end(), 
+                 [](const CounterfactualRecord& r){ return r.action == BrainAction::Maintain; });
+             decision.rejectedAlternatives.erase(it, decision.rejectedAlternatives.end());
+
+             // Force Maintain
+             decision.selectedAction = BrainAction::Maintain;
+             decision.reason = DecisionReason::HardRuleViolation;
+             decision.isReversible = false;
+             
+             // Log only on state change or significant denial to avoid spam, or verbose
+             // Prompt says "Missing / expired / malformed verdicts fail closed"
+             static std::string lastVerdictReason = "";
+             if (verdictResult.reason != lastVerdictReason) {
+                Log("[EXTERNAL_VERDICT] Authority Revoked: " + verdictResult.reason);
+                lastVerdictReason = verdictResult.reason;
+             }
+        }
+    } else {
+        // Missing Module -> Fail Closed
+        decision.selectedAction = BrainAction::Maintain;
+        decision.isReversible = false;
+        verdictResult.stateStr = "MISSING_MODULE";
     }
 
     //  Intent Persistence (Consecutive-Approval Gate)
@@ -408,6 +444,10 @@ static void RunAutonomousCycle() {
             justification.sandboxResult = sbResult;
             justification.policyHash = ctx.subs.policy ? ctx.subs.policy->GetHash() : "NONE";
             justification.counterfactuals = decision.rejectedAlternatives;
+            
+            // External Verdict Capture
+            justification.externalVerdict.state = verdictResult.stateStr;
+            justification.externalVerdict.expiresAt = verdictResult.expiresAt;
 
             // [HARD SAFETY] Counterfactual Integrity Check
             if (justification.counterfactuals.empty() && justification.actionType == BrainAction::Maintain) {

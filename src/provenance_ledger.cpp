@@ -36,6 +36,7 @@ static std::string ReasonToString(RejectionReason r) {
         case RejectionReason::BudgetInsufficient: return "BudgetInsufficient";
         case RejectionReason::SandboxRejected: return "SandboxRejected";
         case RejectionReason::ManualOverride: return "ManualOverride";
+        case RejectionReason::ExternalDenial: return "ExternalDenial";
         default: return "Unknown";
     }
 }
@@ -118,6 +119,11 @@ void ProvenanceLedger::ExportLog(const std::wstring& filePath) const {
             file << "    \"sandbox_reason\": \"" << (rec.sandboxResult.reason ? rec.sandboxResult.reason : "None") << "\",\n";
             file << "    \"policy_hash\": \"" << rec.policyHash << "\",\n";
             
+            file << "    \"external_verdict\": {\n";
+            file << "      \"state\": \"" << rec.externalVerdict.state << "\",\n";
+            file << "      \"expires_at_tick\": " << rec.externalVerdict.expiresAt << "\n";
+            file << "    },\n";
+
             file << "    \"counterfactuals\": [\n";
             for (size_t j = 0; j < rec.counterfactuals.size(); ++j) {
                 const auto& cf = rec.counterfactuals[j];

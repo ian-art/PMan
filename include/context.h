@@ -62,6 +62,7 @@ class OutcomeGuard;      // Reactive Rollback Guard
 class AuthorityBudget;   // Cumulative Cost Limiter
 class ProvenanceLedger;  // Decision Provenance
 class PolicyGuard;       // Policy Boundary Contract
+class ExternalVerdict;   // External Verdict Interface
 
 class PManContext {
 public:
@@ -255,6 +256,7 @@ public:
         std::unique_ptr<AuthorityBudget>       budget;    // Authority Budget
         std::unique_ptr<ProvenanceLedger>      provenance;// Post-Hoc Justification
         std::unique_ptr<PolicyGuard>           policy;    // Policy Boundary Contract
+        std::unique_ptr<ExternalVerdict>       verdict;   // External Verdict Interface
     } subs;
 
 private:

@@ -51,6 +51,12 @@ struct DecisionJustification {
 
     // Counterfactual Accountability
     std::vector<CounterfactualRecord> counterfactuals;
+
+    // External Verdict Context
+    struct {
+        std::string state; // ALLOW, DENY, CONSTRAIN, NONE
+        uint64_t expiresAt;
+    } externalVerdict;
 };
 
 class ProvenanceLedger {

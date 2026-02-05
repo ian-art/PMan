@@ -397,7 +397,8 @@ enum class RejectionReason : uint8_t {
     CooldownActive,
     BudgetInsufficient,
     SandboxRejected,
-    ManualOverride // For user pauses/locks
+    ManualOverride, // For user pauses/locks
+    ExternalDenial  // Rejected by External Verdict Interface
 };
 
 struct CounterfactualRecord {
