@@ -368,6 +368,7 @@ enum class BrainAction : uint8_t {
     Throttle_Mild,
     Throttle_Aggressive,
     Optimize_Memory,
+    Optimize_Memory_Gentle, // [NEW] Soft trim (skip small processes)
     Suspend_Services,
     Release_Pressure,
     Shield_Foreground, // [DCM] Universal Foreground Shielding (Boost FG + IO)
@@ -376,7 +377,7 @@ enum class BrainAction : uint8_t {
 
 // Compile-time check
 constexpr size_t ACTION_COUNT = static_cast<size_t>(BrainAction::Count);
-static_assert(ACTION_COUNT == 7, "BrainAction count");
+static_assert(ACTION_COUNT == 8, "BrainAction count");
 
 // Decision Arbiter Types
 enum class DecisionReason : uint8_t {

@@ -37,6 +37,7 @@ static int ActionFromString(const std::string& s) {
     if (s.find("Throttle_Mild") != std::string::npos) return (int)BrainAction::Throttle_Mild;
     if (s.find("Throttle_Aggressive") != std::string::npos) return (int)BrainAction::Throttle_Aggressive;
     if (s.find("Throttle_Strong") != std::string::npos) return (int)BrainAction::Throttle_Aggressive; // Alias
+    if (s.find("Optimize_Memory_Gentle") != std::string::npos) return (int)BrainAction::Optimize_Memory_Gentle;
     if (s.find("Optimize_Memory") != std::string::npos) return (int)BrainAction::Optimize_Memory;
     if (s.find("Suspend_Services") != std::string::npos) return (int)BrainAction::Suspend_Services;
     if (s.find("Release_Pressure") != std::string::npos) return (int)BrainAction::Release_Pressure;

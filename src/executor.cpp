@@ -211,6 +211,9 @@ std::optional<Executor::Receipt> Executor::Execute(const ActionIntent& intent) {
         case BrainAction::Optimize_Memory:
             success = ApplyMemoryTrim(targets, true); // Hard trim
             break;
+        case BrainAction::Optimize_Memory_Gentle:
+            success = ApplyMemoryTrim(targets, false); // Gentle trim (skips <100MB)
+            break;
         case BrainAction::Suspend_Services:
             // [ARCH-FIX] Safety: targets are ignored. We only suspend the static AllowedList.
             success = ApplyServiceSuspension(targets);
