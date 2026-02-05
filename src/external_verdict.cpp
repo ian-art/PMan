@@ -28,6 +28,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <ctime>
 
 ExternalVerdict::ExternalVerdict() {}
 ExternalVerdict::~ExternalVerdict() {}
@@ -70,7 +71,7 @@ ExternalVerdict::VerdictData ExternalVerdict::ParseVerdict(const std::string& js
         else return data; // Invalid Type
 
         // 2. Parse Expiry
-        size_t expPos = json.find("\"expires_at_tick\"");
+        size_t expPos = json.find("\"expires_at_unix\"");
         if (expPos != std::string::npos) {
             size_t valStart = json.find(":", expPos) + 1;
             // Scan for digits
@@ -118,7 +119,7 @@ ExternalVerdict::VerdictData ExternalVerdict::LoadVerdict(const std::wstring& pa
     return ParseVerdict(buffer.str());
 }
 
-VerdictResult ExternalVerdict::Check(BrainAction action, uint64_t currentTick) {
+VerdictResult ExternalVerdict::Check(BrainAction action) {
     // Hard Rule: Maintain is always allowed unless explicitly DENIED by system failure,
     // but here we check strictly against the verdict.
     // However, if the verdict says "DENY" (meaning stop everything), even Maintain might be the *result* of the denial, 
@@ -145,8 +146,15 @@ VerdictResult ExternalVerdict::Check(BrainAction action, uint64_t currentTick) {
         return result;
     }
 
-    // 2. Expiration -> Fail Closed
-    if (currentTick > v.expiresAt) {
+    // 2. Expiration & Manual Renewal Check
+    // "0" specifically means the operator has not set a valid window.
+    if (v.expiresAt == 0) {
+        result.reason = "Manual Renewal Required";
+        return result;
+    }
+
+    uint64_t now = (uint64_t)std::time(nullptr);
+    if (now > v.expiresAt) {
         result.reason = "Verdict Expired";
         return result;
     }

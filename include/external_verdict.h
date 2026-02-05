@@ -45,7 +45,7 @@ public:
     ~ExternalVerdict();
 
     // Check if the action is permitted by the external verdict file
-    VerdictResult Check(BrainAction action, uint64_t currentTick);
+    VerdictResult Check(BrainAction action);
 
 private:
     struct VerdictData {

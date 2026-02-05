@@ -271,7 +271,7 @@ static void RunAutonomousCycle() {
     // "The system is not sovereign. It is a licensed operator."
     VerdictResult verdictResult = { false, "NONE", 0, "" };
     if (ctx.subs.verdict) {
-        verdictResult = ctx.subs.verdict->Check(decision.selectedAction, GetTickCount64());
+        verdictResult = ctx.subs.verdict->Check(decision.selectedAction);
 
         if (!verdictResult.allowed) {
              // Demote to Counterfactuals
