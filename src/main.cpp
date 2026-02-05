@@ -59,6 +59,7 @@
 #include "policy_contract.h"
 #include "external_verdict.h"
 #include "context.h"
+#include "tray_animator.h"
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -94,19 +95,7 @@
 
 // GLOBAL VARIABLE
 HINSTANCE g_hInst = nullptr;
-static NOTIFYICONDATAW g_nid = {}; // Defined early for visibility
 static UINT g_wmTaskbarCreated = 0;
-
-// --- Tray Animation Globals ---
-#define TRAY_TIMER_ID 1
-#define IDI_TRAY_FRAME_1 201
-#define IDI_TRAY_FRAME_2 202
-#define IDI_TRAY_FRAME_3 203
-#define IDI_TRAY_FRAME_4 204
-#define IDI_TRAY_FRAME_5 205
-#define IDI_TRAY_FRAME_6 206
-#define IDI_TRAY_FRAME_7 207
-#define IDI_TRAY_FRAME_8 208
 
 #define ID_TRAY_EXPORT_LOG 5001 // Unique ID for Audit Export
 
@@ -117,24 +106,6 @@ static UINT g_wmTaskbarCreated = 0;
 #define ID_TRAY_FAULT_SANDBOX     6003
 #define ID_TRAY_FAULT_INTENT      6004
 #define ID_TRAY_FAULT_CONFIDENCE  6005
-
-// --- Tray Animation Globals ---
-#define IDI_TRAY_ORANGE_FRAME_1 209
-#define IDI_TRAY_ORANGE_FRAME_2 210
-#define IDI_TRAY_ORANGE_FRAME_3 211
-#define IDI_TRAY_ORANGE_FRAME_4 212
-#define IDI_TRAY_ORANGE_FRAME_5 213
-#define IDI_TRAY_ORANGE_FRAME_6 214
-#define IDI_TRAY_ORANGE_FRAME_7 215
-#define IDI_TRAY_ORANGE_FRAME_8 216
-
-static std::vector<HICON> g_framesNormal;
-static std::vector<HICON> g_framesPaused;
-static std::vector<HICON> g_framesCustom; // Custom loaded frames
-static std::vector<HICON> g_framesCustomPaused; // Custom PAUSED frames
-static std::vector<HICON>* g_activeFrames = nullptr; // Pointer to the currently active set
-// g_currentThemeName replaced by g_iconTheme (globals.h)
-static size_t g_currentFrame = 0;
 // -----------------------------
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
@@ -969,7 +940,7 @@ static void UpdateTrayTooltip()
         tip += L"\n\u2600 Keep Awake: ON";
     }
 
-    // 3. Current Mode (Optional - requires exposing g_lastMode in globals.h)
+    // 3. Current Mode
     if (g_sessionLocked.load()) {
          tip += L"\n\u1F3AE Mode: Gaming";
     }
@@ -981,11 +952,8 @@ static void UpdateTrayTooltip()
     else if (sramState == LagState::LAGGING) tip += L"\n\u26D4 System: Lagging";
     else if (sramState == LagState::CRITICAL_LAG) tip += L"\n\u2620 System: CRITICAL";
 
-    // Safety: Truncate to 127 chars to prevent buffer overflow (szTip limit)
-    if (tip.length() > 127) tip = tip.substr(0, 127);
-
-    wcsncpy_s(g_nid.szTip, tip.c_str(), _TRUNCATE);
-    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+    // Delegate to module
+    TrayAnimator::Get().UpdateTooltip(tip);
 }
 
 // Forward declaration for main program logic
@@ -1004,184 +972,43 @@ static void ShowSramNotification(LagState state) {
     std::wstring title = L"System Responsiveness Alert";
     std::wstring msg = L"";
 
+    DWORD flags = NIIF_NONE;
     if (state == LagState::LAGGING) {
         msg = L"System is experiencing lag. Optimization scans have been deferred to restore responsiveness.";
-        g_nid.dwInfoFlags = NIIF_WARNING;
+        flags = NIIF_WARNING;
     } else if (state == LagState::CRITICAL_LAG) {
         msg = L"CRITICAL LAG DETECTED. Entering 'Do No Harm' mode. All background operations stopped.";
-        g_nid.dwInfoFlags = NIIF_ERROR;
+        flags = NIIF_ERROR;
     }
 
-    wcsncpy_s(g_nid.szInfoTitle, title.c_str(), _TRUNCATE);
-    wcsncpy_s(g_nid.szInfo, msg.c_str(), _TRUNCATE);
-    g_nid.uFlags |= NIF_INFO;
-    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
-    
-    // Clear flag after sending to prevent stuck balloon
-    g_nid.uFlags &= ~NIF_INFO;
+    TrayAnimator::Get().ShowNotification(title, msg, flags);
 }
 
 // --- Custom Tray Animation Helpers ---
-static void EnsureCustomFolderAndReadme() {
-    try {
-        std::filesystem::path baseDir = GetLogPath() / L"custom_icoanimation";
-        
-        // 1. Create directory if missing
-        if (!std::filesystem::exists(baseDir)) {
-            std::filesystem::create_directories(baseDir);
-        }
-
-        // 2. Create README if missing (ALWAYS check, even if dir existed)
-        std::filesystem::path readmePath = baseDir / L"README.txt";
-        if (!std::filesystem::exists(readmePath)) {
-            std::ofstream readme(readmePath);
-            if (readme.is_open()) {
-                readme << "PMan Custom Tray Animations\n"
-                       << "===========================\n\n"
-                       << "How to install a theme:\n"
-                       << "1. Create a folder with your theme name (e.g. 'Matrix') inside this folder.\n"
-                       << "2. Add 8 icons for the ACTIVE animation named:\n"
-                       << "   frame_01.ico, frame_02.ico ... frame_08.ico\n"
-                       << "3. (Optional) Add 8 icons for the PAUSED animation named:\n"
-                       << "   p_frame_01.ico, p_frame_02.ico ... p_frame_08.ico\n\n"
-                       << "Note:\n"
-                       << "- If paused icons (p_*) are missing, PMan will use the active icons for the paused state.\n";
-                readme.close();
-            }
-        }
-    } catch (...) {}
-}
-
-static std::vector<std::wstring> ScanAnimationThemes() {
-    EnsureCustomFolderAndReadme(); 
-    std::vector<std::wstring> themes;
-    try {
-        std::filesystem::path baseDir = GetLogPath() / L"custom_icoanimation";
-        if (std::filesystem::exists(baseDir)) {
-            for (const auto& entry : std::filesystem::directory_iterator(baseDir)) {
-                if (entry.is_directory()) {
-                    // Validate: Only list themes that have at least the first frame
-                    if (std::filesystem::exists(entry.path() / L"frame_01.ico")) {
-                        themes.push_back(entry.path().filename().wstring());
-                    }
-                }
-            }
-        }
-    } catch (...) {}
-    return themes;
-}
-
-static void SetCustomTheme(const std::wstring& themeName) {
-    // Cleanup previous custom icons
-    for (HICON h : g_framesCustom) DestroyIcon(h);
-    g_framesCustom.clear();
-    for (HICON h : g_framesCustomPaused) DestroyIcon(h);
-    g_framesCustomPaused.clear();
-
-    if (themeName == L"Default") {
-        g_iconTheme = L"Default";
-        g_activeFrames = g_userPaused.load() ? &g_framesPaused : &g_framesNormal;
-    } else {
-        std::filesystem::path themePath = GetLogPath() / L"custom_icoanimation" / themeName;
-        
-        // 1. Load Normal Frames
-        for (int i = 1; i <= 8; ++i) {
-            wchar_t filename[32];
-            swprintf_s(filename, L"frame_%02d.ico", i);
-            HICON hIcon = (HICON)LoadImageW(nullptr, (themePath / filename).c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION | LR_DEFAULTSIZE);
-            if (hIcon) g_framesCustom.push_back(hIcon);
-        }
-
-        // 2. Load Paused Frames (p_*)
-        bool foundPaused = false;
-        for (int i = 1; i <= 8; ++i) {
-            wchar_t filename[32];
-            swprintf_s(filename, L"p_frame_%02d.ico", i);
-            HICON hIcon = (HICON)LoadImageW(nullptr, (themePath / filename).c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION | LR_DEFAULTSIZE);
-            if (hIcon) {
-                g_framesCustomPaused.push_back(hIcon);
-                foundPaused = true;
-            }
-        }
-
-        // 3. Fallback: If no specific paused icons, reuse normal icons (reload to get distinct handles)
-        if (!foundPaused || g_framesCustomPaused.empty()) {
-            for (HICON h : g_framesCustomPaused) DestroyIcon(h); // Cleanup partials
-            g_framesCustomPaused.clear();
-            for (int i = 1; i <= 8; ++i) {
-                wchar_t filename[32];
-                swprintf_s(filename, L"frame_%02d.ico", i);
-                HICON hIcon = (HICON)LoadImageW(nullptr, (themePath / filename).c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION | LR_DEFAULTSIZE);
-                if (hIcon) g_framesCustomPaused.push_back(hIcon);
-            }
-        }
-
-        if (!g_framesCustom.empty()) {
-            g_iconTheme = themeName;
-            g_activeFrames = g_userPaused.load() ? &g_framesCustomPaused : &g_framesCustom;
-        } else {
-            g_iconTheme = L"Default";
-            g_activeFrames = g_userPaused.load() ? &g_framesPaused : &g_framesNormal;
-        }
-    }
-
-    g_currentFrame = 0;
-    if (g_activeFrames && !g_activeFrames->empty()) {
-        g_nid.hIcon = (*g_activeFrames)[0];
-        Shell_NotifyIconW(NIM_MODIFY, &g_nid);
-    }
-}
+// Logic moved to tray_animator.cpp
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     // Re-add icon if Explorer restarts (TaskbarCreated message)
     if (g_wmTaskbarCreated && uMsg == g_wmTaskbarCreated)
     {
-        Shell_NotifyIconW(NIM_ADD, &g_nid);
+        TrayAnimator::Get().OnTaskbarRestart();
         return 0;
     }
 
     switch (uMsg)
     {
     case WM_CREATE:
-        // Ensure custom folder structure exists immediately on startup
-        EnsureCustomFolderAndReadme();
-
-        // 1. Load Normal Frames
-        for (int i = 0; i < 8; i++) {
-            g_framesNormal.push_back(LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_FRAME_1 + i)));
-        }
-
-        // 2. Load Paused (Orange) Frames
-        for (int i = 0; i < 8; i++) {
-            g_framesPaused.push_back(LoadIcon(g_hInst, MAKEINTRESOURCE(IDI_TRAY_ORANGE_FRAME_1 + i)));
-        }
-
-        // 3. Set Initial State
+        // Initialize Tray Animation Subsystem
+        TrayAnimator::Get().Initialize(g_hInst, hwnd);
+        
+        // Restore saved state
         if (g_iconTheme != L"Default") {
-            SetCustomTheme(g_iconTheme);
-        } else {
-            g_activeFrames = &g_framesNormal;
+            TrayAnimator::Get().SetTheme(g_iconTheme);
         }
-
-        g_nid.cbSize = sizeof(NOTIFYICONDATAW);
-        g_nid.hWnd = hwnd;
-        g_nid.uID = ID_TRAY_APP_ICON;
-        g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-        g_nid.uCallbackMessage = WM_TRAYICON;
+        TrayAnimator::Get().SetPaused(g_userPaused.load());
         
-        // Initial Icon
-        if (!g_activeFrames->empty()) {
-            g_nid.hIcon = (*g_activeFrames)[0];
-        } else {
-            g_nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
-        }
-        
-        Shell_NotifyIconW(NIM_ADD, &g_nid);
         UpdateTrayTooltip(); // Set initial text
-        
-        // Start Animation Timer (150ms)
-        SetTimer(hwnd, TRAY_TIMER_ID, 150, nullptr);
 
         // [DARK MODE] Apply Centralized Dark Mode
         DarkMode::ApplyToWindow(hwnd);
@@ -1189,13 +1016,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
     // [DARK MODE] Refresh Menu Themes if system theme changes
     case WM_TIMER:
-        if (wParam == TRAY_TIMER_ID && g_activeFrames && !g_activeFrames->empty())
-        {
-            // Simple cyclic animation on the active set
-            g_currentFrame = (g_currentFrame + 1) % g_activeFrames->size();
-            g_nid.hIcon = (*g_activeFrames)[g_currentFrame];
-            Shell_NotifyIconW(NIM_MODIFY, &g_nid);
-        }
+        TrayAnimator::Get().OnTimer(wParam);
         return 0;
 
     case WM_THEMECHANGED:
@@ -1245,7 +1066,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             HMENU hThemeMenu = CreatePopupMenu();
             AppendMenuW(hThemeMenu, MF_STRING | (g_iconTheme == L"Default" ? MF_CHECKED : 0), ID_TRAY_THEME_BASE, L"Default (Embedded)");
             
-            std::vector<std::wstring> themes = ScanAnimationThemes();
+            std::vector<std::wstring> themes = TrayAnimator::Get().ScanThemes();
             int themeId = ID_TRAY_THEME_BASE + 1;
             for (const auto& theme : themes) {
                 bool isSelected = (g_iconTheme == theme);
@@ -1355,13 +1176,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         if (wmId >= ID_TRAY_THEME_BASE && wmId < ID_TRAY_THEME_BASE + 100) {
             std::wstring newTheme = L"Default";
             if (wmId != ID_TRAY_THEME_BASE) {
-                std::vector<std::wstring> themes = ScanAnimationThemes();
+                std::vector<std::wstring> themes = TrayAnimator::Get().ScanThemes();
                 int index = wmId - (ID_TRAY_THEME_BASE + 1);
                 if (index >= 0 && index < themes.size()) {
                     newTheme = themes[index];
                 }
             }
-            SetCustomTheme(newTheme);
+            TrayAnimator::Get().SetTheme(newTheme);
             SaveIconTheme(newTheme);
         }
         
@@ -1388,12 +1209,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 PManContext::Get().subs.provenance->ExportLog(path);
                 
                 // Optional: Show balloon tip to confirm
-                wcsncpy_s(g_nid.szInfoTitle, L"Audit Export Complete", _TRUNCATE);
-                wcsncpy_s(g_nid.szInfo, filename, _TRUNCATE);
-                g_nid.uFlags |= NIF_INFO;
-                g_nid.dwInfoFlags = NIIF_INFO;
-                Shell_NotifyIconW(NIM_MODIFY, &g_nid);
-                g_nid.uFlags &= ~NIF_INFO; // Clear flag
+                TrayAnimator::Get().ShowNotification(L"Audit Export Complete", filename, NIIF_INFO);
             }
         }
 		else if (wmId == ID_TRAY_EDIT_CONFIG) {
@@ -1473,23 +1289,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             g_userPaused.store(p);
 
             // --- ANIMATION STATE SWITCH ---
-            // 1. Swap the pointer based on Theme
-            if (p) { // Paused
-                if (g_iconTheme == L"Default") g_activeFrames = &g_framesPaused;
-                else g_activeFrames = &g_framesCustomPaused;
-            } else { // Resumed
-                if (g_iconTheme == L"Default") g_activeFrames = &g_framesNormal;
-                else g_activeFrames = &g_framesCustom;
-            }
-            
-            // 2. Reset index to start fresh immediately
-            g_currentFrame = 0;
-            
-            // 3. Force immediate icon update (don't wait for timer)
-            if (g_activeFrames && !g_activeFrames->empty()) {
-                g_nid.hIcon = (*g_activeFrames)[0];
-                Shell_NotifyIconW(NIM_MODIFY, &g_nid);
-            }
+            TrayAnimator::Get().SetPaused(p);
             // -----------------------------
 
             UpdateTrayTooltip(); 
@@ -1537,14 +1337,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return TRUE;
 
     case WM_DESTROY:
-        // Cleanup Custom Icons
-        for (HICON h : g_framesCustom) DestroyIcon(h);
-        g_framesCustom.clear();
-        for (HICON h : g_framesCustomPaused) DestroyIcon(h);
-        g_framesCustomPaused.clear();
-
-        KillTimer(hwnd, TRAY_TIMER_ID);
-        Shell_NotifyIconW(NIM_DELETE, &g_nid);
+        TrayAnimator::Get().Shutdown();
         PostQuitMessage(0);
         return 0;
 
