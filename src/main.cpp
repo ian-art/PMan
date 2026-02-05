@@ -55,6 +55,7 @@
 #include "intent_tracker.h" // [FIX] Added missing include
 #include "outcome_guard.h"
 #include "authority_budget.h"
+#include "provenance_ledger.h"
 #include "context.h"
 #include <thread>
 #include <tlhelp32.h>
@@ -230,7 +231,7 @@ static void RunAutonomousCycle() {
     // 4. DecisionArbiter (Decide)
     ArbiterDecision decision = ctx.subs.arbiter->Decide(priorities, consequences, currentConfidence);
 
-    // [NEW] Intent Persistence (Consecutive-Approval Gate)
+    //  Intent Persistence (Consecutive-Approval Gate)
     // Filter out single-tick noise. Stability required before reaching Sandbox.
     bool intentStable = true;
     uint32_t intentCount = 0;
@@ -257,11 +258,22 @@ static void RunAutonomousCycle() {
         shadowDelta = ctx.subs.shadow->Simulate(decision, telemetry);
     }
 
-    // [NEW] Authority Budget (Cumulative Cost Limiter)
-    // Check if we can afford the action cost BEFORE trying to execute.
+    //  Provenance Integrity Check (Hard Constraint)
+    // "Failure to write justification must abort authority spend"
+    if (ctx.subs.provenance && !ctx.subs.provenance->IsProvenanceSecure()) {
+        decision.selectedAction = BrainAction::Maintain;
+        decision.reason = DecisionReason::HardRuleViolation; 
+        decision.isReversible = false;
+        Log("Abort: Provenance Ledger Unhealthy");
+    }
+
+    //  Authority Budget & Pre-Execution Capture
     int actionCost = 0;
+    int budgetBefore = 0;
     bool budgetExhausted = false;
     if (ctx.subs.budget) {
+        budgetBefore = ctx.subs.budget->GetUsed(); // Capture for Provenance
+
         // 1. Check Hard Exhaustion State
         if (ctx.subs.budget->IsExhausted()) {
              decision.selectedAction = BrainAction::Maintain;
@@ -287,11 +299,37 @@ static void RunAutonomousCycle() {
     if (ctx.subs.sandbox) {
         sbResult = ctx.subs.sandbox->TryExecute(decision);
 
-        // [NEW] Budget Spending
+        //  Budget Spending
         // Only spend if the action was committed and wasn't forced to Maintain by budget check
         if (sbResult.committed && !budgetExhausted) {
              if (ctx.subs.budget) ctx.subs.budget->Spend(actionCost);
         }
+    }
+
+    //  Decision Provenance Recording (The Receipt)
+    // "Capture point... Only if action passed all gates and reached Sandbox execution"
+    // "Do not log for Maintain"
+    if (ctx.subs.provenance && decision.selectedAction != BrainAction::Maintain && sbResult.executed) {
+        DecisionJustification justification;
+        justification.actionType = decision.selectedAction;
+        justification.timestamp = GetTickCount64();
+        
+        // Confidence Snapshot
+        justification.cpuVariance = currentConfidence.cpuVariance;
+        justification.thermalVariance = currentConfidence.thermalVariance;
+        justification.latencyVariance = currentConfidence.latencyVariance;
+        
+        // Context
+        justification.intentStabilityCount = intentCount;
+        justification.authorityBudgetBefore = budgetBefore;
+        justification.authorityCost = actionCost;
+        
+        // Outcomes
+        justification.sandboxResult = sbResult;
+        justification.rollbackGuardTriggered = false; // We reached execution, so guard was passive
+        justification.finalCommitted = sbResult.committed;
+        
+        ctx.subs.provenance->Record(justification);
     }
 
     // 7. Conditional Execution (The "1 Bit" of Authority)

@@ -38,6 +38,7 @@
 #include "intent_tracker.h"
 #include "outcome_guard.h"
 #include "authority_budget.h"
+#include "provenance_ledger.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -62,6 +63,7 @@ PManContext::PManContext() {
     subs.intent     = std::make_unique<IntentTracker>();
     subs.guard      = std::make_unique<OutcomeGuard>();
     subs.budget     = std::make_unique<AuthorityBudget>();
+    subs.provenance = std::make_unique<ProvenanceLedger>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)
