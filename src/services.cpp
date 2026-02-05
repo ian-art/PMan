@@ -33,6 +33,32 @@
 static constexpr int SERVICE_OP_WAIT_RETRIES = 20;
 static constexpr int SERVICE_OP_WAIT_DELAY_MS = 100;
 
+// [PATCH] Heuristic Detection for Security Products (AV/EDR)
+// We use the raw constant 11 for ProcessProtectionLevelInfo to avoid SDK macro conflicts.
+// This allows PMan to generically identify Security Products without hardcoded names.
+static bool IsProtectedProcess(DWORD pid) {
+    if (pid == 0 || pid == 4) return true; // System/Idle
+
+    // Try to open with limited rights. 
+    // If we can't even do this, it's likely a high-security process (AV/EDR).
+    // Access Denied on QueryLimited is a strong heuristic for "Do Not Touch".
+    UniqueHandle hProcess(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (!hProcess) {
+        if (GetLastError() == ERROR_ACCESS_DENIED) return true;
+        return false;
+    }
+
+    // Use standard SDK struct (defined in processthreadsapi.h)
+    PROCESS_PROTECTION_LEVEL_INFORMATION ppl = {0};
+    
+    // Check if the process has a Protection Level (PPL)
+    // Common: Antimalware (0x31/0x32), WinTcb (0x11), Lsa (0x41)
+    if (GetProcessInformation(hProcess.get(), (PROCESS_INFORMATION_CLASS)11, &ppl, sizeof(ppl))) {
+        return (ppl.ProtectionLevel != 0);
+    }
+    return false;
+}
+
 // Helper: Check for active dependent services to prevent cascade failures
 static bool HasActiveDependents(SC_HANDLE hSvc) {
     DWORD bytesNeeded = 0;
@@ -81,6 +107,28 @@ bool WindowsServiceManager::AddService(const std::wstring& serviceName, DWORD ac
     if (m_services.find(serviceName) != m_services.end())
         return true;
     
+    // [SECURITY] Heuristic Guard: Detect Security Products before requesting high privileges.
+    // Opening an AV service with STOP/WRITE access (even just to check it) triggers Tamper Protection.
+    // We first perform a "Safe Check" using minimal rights to inspect the PID/PPL status.
+    {
+        ScHandle checkHandle(OpenServiceW(m_scManager.get(), serviceName.c_str(), SERVICE_QUERY_STATUS));
+        if (checkHandle) {
+            SERVICE_STATUS_PROCESS ssp = {0};
+            DWORD bytes = 0;
+            // Use QueryServiceStatusEx to get the PID
+            if (QueryServiceStatusEx(checkHandle.get(), SC_STATUS_PROCESS_INFO, 
+                (LPBYTE)&ssp, sizeof(ssp), &bytes)) {
+                
+                // If it's running and is a Protected Process (AV/EDR), ABORT.
+                if (ssp.dwProcessId > 0 && IsProtectedProcess(ssp.dwProcessId)) {
+                    Log("[SEC] Security/Protected Service detected: " + WideToUtf8(serviceName.c_str()) + 
+                        " (PID " + std::to_string(ssp.dwProcessId) + "). Blocked access.");
+                    return false;
+                }
+            }
+        }
+    }
+
     // RAII Wrapper (Using standard ScHandle)
     // .get() is required for raw handle access to C-APIs
     ScHandle safeHandle(OpenServiceW(m_scManager.get(), serviceName.c_str(), accessRights));
@@ -308,6 +356,13 @@ bool WindowsServiceManager::CaptureSessionSnapshot()
 
         // Standard exclusion check (still needed for standalone services)
         if (IsHardExcluded(name)) continue;
+
+        // [SECURITY] Heuristic: Skip Protected Processes (AVs, EDRs, System)
+        // This ensures we never attempt to touch the affinity/priority of an active Security Product.
+        if (IsProtectedProcess(pid)) {
+             // Log("[SERVICE] Skipped PPL/Security PID " + std::to_string(pid));
+             continue;
+        }
 
         ServiceSessionEntry entry;
         entry.name = name;
