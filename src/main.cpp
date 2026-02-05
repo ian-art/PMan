@@ -62,6 +62,7 @@
 #include "tray_animator.h"
 #include "responsiveness_manager.h"
 #include "log_viewer.h"
+#include "etw_monitor.h"
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -1332,7 +1333,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     std::thread etwThread;
     if (g_caps.canUseEtw)
     {
-        etwThread = std::thread(EtwThread);
+        etwThread = std::thread(EtwMonitor::Run);
         PinBackgroundThread(etwThread);
         Sleep(100); // [POLISH] Stagger start
     }
@@ -1660,7 +1661,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 	
     // Signal threads to wake up/stop
     if (g_hShutdownEvent) SetEvent(g_hShutdownEvent.get()); // Wakes Watchdog immediately
-    StopEtwSession(); // Unblocks EtwThread (ProcessTrace returns)
+    EtwMonitor::Stop(); // Unblocks EtwThread (ProcessTrace returns)
     PostShutdown(); // Wakes IocpConfigWatcher
     
     // Stop background worker
