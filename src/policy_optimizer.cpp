@@ -108,23 +108,36 @@ PolicyParameters PolicyOptimizer::Optimize() {
 }
 
 void PolicyOptimizer::TuneParameters(double avgRegret, const OptimizationFeedback& recentAvg) {
-    // Allowed Changes
-    // If Regret is high (System getting worse), tighten thresholds.
+    // [FIX] Adaptive Gradient Descent with "User Annoyance" Safety
     
-    if (avgRegret > 5.0) { // Arbitrary high regret threshold
-        // System is unstable/degrading.
-        // Reaction: Become more sensitive (lower thresholds) to catch pressure earlier?
-        // OR: If we are acting and it's bad, maybe we are acting too much?
-        
-        // Simple logic: If CPU is worsening (positive delta), lower CPU threshold to catch it earlier.
+    // CASE A: User Hated It (Interrupted) -> IMMEDIATE BACKOFF
+    if (recentAvg.userInterrupted) {
+        // Raise thresholds significantly to stop interfering
+        m_currentPolicy.cpuThreshold = std::clamp(m_currentPolicy.cpuThreshold + 0.05, 0.50, 0.99);
+        // Increase penalty weights to make expensive actions less likely
+        m_currentPolicy.latencyWeight *= 1.1; 
+        Log("[OPTIMIZER] User Interruption Detected: Backing off (Threshold ++, Weights ++)");
+        return;
+    }
+
+    // CASE B: System is Degrading (High Positive Regret) -> Intervene More
+    if (avgRegret > 5.0) { 
         if (recentAvg.cpuDelta > 0) {
+            // CPU is the problem: Lower threshold to catch spikes earlier
             m_currentPolicy.cpuThreshold = std::clamp(m_currentPolicy.cpuThreshold - 0.01, 0.50, 0.95);
         }
+        if (recentAvg.diskDelta > 0) {
+            // Disk is the problem: Increase Disk Weight to prioritize I/O logic
+            m_currentPolicy.diskWeight *= 1.05;
+        }
     }
-    else if (avgRegret < -5.0) {
-        // System is improving significantly.
-        // We can afford to be looser (higher thresholds) to interfere less.
-        m_currentPolicy.cpuThreshold = std::clamp(m_currentPolicy.cpuThreshold + 0.005, 0.50, 0.95);
+    // CASE C: System is Stable/Improving (Negative Regret) -> Relax
+    else if (avgRegret < -2.0) {
+        // We are doing well, loosen grip slightly to save resources
+        m_currentPolicy.cpuThreshold = std::clamp(m_currentPolicy.cpuThreshold + 0.002, 0.50, 0.95);
+        
+        // Normalize weights slowly back to baseline if they got too high
+        if (m_currentPolicy.latencyWeight > 1.0) m_currentPolicy.latencyWeight *= 0.99;
     }
 }
 
