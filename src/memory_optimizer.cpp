@@ -96,7 +96,8 @@ void MemoryOptimizer::InitializePageFaultCounter() {
     // Attempt to add the Page Faults/sec counter
     // Note: This path works on English systems. For full localization support, 
     // PdhLookupPerfNameByIndex should ideally be used in the future.
-    if (PdhAddCounterW(m_pdhQuery, L"\\Memory\\Page Faults/sec", 0, &m_pdhCounter) != ERROR_SUCCESS) {
+    // [FIX] Use PdhAddEnglishCounterW to support non-English Windows locales
+    if (PdhAddEnglishCounterW(m_pdhQuery, L"\\Memory\\Page Faults/sec", 0, &m_pdhCounter) != ERROR_SUCCESS) {
         Log("[MEMOPT] Warning: Failed to add Page Fault counter. Monitoring might be limited.");
     }
     PdhCollectQueryData(m_pdhQuery);
