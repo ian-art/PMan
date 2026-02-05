@@ -181,12 +181,45 @@ static SystemSignalSnapshot CaptureSnapshot() {
     }
 
     // 3. Disk & Latency
-    // Note: Assuming SysInfo exposes these, otherwise default to safe 0
-    snap.diskQueueLen = 0.0; // Placeholder for PDH Queue Length
+    // [TELEMETRY] Real-Time PDH Monitoring
+    static PDH_HQUERY s_perfQuery = nullptr;
+    static PDH_HCOUNTER s_diskCounter = nullptr;
+    static PDH_HCOUNTER s_thermalCounter = nullptr;
+    static bool s_perfInit = false;
+
+    if (!s_perfInit) {
+        if (PdhOpenQueryW(nullptr, 0, &s_perfQuery) == ERROR_SUCCESS) {
+            // Monitor Total Disk Queue
+            PdhAddEnglishCounterW(s_perfQuery, L"\\PhysicalDisk(_Total)\\Current Disk Queue Length", 0, &s_diskCounter);
+            // Monitor Processor Throttling (<100% means throttling)
+            PdhAddEnglishCounterW(s_perfQuery, L"\\Processor Information(_Total)\\% Performance Limit", 0, &s_thermalCounter);
+            PdhCollectQueryData(s_perfQuery); // Prime counters
+        }
+        s_perfInit = true;
+    }
+
+    if (s_perfQuery) {
+        PdhCollectQueryData(s_perfQuery);
+        
+        PDH_FMT_COUNTERVALUE val;
+        if (s_diskCounter && PdhGetFormattedCounterValue(s_diskCounter, PDH_FMT_DOUBLE, nullptr, &val) == ERROR_SUCCESS) {
+            snap.diskQueueLen = val.doubleValue;
+        } else {
+            snap.diskQueueLen = 0.0;
+        }
+
+        if (s_thermalCounter && PdhGetFormattedCounterValue(s_thermalCounter, PDH_FMT_DOUBLE, nullptr, &val) == ERROR_SUCCESS) {
+            // If Performance Limit is < 99%, system is throttling (Thermal/Power)
+            snap.isThermalThrottling = (val.doubleValue < 99.0);
+        } else {
+            snap.isThermalThrottling = false;
+        }
+    }
+
     snap.latencyMs = PManContext::Get().telem.lastDpcLatency.load();
 
     // 4. Thermal & User Activity
-    snap.isThermalThrottling = false; // Placeholder for ThermalZone API
+    // snap.isThermalThrottling handled above
     
     // Check if user has been active in the last 30 seconds
     uint64_t lastInput = g_explorerBooster.GetLastUserActivity();
