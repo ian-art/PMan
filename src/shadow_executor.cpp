@@ -19,7 +19,7 @@
 
 #include "shadow_executor.h"
 
-PredictedStateDelta ShadowExecutor::Simulate(const ArbiterDecision& decision, const SystemSignalSnapshot& /*telemetry*/) {
+PredictedStateDelta ShadowExecutor::Simulate(const ArbiterDecision& decision, const SystemSignalSnapshot& telemetry) {
     PredictedStateDelta delta = { 0, 0, 0 };
 
     switch (decision.selectedAction) {
@@ -28,30 +28,36 @@ PredictedStateDelta ShadowExecutor::Simulate(const ArbiterDecision& decision, co
             break;
 
         case BrainAction::Throttle_Mild:
-            // Simulation: Mild throttling reduces CPU load slightly (-5%)
-            delta = {-5, 0, 0};
+            // Simulation: Mild throttling reduces CPU load by ~10% of current usage
+            // It rarely adds latency unless load is already critically low (starvation)
+            delta.cpuLoadDelta = -(telemetry.cpuLoad * 0.10);
+            delta.latencyDelta = (telemetry.cpuLoad > 90.0) ? 2.0 : 0.0;
             break;
 
         case BrainAction::Throttle_Aggressive:
-            // Simulation: Aggressive throttling reduces CPU load significantly (-15%) 
-            // but may increase latency (+10ms)
-            delta = {-15, -1, 10};
+            // Simulation: Aggressive throttling reduces CPU load by ~25%
+            // But significantly risks latency if user is active or load is high
+            delta.cpuLoadDelta = -(telemetry.cpuLoad * 0.25);
+            delta.latencyDelta = (telemetry.cpuLoad * 0.20); // 20% latency penalty risk
+            delta.thermalDelta = -2.0; // Good for cooling
             break;
 
         case BrainAction::Optimize_Memory:
-            // Simulation: Memory optimization might spike CPU momentarily (+2%)
-            // but reduces memory pressure (not tracked in this specific struct, so 0)
-            delta = {2, 0, 5}; 
+            // Simulation: Trimming spikes CPU and Latency momentarily
+            delta.cpuLoadDelta = 5.0; 
+            delta.latencyDelta = 15.0; // Hard faults cause stutter
             break;
 
         case BrainAction::Suspend_Services:
-            // Simulation: Stopping services frees resources
-            delta = {-2, 0, 0};
+            // Simulation: Stopping services frees minimal CPU, mostly RAM
+            delta.cpuLoadDelta = -1.0;
             break;
 
         case BrainAction::Release_Pressure:
-            // Simulation: Releasing clamps increases CPU load (+5%) and reduces latency (-5ms)
-            delta = {5, 0, -5};
+            // Simulation: Removing clamps restores natural CPU demand (load goes UP)
+            // But latency (responsiveness) improves drastically
+            delta.cpuLoadDelta = 5.0; 
+            delta.latencyDelta = -10.0;
             break;
 
         default:
