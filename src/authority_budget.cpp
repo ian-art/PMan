@@ -66,3 +66,7 @@ void AuthorityBudget::ResetByExternalSignal() {
     m_exhausted = false;
     Log("Budget: Reset (ExternalSignal)");
 }
+
+void AuthorityBudget::SetMax(int newMax) {
+    m_maxBudget = newMax;
+}

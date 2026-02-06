@@ -43,6 +43,9 @@ public:
     // Manual Recovery (Auditable)
     void ResetByExternalSignal();
 
+    // Dynamic Policy Update
+    void SetMax(int newMax);
+
 private:
     int m_maxBudget;
     int m_usedBudget;

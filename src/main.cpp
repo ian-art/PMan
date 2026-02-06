@@ -1523,6 +1523,10 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     // It is read-only and will never be created by the system.
     if (PManContext::Get().subs.policy->Load(GetLogPath() / L"policy.json")) {
         Log("[INIT] Policy Contract loaded. Hash: " + PManContext::Get().subs.policy->GetHash());
+        // [FIX] Apply Budget Limit from Policy
+        if (PManContext::Get().subs.budget) {
+            PManContext::Get().subs.budget->SetMax(PManContext::Get().subs.policy->GetLimits().maxAuthorityBudget);
+        }
     } else {
         Log("[INIT] WARNING: policy.json missing or invalid. Using hardcoded safe defaults.");
         Log("[INIT] No policy.json found. Authority is DISABLED. To enable autonomy, provide a valid policy.json.");
@@ -1818,9 +1822,17 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                     g_sessionCache.store(nullptr, std::memory_order_release);
                     Sleep(250);
                     LoadConfig();
+
+                    // [FIX] Reload Policy and Sync Budget
+                    if (PManContext::Get().subs.policy) {
+                        PManContext::Get().subs.policy->Load(GetLogPath() / L"policy.json");
+                    }
                     
                     // [RECOVERY] Reset Budget on External Signal (Config Reload)
                     if (PManContext::Get().subs.budget) {
+                        if (PManContext::Get().subs.policy) {
+                            PManContext::Get().subs.budget->SetMax(PManContext::Get().subs.policy->GetLimits().maxAuthorityBudget);
+                        }
                         PManContext::Get().subs.budget->ResetByExternalSignal();
                     }
                 });
