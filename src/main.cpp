@@ -1079,7 +1079,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 			// 2. Configuration Submenu
             HMENU hConfigMenu = CreatePopupMenu();
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, (L"Edit Config (config.ini)" + editorName).c_str());
+            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, L"Open Control Center");
             AppendMenuW(hConfigMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_GAMES, (L"Edit Games List" + editorName).c_str());
             AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_BROWSERS, (L"Edit Browsers List" + editorName).c_str());
