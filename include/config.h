@@ -22,6 +22,7 @@
 #include <filesystem>
 
 void LoadConfig();
+void SaveConfig();
 bool CreateDefaultConfig(const std::filesystem::path& configPath);
 
 // Tweak Persistence

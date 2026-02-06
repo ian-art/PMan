@@ -1216,7 +1216,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             }
         }
 		else if (wmId == ID_TRAY_EDIT_CONFIG) {
-            EditorManager::OpenFile(CONFIG_FILENAME);
+            GuiManager::ShowConfigWindow();
         }
 		else if (wmId == ID_TRAY_EDIT_GAMES) {
             EditorManager::OpenConfigAtSection(L"[games]");

@@ -29,6 +29,7 @@ namespace GuiManager {
     void ShowAboutWindow();
     void ShowHelpWindow();
     void ShowLogWindow();
+    void ShowConfigWindow();
 
     // Returns true if the GUI window is currently open.
     // Use this to determine if you should call RenderFrame().

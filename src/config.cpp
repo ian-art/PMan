@@ -120,6 +120,10 @@ static std::unordered_set<std::wstring> GetDefaultBackgroundApps() {
     };
 }
 
+// Internal shadow copies for serialization
+static ExplorerConfig g_lastExplorerConfig;
+static std::unordered_set<std::wstring> g_shadowBackgroundApps;
+
 // Helper to write configuration data to file (refactored for AV compatibility)
 static void WriteConfigurationFile(const std::filesystem::path& path, 
                                    const std::unordered_set<std::wstring>& games,
@@ -695,6 +699,7 @@ void LoadConfig()
         if (backgroundApps.empty()) {
             backgroundApps = GetDefaultBackgroundApps();
         }
+        g_shadowBackgroundApps = backgroundApps; // Update shadow copy
         g_networkMonitor.SetBackgroundApps(backgroundApps);
 
 		// Finalize Explorer Config with Validations
@@ -711,6 +716,7 @@ void LoadConfig()
              Log("[CONFIG] explorer.idle_threshold too low (<5s). Forcing to 15s.");
              explorerConfig.idleThresholdMs = 15000;
         }
+        g_lastExplorerConfig = explorerConfig; // Update shadow copy
         g_explorerBooster.UpdateConfig(explorerConfig);
         
 		Log("Config loaded: " + std::to_string(g_games.size()) + " games, " +
@@ -831,6 +837,32 @@ void SaveTweakPreferences(const TweakConfig& config)
     out << L"location = " << (config.location ? L"true" : L"false") << L"\n";
     out << L"dvr = " << (config.dvr ? L"true" : L"false") << L"\n";
     out << L"bloatware = " << (config.bloatware ? L"true" : L"false") << L"\n";
+}
+
+void SaveConfig()
+{
+    try {
+        std::unique_lock lg(g_setMtx);
+        
+        WriteConfigurationFile(
+            GetConfigPath(),
+            g_games, g_browsers, g_videoPlayers, g_shadowBackgroundApps, g_oldGames, 
+            g_gameWindows, g_browserWindows, g_customLaunchers, g_ignoredProcesses,
+            g_ignoreNonInteractive.load(),
+            g_restoreOnExit.load(),
+            g_lockPolicy.load(),
+            g_suspendUpdatesDuringGames.load(),
+            g_idleRevertEnabled.load(),
+            g_idleTimeoutMs.load(),
+            g_responsivenessRecoveryEnabled.load(),
+            g_recoveryPromptEnabled.load(),
+            g_lastExplorerConfig,
+            g_iconTheme
+        );
+        Log("[CONFIG] Configuration saved to disk.");
+    } catch (const std::exception& e) {
+        Log("[CONFIG] Failed to save configuration: " + std::string(e.what()));
+    }
 }
 
 void SaveIconTheme(const std::wstring& theme)

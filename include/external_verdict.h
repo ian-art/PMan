@@ -47,6 +47,8 @@ public:
     // Check if the action is permitted by the external verdict file
     VerdictResult Check(BrainAction action);
 
+    static void SaveVerdict(const std::wstring& path, VerdictType type, uint64_t durationSeconds);
+
 private:
     struct VerdictData {
         VerdictType type = VerdictType::NONE;

@@ -22,6 +22,10 @@
 #include "config.h"
 #include "logger.h"
 #include "utils.h" // For GetCurrentExeVersion
+#include "context.h"
+#include "policy_contract.h"
+#include "external_verdict.h"
+#include "globals.h"
 
 #include <d3d11.h>
 #include <dwmapi.h> // Required for transparency
@@ -53,8 +57,30 @@ namespace GuiManager {
     static bool g_isInitialized = false;
     static bool g_isOpen = false;
     
-    enum class GuiMode { TuneUp, About, Help, LogViewer };
+    enum class GuiMode { TuneUp, About, Help, LogViewer, Config };
     static GuiMode g_activeMode = GuiMode::TuneUp;
+
+    // Config Window State
+    struct ConfigState {
+        // Tab 1: General
+        bool restoreOnExit = true;
+        bool idleRevert = true;
+        int idleTimeoutSec = 300;
+        
+        // Tab 2: Policy
+        int maxBudget = 100;
+        float cpuVar = 0.01f;
+        float latVar = 0.02f;
+        bool allowThrottle = true;
+        bool allowOptimize = true;
+        bool allowSuspend = true;
+        bool allowPressure = true;
+
+        // Tab 3: Verdict
+        int verdictIdx = 0; // 0=ALLOW, 1=DENY, 2=CONSTRAIN
+        int durationHours = 24;
+    };
+    static ConfigState g_configState;
 
     // Log Viewer State
     static std::string g_logBuffer;
@@ -286,6 +312,32 @@ namespace GuiManager {
         ShowWindow(g_hwnd, SW_SHOW);
         SetForegroundWindow(g_hwnd);
     }
+
+    void ShowConfigWindow() {
+        if (!g_isInitialized) Init();
+        g_activeMode = GuiMode::Config;
+        
+        // Populate State
+        g_configState.restoreOnExit = g_restoreOnExit.load();
+        g_configState.idleRevert = g_idleRevertEnabled.load();
+        g_configState.idleTimeoutSec = g_idleTimeoutMs.load() / 1000;
+        
+        if (auto& pol = PManContext::Get().subs.policy) {
+            const auto& lim = pol->GetLimits();
+            g_configState.maxBudget = lim.maxAuthorityBudget;
+            g_configState.cpuVar = (float)lim.minConfidence.cpuVariance;
+            g_configState.latVar = (float)lim.minConfidence.latencyVariance;
+            
+            g_configState.allowThrottle = lim.allowedActions.count((int)BrainAction::Throttle_Mild);
+            g_configState.allowOptimize = lim.allowedActions.count((int)BrainAction::Optimize_Memory);
+            g_configState.allowSuspend = lim.allowedActions.count((int)BrainAction::Suspend_Services);
+            g_configState.allowPressure = lim.allowedActions.count((int)BrainAction::Release_Pressure);
+        }
+
+        g_isOpen = true;
+        ShowWindow(g_hwnd, SW_SHOW);
+        SetForegroundWindow(g_hwnd);
+    }
 	
     bool IsWindowOpen() {
         return g_isOpen;
@@ -363,6 +415,7 @@ namespace GuiManager {
         if (g_activeMode == GuiMode::About) title = "ABOUT";
         else if (g_activeMode == GuiMode::Help) title = "HELP";
         else if (g_activeMode == GuiMode::LogViewer) title = "PMAN LIVE LOG";
+        else if (g_activeMode == GuiMode::Config) title = "CONTROL CENTER";
         
         // Use loaded Title Font if available, otherwise fallback to scaling
         if (g_pFontTitle) ImGui::PushFont(g_pFontTitle);
@@ -385,7 +438,113 @@ namespace GuiManager {
         // ----------------------------------------------------------------------------------------
         ImGui::BeginChild("Content", ImVec2(0, -70), false);
 
-        if (g_activeMode == GuiMode::TuneUp)
+        if (g_activeMode == GuiMode::Config)
+        {
+            if (ImGui::BeginTabBar("ConfigTabs")) {
+                if (ImGui::BeginTabItem("General")) {
+                    BeginCard("gen", {0.12f, 0.16f, 0.14f, 1.0f});
+                    
+                    ImGui::Checkbox("Restore Priority on Exit", &g_configState.restoreOnExit);
+                    HelpMarker("Restores original Win32PrioritySeparation when PMan closes.");
+
+                    ImGui::Separator();
+                    
+                    ImGui::Checkbox("Idle Revert Mode", &g_configState.idleRevert);
+                    HelpMarker("Switch to Browser Mode when system is idle.");
+
+                    ImGui::SliderInt("Idle Timeout (s)", &g_configState.idleTimeoutSec, 10, 600);
+                    
+                    if (ImGui::Button("Save Settings", ImVec2(140, 32))) {
+                        // Apply to Global State
+                        g_restoreOnExit.store(g_configState.restoreOnExit);
+                        g_idleRevertEnabled.store(g_configState.idleRevert);
+                        g_idleTimeoutMs.store(g_configState.idleTimeoutSec * 1000);
+                        
+                        // Save to File
+                        SaveConfig();
+                        g_reloadNow.store(true);
+                        
+                        MessageBoxW(g_hwnd, L"Configuration saved successfully.", L"PMan", MB_OK);
+                    }
+
+                    EndCard();
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Policy")) {
+                    BeginCard("pol", {0.14f, 0.10f, 0.10f, 1.0f});
+                    
+                    ImGui::InputInt("Authority Budget", &g_configState.maxBudget);
+                    HelpMarker("Max actions per cycle.");
+                    
+                    ImGui::InputFloat("CPU Variance", &g_configState.cpuVar, 0.001f, 0.01f, "%.4f");
+                    ImGui::InputFloat("Latency Variance", &g_configState.latVar, 0.001f, 0.01f, "%.4f");
+
+                    ImGui::Separator();
+                    ImGui::Text("Allowed Actions:");
+                    ImGui::Checkbox("Throttle", &g_configState.allowThrottle);
+                    ImGui::Checkbox("Optimize Memory", &g_configState.allowOptimize);
+                    ImGui::Checkbox("Suspend Services", &g_configState.allowSuspend);
+                    ImGui::Checkbox("Pressure Relief", &g_configState.allowPressure);
+
+                    if (ImGui::Button("Apply Policy", ImVec2(140, 32))) {
+                        PolicyLimits limits;
+                        limits.maxAuthorityBudget = g_configState.maxBudget;
+                        limits.minConfidence.cpuVariance = g_configState.cpuVar;
+                        limits.minConfidence.latencyVariance = g_configState.latVar;
+                        
+                        if (g_configState.allowThrottle) {
+                            limits.allowedActions.insert((int)BrainAction::Throttle_Mild);
+                            limits.allowedActions.insert((int)BrainAction::Throttle_Aggressive);
+                        }
+                        if (g_configState.allowOptimize) {
+                             limits.allowedActions.insert((int)BrainAction::Optimize_Memory);
+                             limits.allowedActions.insert((int)BrainAction::Optimize_Memory_Gentle);
+                        }
+                        if (g_configState.allowSuspend) limits.allowedActions.insert((int)BrainAction::Suspend_Services);
+                        if (g_configState.allowPressure) {
+                            limits.allowedActions.insert((int)BrainAction::Release_Pressure);
+                            limits.allowedActions.insert((int)BrainAction::Shield_Foreground);
+                        }
+                        
+                        // Save Policy
+                        if (PManContext::Get().subs.policy) {
+                            PManContext::Get().subs.policy->Save(GetLogPath() / L"policy.json", limits);
+                            g_reloadNow.store(true); // Trigger hot-reload
+                        }
+                    }
+
+                    EndCard();
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Verdict")) {
+                    BeginCard("verd", {0.14f, 0.14f, 0.18f, 1.0f});
+                    
+                    const char* items[] = { "ALLOW", "DENY", "CONSTRAIN" };
+                    ImGui::Combo("Verdict Status", &g_configState.verdictIdx, items, IM_ARRAYSIZE(items));
+                    
+                    ImGui::InputInt("Duration (Hours)", &g_configState.durationHours);
+
+                    if (ImGui::Button("Revoke Authority Now", ImVec2(180, 32))) {
+                        ExternalVerdict::SaveVerdict(GetLogPath() / L"verdict.json", VerdictType::DENY, 3600);
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Grant Authority", ImVec2(180, 32))) {
+                        VerdictType type = VerdictType::ALLOW;
+                        if (g_configState.verdictIdx == 1) type = VerdictType::DENY;
+                        if (g_configState.verdictIdx == 2) type = VerdictType::CONSTRAIN;
+                        
+                        ExternalVerdict::SaveVerdict(GetLogPath() / L"verdict.json", type, g_configState.durationHours * 3600);
+                    }
+
+                    EndCard();
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
+        }
+        else if (g_activeMode == GuiMode::TuneUp)
         {
             if (ImGui::BeginTabBar("TweakTabs")) {
 

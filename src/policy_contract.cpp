@@ -93,6 +93,55 @@ std::string PolicyGuard::ComputeFileHash(const std::wstring& path) {
     return hexHash;
 }
 
+static std::string ActionToString(int action) {
+    switch ((BrainAction)action) {
+        case BrainAction::Throttle_Mild: return "Throttle_Mild";
+        case BrainAction::Throttle_Aggressive: return "Throttle_Aggressive";
+        case BrainAction::Optimize_Memory_Gentle: return "Optimize_Memory_Gentle";
+        case BrainAction::Optimize_Memory: return "Optimize_Memory";
+        case BrainAction::Suspend_Services: return "Suspend_Services";
+        case BrainAction::Release_Pressure: return "Release_Pressure";
+        case BrainAction::Shield_Foreground: return "Shield_Foreground";
+        case BrainAction::Maintain: return "Maintain";
+        default: return "Maintain";
+    }
+}
+
+std::string PolicyGuard::SerializePolicy(const PolicyLimits& limits) {
+    std::stringstream ss;
+    ss << "{\n";
+    ss << "  \"allowed_actions\": [";
+    bool first = true;
+    for (int act : limits.allowedActions) {
+        if (!first) ss << ", ";
+        ss << "\"" << ActionToString(act) << "\"";
+        first = false;
+    }
+    ss << "],\n";
+    ss << "  \"max_authority_budget\": " << limits.maxAuthorityBudget << ",\n";
+    ss << "  \"min_confidence_threshold\": {\n";
+    ss << "    \"cpu_variance\": " << limits.minConfidence.cpuVariance << ",\n";
+    ss << "    \"latency_variance\": " << limits.minConfidence.latencyVariance << "\n";
+    ss << "  }\n";
+    ss << "}";
+    return ss.str();
+}
+
+bool PolicyGuard::Save(const std::wstring& path, const PolicyLimits& limits) {
+    try {
+        std::ofstream out(path, std::ios::trunc);
+        if (!out.is_open()) return false;
+        out << SerializePolicy(limits);
+        out.close();
+        
+        // Update local hash immediately to prevent tampering detection on next load
+        m_hash = ComputeFileHash(path); 
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 // Minimalistic JSON Parser for Policy Schema
 bool PolicyGuard::ParsePolicy(const std::string& json) {
     try {

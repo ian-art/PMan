@@ -44,6 +44,29 @@ static int ActionFromString(const std::string& s) {
     return -1;
 }
 
+void ExternalVerdict::SaveVerdict(const std::wstring& path, VerdictType type, uint64_t durationSeconds) {
+    std::ofstream out(path, std::ios::trunc);
+    if (!out) return;
+
+    std::string typeStr = "NONE";
+    if (type == VerdictType::ALLOW) typeStr = "ALLOW";
+    else if (type == VerdictType::DENY) typeStr = "DENY";
+    else if (type == VerdictType::CONSTRAIN) typeStr = "CONSTRAIN";
+
+    uint64_t now = (uint64_t)std::time(nullptr);
+    uint64_t expires = now + durationSeconds;
+
+    out << "{\n";
+    out << "  \"verdict\": \"" << typeStr << "\",\n";
+    out << "  \"expires_at_unix\": " << expires;
+    
+    // If we ever support UI for allowed_actions in verdict, add it here.
+    // For now, defaults are safe.
+    
+    out << "\n}";
+    out.close();
+}
+
 ExternalVerdict::VerdictData ExternalVerdict::ParseVerdict(const std::string& json) {
     VerdictData data;
     data.valid = false;

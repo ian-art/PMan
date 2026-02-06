@@ -57,6 +57,10 @@ public:
     std::string GetHash() const { return m_hash; }
 
     const PolicyLimits& GetLimits() const { return m_limits; }
+    
+    // Serialization Support
+    std::string SerializePolicy(const PolicyLimits& limits);
+    bool Save(const std::wstring& path, const PolicyLimits& limits);
 
 private:
     PolicyLimits m_limits;
