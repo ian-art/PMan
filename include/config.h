@@ -20,8 +20,13 @@
 #ifndef PMAN_CONFIG_H
 #define PMAN_CONFIG_H
 #include <filesystem>
+#include "explorer_booster.h"
 
 void LoadConfig();
+
+// Shadow Config Accessors (for GUI)
+void SetExplorerConfigShadow(const ExplorerConfig& cfg);
+ExplorerConfig GetExplorerConfigShadow();
 void SaveConfig();
 bool CreateDefaultConfig(const std::filesystem::path& configPath);
 

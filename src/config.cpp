@@ -921,3 +921,13 @@ void SaveIconTheme(const std::wstring& theme)
     std::wofstream out(path);
     for (const auto& l : lines) out << l << L"\n";
 }
+
+void SetExplorerConfigShadow(const ExplorerConfig& cfg) {
+    std::unique_lock lg(g_setMtx);
+    g_lastExplorerConfig = cfg;
+}
+
+ExplorerConfig GetExplorerConfigShadow() {
+    std::shared_lock lg(g_setMtx);
+    return g_lastExplorerConfig;
+}

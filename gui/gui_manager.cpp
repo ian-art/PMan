@@ -62,12 +62,28 @@ namespace GuiManager {
 
     // Config Window State
     struct ConfigState {
-        // Tab 1: General
+        // Tab 1: Global
+        bool ignoreNonInteractive = true;
         bool restoreOnExit = true;
+        bool lockPolicy = false;
+        bool suspendUpdates = false;
         bool idleRevert = true;
         int idleTimeoutSec = 300;
+        bool recovery = true;
+        bool recoveryPrompt = true;
+        char iconTheme[64] = "Default";
+
+        // Tab 2: Explorer
+        bool expEnabled = true;
+        int expIdleThresholdSec = 15;
+        bool boostDwm = true;
+        bool boostIo = false;
+        bool disableEco = true;
+        bool preventPaging = true;
+        int scanIntervalSec = 5;
+        bool debugLog = false;
         
-        // Tab 2: Policy
+        // Tab 3: Policy
         int maxBudget = 100;
         float cpuVar = 0.01f;
         float latVar = 0.02f;
@@ -76,7 +92,7 @@ namespace GuiManager {
         bool allowSuspend = true;
         bool allowPressure = true;
 
-        // Tab 3: Verdict
+        // Tab 4: Verdict
         int verdictIdx = 0; // 0=ALLOW, 1=DENY, 2=CONSTRAIN
         int durationHours = 24;
     };
@@ -317,11 +333,33 @@ namespace GuiManager {
         if (!g_isInitialized) Init();
         g_activeMode = GuiMode::Config;
         
-        // Populate State
+        // Populate Global State
+        g_configState.ignoreNonInteractive = g_ignoreNonInteractive.load();
         g_configState.restoreOnExit = g_restoreOnExit.load();
+        g_configState.lockPolicy = g_lockPolicy.load();
+        g_configState.suspendUpdates = g_suspendUpdatesDuringGames.load();
         g_configState.idleRevert = g_idleRevertEnabled.load();
         g_configState.idleTimeoutSec = g_idleTimeoutMs.load() / 1000;
+        g_configState.recovery = g_responsivenessRecoveryEnabled.load();
+        g_configState.recoveryPrompt = g_recoveryPromptEnabled.load();
         
+        {
+            std::shared_lock lg(g_setMtx);
+            std::string theme = WideToUtf8(g_iconTheme.c_str());
+            strncpy_s(g_configState.iconTheme, theme.c_str(), 63);
+        }
+
+        // Populate Explorer State
+        ExplorerConfig ec = GetExplorerConfigShadow();
+        g_configState.expEnabled = ec.enabled;
+        g_configState.expIdleThresholdSec = ec.idleThresholdMs / 1000;
+        g_configState.boostDwm = ec.boostDwm;
+        g_configState.boostIo = ec.boostIoPriority;
+        g_configState.disableEco = ec.disablePowerThrottling;
+        g_configState.preventPaging = ec.preventShellPaging;
+        g_configState.scanIntervalSec = ec.scanIntervalMs / 1000;
+        g_configState.debugLog = ec.debugLogging;
+
         if (auto& pol = PManContext::Get().subs.policy) {
             const auto& lim = pol->GetLimits();
             g_configState.maxBudget = lim.maxAuthorityBudget;
@@ -441,30 +479,132 @@ namespace GuiManager {
         if (g_activeMode == GuiMode::Config)
         {
             if (ImGui::BeginTabBar("ConfigTabs")) {
-                if (ImGui::BeginTabItem("General")) {
-                    BeginCard("gen", {0.12f, 0.16f, 0.14f, 1.0f});
+                if (ImGui::BeginTabItem("Global")) {
+                    BeginCard("glob", {0.12f, 0.16f, 0.14f, 1.0f});
                     
+                    ImGui::Checkbox("Ignore Non-Interactive", &g_configState.ignoreNonInteractive);
+                    HelpMarker("Ignore non-interactive processes (services, scheduled tasks, SYSTEM processes).");
+
                     ImGui::Checkbox("Restore Priority on Exit", &g_configState.restoreOnExit);
-                    HelpMarker("Restores original Win32PrioritySeparation when PMan closes.");
+                    HelpMarker("Restore original Win32PrioritySeparation value when program exits.");
+
+                    ImGui::Checkbox("Lock Policy", &g_configState.lockPolicy);
+                    HelpMarker("Prevent external interference from other tweaking tools.");
+
+                    ImGui::Checkbox("Suspend Updates (Gaming)", &g_configState.suspendUpdates);
+                    HelpMarker("Pause Windows Update and background transfers during gaming.");
 
                     ImGui::Separator();
                     
                     ImGui::Checkbox("Idle Revert Mode", &g_configState.idleRevert);
-                    HelpMarker("Switch to Browser Mode when system is idle.");
+                    HelpMarker("Automatically revert to Browser Mode if system is idle for specified time and no game is currently running.");
 
                     ImGui::SliderInt("Idle Timeout (s)", &g_configState.idleTimeoutSec, 10, 600);
+                    HelpMarker("Time in seconds before idle mode activates.");
+
+                    ImGui::Separator();
+
+                    ImGui::Checkbox("Hung App Recovery", &g_configState.recovery);
+                    HelpMarker("Automatically detect and boost hung applications to restore responsiveness.");
+
+                    ImGui::Checkbox("Recovery Prompt", &g_configState.recoveryPrompt);
+                    HelpMarker("Show a popup asking to restart the app if it stays hung for >15 seconds.");
+
+                    ImGui::Separator();
                     
+                    if (ImGui::Button("Restore Defaults")) {
+                        g_configState.ignoreNonInteractive = true;
+                        g_configState.restoreOnExit = true;
+                        g_configState.lockPolicy = false;
+                        g_configState.suspendUpdates = false;
+                        g_configState.idleRevert = true;
+                        g_configState.idleTimeoutSec = 300;
+                        g_configState.recovery = true;
+                        g_configState.recoveryPrompt = true;
+                        strncpy_s(g_configState.iconTheme, "Default", 63);
+                    }
+                    HelpMarker("Restores global settings to recommended defaults (does not auto-save).");
+
+                    ImGui::SameLine();
+
                     if (ImGui::Button("Save Settings", ImVec2(140, 32))) {
                         // Apply to Global State
+                        g_ignoreNonInteractive.store(g_configState.ignoreNonInteractive);
                         g_restoreOnExit.store(g_configState.restoreOnExit);
+                        g_lockPolicy.store(g_configState.lockPolicy);
+                        g_suspendUpdatesDuringGames.store(g_configState.suspendUpdates);
                         g_idleRevertEnabled.store(g_configState.idleRevert);
                         g_idleTimeoutMs.store(g_configState.idleTimeoutSec * 1000);
+                        g_responsivenessRecoveryEnabled.store(g_configState.recovery);
+                        g_recoveryPromptEnabled.store(g_configState.recoveryPrompt);
+                        
+                        {
+                            std::unique_lock lg(g_setMtx);
+                            g_iconTheme = Utf8ToWide(g_configState.iconTheme);
+                        }
+
+                        // Save Explorer Config
+                        ExplorerConfig ec;
+                        ec.enabled = g_configState.expEnabled;
+                        ec.idleThresholdMs = g_configState.expIdleThresholdSec * 1000;
+                        ec.boostDwm = g_configState.boostDwm;
+                        ec.boostIoPriority = g_configState.boostIo;
+                        ec.disablePowerThrottling = g_configState.disableEco;
+                        ec.preventShellPaging = g_configState.preventPaging;
+                        ec.scanIntervalMs = g_configState.scanIntervalSec * 1000;
+                        ec.debugLogging = g_configState.debugLog;
+                        
+                        SetExplorerConfigShadow(ec);
                         
                         // Save to File
                         SaveConfig();
                         g_reloadNow.store(true);
                         
                         MessageBoxW(g_hwnd, L"Configuration saved successfully.", L"PMan", MB_OK);
+                    }
+
+                    EndCard();
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Explorer")) {
+                    BeginCard("exp", {0.14f, 0.14f, 0.16f, 1.0f});
+
+                    ImGui::Checkbox("Enable Smart Shell Boost", &g_configState.expEnabled);
+                    HelpMarker("Optimizes Windows UI only when system is truly idle. Admin rights required for DWM boosting.");
+
+                    if (g_configState.expEnabled) {
+                        ImGui::SliderInt("Idle Threshold (s)", &g_configState.expIdleThresholdSec, 5, 600);
+                        HelpMarker("Time with NO user input AND no foreground game before boost activates.");
+
+                        ImGui::Checkbox("Boost DWM", &g_configState.boostDwm);
+                        HelpMarker("Also boost Desktop Window Manager (dwm.exe) for smoother animations.");
+
+                        ImGui::Checkbox("Boost I/O Priority", &g_configState.boostIo);
+                        HelpMarker("Apply High I/O priority to file operations (snappier folder loading).");
+
+                        ImGui::Checkbox("Disable Power Throttling", &g_configState.disableEco);
+                        HelpMarker("Disable 'Power Throttling' (EcoQoS) for Explorer/DWM.");
+
+                        ImGui::Checkbox("Prevent Shell Paging", &g_configState.preventPaging);
+                        HelpMarker("Prevents Windows from paging out Explorer/DWM during gaming.");
+
+                        ImGui::SliderInt("Scan Interval (s)", &g_configState.scanIntervalSec, 1, 60);
+                        HelpMarker("How often to check for new Explorer windows.");
+                        
+                        ImGui::Checkbox("Debug Logging", &g_configState.debugLog);
+                    }
+                    
+                    ImGui::Separator();
+                    if (ImGui::Button("Restore Defaults")) {
+                        g_configState.expEnabled = true;
+                        g_configState.expIdleThresholdSec = 15;
+                        g_configState.boostDwm = true;
+                        g_configState.boostIo = false;
+                        g_configState.disableEco = true;
+                        g_configState.preventPaging = true;
+                        g_configState.scanIntervalSec = 5;
+                        g_configState.debugLog = false;
                     }
 
                     EndCard();

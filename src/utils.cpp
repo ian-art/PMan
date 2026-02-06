@@ -54,6 +54,22 @@ std::string WideToUtf8(const wchar_t* wstr)
     return result;
 }
 
+std::wstring Utf8ToWide(const char* str)
+{
+    if (!str || !*str) return L"";
+    int len = MultiByteToWideChar(CP_UTF8, 0, str, -1, nullptr, 0);
+    if (len <= 0) return L"";
+    
+    std::wstring result;
+    try {
+        result.resize(len - 1);
+        MultiByteToWideChar(CP_UTF8, 0, str, -1, &result[0], len);
+    } catch (...) {
+        return L"";
+    }
+    return result;
+}
+
 std::wstring ExeFromPath(const wchar_t* path)
 {
     if (!path || !*path) return L"";
