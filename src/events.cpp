@@ -701,7 +701,8 @@ void IocpConfigWatcher()
                         std::wstring fileName(info->FileName, info->FileNameLength / sizeof(wchar_t));
 						if (ContainsIgnoreCase(fileName, CONFIG_FILENAME) || 
                             ContainsIgnoreCase(fileName, CUSTOM_LAUNCHERS_FILENAME) ||
-                            ContainsIgnoreCase(fileName, IGNORED_PROCESSES_FILENAME))
+                            ContainsIgnoreCase(fileName, IGNORED_PROCESSES_FILENAME) ||
+                            ContainsIgnoreCase(fileName, L"policy.json")) // [FIX] Watch policy.json
                         {
                             configChanged = true;
                             break;
