@@ -47,13 +47,31 @@ void AuthorityBudget::Spend(int cost) {
 }
 
 int AuthorityBudget::GetCost(BrainAction action) const {
-    // Hardcoded costs as defined in requirements
+    // Costs reflect the risk/impact of the action
     switch (action) {
-        case BrainAction::Throttle_Mild: 
-            return 10;
         case BrainAction::Maintain:
-        default: 
             return 0;
+
+        case BrainAction::Throttle_Mild: 
+            return 5;
+
+        case BrainAction::Throttle_Aggressive: 
+            return 15; // Higher cost for aggressive intervention
+
+        case BrainAction::Optimize_Memory:
+        case BrainAction::Optimize_Memory_Gentle:
+            return 10; // Memory operations are expensive
+
+        case BrainAction::Release_Pressure:
+        case BrainAction::Shield_Foreground:
+        case BrainAction::Boost_Process:
+            return 20; // Boosting is a high-privilege action
+
+        case BrainAction::Suspend_Services:
+            return 30; // Very high impact, drains budget quickly
+
+        default: 
+            return 5; // Default safe cost
     }
 }
 
