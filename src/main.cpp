@@ -1817,6 +1817,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 				}
 			}
             
+            TranslateMessage(&msg); // [FIX] Convert keystrokes to characters for GUI input
             DispatchMessage(&msg);
         }
         
