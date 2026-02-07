@@ -18,6 +18,24 @@
 #define IDI_TRAY_ORANGE_FRAME_7 215
 #define IDI_TRAY_ORANGE_FRAME_8 216
 
+#define IDI_TRAY_L_THEME          4001
+#define IDI_TRAY_L_CONTROLS       4002
+#define IDI_TRAY_L_STARTUP        4003
+#define IDI_TRAY_L_HELP           4004
+#define IDI_TRAY_L_SUPPORT        4005
+#define IDI_TRAY_L_EXIT           4006
+#define IDI_TRAY_L_CP             4007
+#define IDI_TRAY_L_LOG            4008
+
+#define IDI_TRAY_D_THEME          4009
+#define IDI_TRAY_D_CONTROLS       4010
+#define IDI_TRAY_D_STARTUP        4011
+#define IDI_TRAY_D_HELP           4012
+#define IDI_TRAY_D_SUPPORT        4013
+#define IDI_TRAY_D_EXIT           4014
+#define IDI_TRAY_D_CP             4015
+#define IDI_TRAY_D_LOG            4016
+
 // Tray animation frames
 IDI_TRAY_FRAME_1 ICON "icons/frame_01.ico"
 IDI_TRAY_FRAME_2 ICON "icons/frame_02.ico"
@@ -35,6 +53,26 @@ IDI_TRAY_ORANGE_FRAME_5 ICON "icons/orange_frame_05.ico"
 IDI_TRAY_ORANGE_FRAME_6 ICON "icons/orange_frame_06.ico"
 IDI_TRAY_ORANGE_FRAME_7 ICON "icons/orange_frame_07.ico"
 IDI_TRAY_ORANGE_FRAME_8 ICON "icons/orange_frame_08.ico"
+
+// Light Theme Icons
+IDI_TRAY_L_THEME      ICON "icons\\tray_light_icon_theme.ico"
+IDI_TRAY_L_CONTROLS   ICON "icons\\tray_light_controls.ico"
+IDI_TRAY_L_STARTUP    ICON "icons\\tray_light_startup_behavior.ico"
+IDI_TRAY_L_HELP       ICON "icons\\tray_light_help.ico"
+IDI_TRAY_L_SUPPORT    ICON "icons\\tray_light_support_pman.ico"
+IDI_TRAY_L_EXIT       ICON "icons\\tray_light_exit.ico"
+IDI_TRAY_L_CP         ICON "icons\\tray_light_control_panel.ico"
+IDI_TRAY_L_LOG        ICON "icons\\tray_light_monitor_log.ico"
+
+// Dark Theme Icons
+IDI_TRAY_D_THEME      ICON "icons\\tray_dark_icon_theme.ico"
+IDI_TRAY_D_CONTROLS   ICON "icons\\tray_dark_controls.ico"
+IDI_TRAY_D_STARTUP    ICON "icons\\tray_dark_startup_behavior.ico"
+IDI_TRAY_D_HELP       ICON "icons\\tray_dark_help.ico"
+IDI_TRAY_D_SUPPORT    ICON "icons\\tray_dark_support_pman.ico"
+IDI_TRAY_D_EXIT       ICON "icons\\tray_dark_exit.ico"
+IDI_TRAY_D_CP         ICON "icons\\tray_dark_control_panel.ico"
+IDI_TRAY_D_LOG        ICON "icons\\tray_dark_monitor_log.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION PMAN_VERSION_MAJOR, PMAN_VERSION_MINOR, PMAN_VERSION_PATCH, PMAN_VERSION_BUILD

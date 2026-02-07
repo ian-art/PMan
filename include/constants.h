@@ -77,6 +77,26 @@ static constexpr UINT    ID_TRAY_EDIT_VIDEO_PLAYERS = 2008;
 // Custom Tray Animation
 static constexpr UINT    ID_TRAY_THEME_BASE         = 3000;
 
+// Tray Menu Icons (Light)
+static constexpr UINT IDI_TRAY_L_THEME          = 4001;
+static constexpr UINT IDI_TRAY_L_CONTROLS       = 4002;
+static constexpr UINT IDI_TRAY_L_STARTUP        = 4003;
+static constexpr UINT IDI_TRAY_L_HELP           = 4004;
+static constexpr UINT IDI_TRAY_L_SUPPORT        = 4005;
+static constexpr UINT IDI_TRAY_L_EXIT           = 4006;
+static constexpr UINT IDI_TRAY_L_CP             = 4007;
+static constexpr UINT IDI_TRAY_L_LOG            = 4008;
+
+// Tray Menu Icons (Dark)
+static constexpr UINT IDI_TRAY_D_THEME          = 4009;
+static constexpr UINT IDI_TRAY_D_CONTROLS       = 4010;
+static constexpr UINT IDI_TRAY_D_STARTUP        = 4011;
+static constexpr UINT IDI_TRAY_D_HELP           = 4012;
+static constexpr UINT IDI_TRAY_D_SUPPORT        = 4013;
+static constexpr UINT IDI_TRAY_D_EXIT           = 4014;
+static constexpr UINT IDI_TRAY_D_CP             = 4015;
+static constexpr UINT IDI_TRAY_D_LOG            = 4016;
+
 // PAYPAL
 static constexpr wchar_t SUPPORT_URL[] = L"https://paypal.me/ianart/100";
 

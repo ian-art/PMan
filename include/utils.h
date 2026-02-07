@@ -113,4 +113,7 @@ bool DisableScheduledTask(const std::wstring& taskPath);
 // Responsiveness Check
 bool IsWindowHung(HWND hwnd);
 
+// Helper to convert Icon to 32-bit PARGB Bitmap for Menus
+HBITMAP IconToBitmapPARGB32(HINSTANCE hInst, UINT uIconId, int cx, int cy);
+
 #endif // PMAN_UTILS_H

@@ -1043,9 +1043,27 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
             // Apply Dark Mode styles to the context menu
             DarkMode::ApplyToMenu(hMenu);
+
+            // --- Icon Management ---
+            std::vector<HBITMAP> menuBitmaps;
+            bool isDark = DarkMode::IsEnabled();
             
+            auto SetMenuIcon = [&](HMENU hM, UINT id, UINT iconLight, UINT iconDark, bool byPos = false) {
+                UINT iconId = isDark ? iconDark : iconLight;
+                HBITMAP hBmp = IconToBitmapPARGB32(g_hInst, iconId, 16, 16);
+                if (hBmp) {
+                    MENUITEMINFOW mii = { sizeof(mii) };
+                    mii.fMask = MIIM_BITMAP;
+                    mii.hbmpItem = hBmp;
+                    SetMenuItemInfoW(hM, id, byPos, &mii);
+                    menuBitmaps.push_back(hBmp);
+                }
+            };
+
             // 0. Control Panel
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, L"Control Panel");
+            SetMenuIcon(hMenu, ID_TRAY_EDIT_CONFIG, IDI_TRAY_L_CP, IDI_TRAY_D_CP);
+            
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
             bool paused = g_userPaused.load();
@@ -1056,7 +1074,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_OPEN_DIR, L"Open Log Folder");
             AppendMenuW(hDashMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_EXPORT_LOG, L"Export Authority Log (JSON)");
+            
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hDashMenu, L"Monitor & Logs");
+            // Set icon for "Monitor & Logs" (Last item added)
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_LOG, IDI_TRAY_D_LOG, true);
 
             // --- Theme Selection Submenu ---
             HMENU hThemeMenu = CreatePopupMenu();
@@ -1069,6 +1090,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 AppendMenuW(hThemeMenu, MF_STRING | (isSelected ? MF_CHECKED : 0), themeId++, theme.c_str());
             }
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hThemeMenu, L"Icon Theme");
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_THEME, IDI_TRAY_D_THEME, true);
 
             // 3. Controls Submenu
             HMENU hControlMenu = CreatePopupMenu();
@@ -1083,6 +1105,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_REFRESH_GPU, L"Refresh GPU");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hControlMenu, L"Controls");
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_CONTROLS, IDI_TRAY_D_CONTROLS, true);
 
 			AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
@@ -1109,6 +1132,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hStartupMenu, MF_STRING | (startupMode == 2 ? MF_CHECKED : 0), ID_TRAY_STARTUP_PASSIVE,  L"Enabled (Standby Mode)");
             
 			AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hStartupMenu, L"Startup Behavior");
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_STARTUP, IDI_TRAY_D_STARTUP, true);
             
             // 5. Help Submenu
             HMENU hHelpMenu = CreatePopupMenu();
@@ -1116,9 +1140,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hHelpMenu, MF_STRING | (g_isCheckingUpdate.load() ? MF_GRAYED : 0), ID_TRAY_UPDATE, L"Check for Updates");
             AppendMenuW(hHelpMenu, MF_STRING, ID_TRAY_ABOUT, L"About");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hHelpMenu, L"Help");
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_HELP, IDI_TRAY_D_HELP, true);
             
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_SUPPORT, L"Support PMan \u2764\U0001F97A");
+            SetMenuIcon(hMenu, ID_TRAY_SUPPORT, IDI_TRAY_L_SUPPORT, IDI_TRAY_D_SUPPORT);
+
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
+            SetMenuIcon(hMenu, ID_TRAY_EXIT, IDI_TRAY_L_EXIT, IDI_TRAY_D_EXIT);
 
             POINT pt; GetCursorPos(&pt);
             TrackPopupMenuEx(
@@ -1136,6 +1164,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             DestroyMenu(hThemeMenu);
             DestroyMenu(hHelpMenu);
             DestroyMenu(hMenu);
+            
+            // Cleanup bitmaps
+            for (HBITMAP h : menuBitmaps) DeleteObject(h);
         }
         return 0;
 

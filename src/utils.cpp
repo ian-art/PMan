@@ -560,3 +560,38 @@ bool IsWindowHung(HWND hwnd)
     if (!hwnd) return false;
     return IsHungAppWindow(hwnd) != 0;
 }
+
+HBITMAP IconToBitmapPARGB32(HINSTANCE hInst, UINT uIconId, int cx, int cy)
+{
+    HICON hIcon = (HICON)LoadImageW(hInst, MAKEINTRESOURCEW(uIconId), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR);
+    if (!hIcon) return nullptr;
+
+    BITMAPINFO bi = {0};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = cx;
+    bi.bmiHeader.biHeight = -cy; // Top-down
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+
+    void* pBits = nullptr;
+    HDC hDC = GetDC(nullptr);
+    HBITMAP hBmp = CreateDIBSection(hDC, &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
+    ReleaseDC(nullptr, hDC);
+
+    if (hBmp) {
+        HDC hMemDC = CreateCompatibleDC(nullptr);
+        HBITMAP hOldBmp = (HBITMAP)SelectObject(hMemDC, hBmp);
+        
+        // Initialize with transparency
+        RECT rc = {0, 0, cx, cy};
+        FillRect(hMemDC, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH)); // Alpha 0
+
+        DrawIconEx(hMemDC, 0, 0, hIcon, cx, cy, 0, nullptr, DI_NORMAL);
+        
+        SelectObject(hMemDC, hOldBmp);
+        DeleteDC(hMemDC);
+    }
+    DestroyIcon(hIcon);
+    return hBmp;
+}
