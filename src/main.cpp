@@ -1853,7 +1853,8 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         }
 
         // GUI Rendering Integration
-        if (GuiManager::IsWindowOpen()) {
+        // [FIX] Protection: Stop rendering if system is suspended/stabilizing to prevent D3D crash
+        if (GuiManager::IsWindowOpen() && !g_isSuspended.load()) {
             GuiManager::RenderFrame();
         }
 
