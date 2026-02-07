@@ -1060,8 +1060,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 }
             };
 
-            // 0. Control Panel
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, L"Control Panel");
+            // 0. PMan Neural Center
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, L"PMan Neural Center");
             SetMenuIcon(hMenu, ID_TRAY_EDIT_CONFIG, IDI_TRAY_L_CP, IDI_TRAY_D_CP);
             
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);

@@ -477,8 +477,8 @@ namespace GuiManager {
         if (g_activeMode == GuiMode::About) title = "ABOUT";
         else if (g_activeMode == GuiMode::Help) title = "HELP";
         else if (g_activeMode == GuiMode::LogViewer) title = "PMAN LIVE LOG";
-        else if (g_activeMode == GuiMode::Config) title = "CONTROL CENTER";
-        
+        else if (g_activeMode == GuiMode::Config) title = "NEURAL CENTER";
+
         // Use loaded Title Font if available, otherwise fallback to scaling
         if (g_pFontTitle) ImGui::PushFont(g_pFontTitle);
         else ImGui::SetWindowFontScale(2.2f);
