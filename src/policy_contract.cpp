@@ -41,7 +41,7 @@ static int ActionFromString(const std::string& s) {
     if (s.find("Optimize_Memory") != std::string::npos) return (int)BrainAction::Optimize_Memory;
     if (s.find("Suspend_Services") != std::string::npos) return (int)BrainAction::Suspend_Services;
     if (s.find("Release_Pressure") != std::string::npos) return (int)BrainAction::Release_Pressure;
-    if (s.find("Boost_Process") != std::string::npos) return (int)BrainAction::Release_Pressure; // Alias
+    if (s.find("Boost_Process") != std::string::npos) return (int)BrainAction::Boost_Process; // [FIX] No longer aliased
     if (s.find("Shield_Foreground") != std::string::npos) return (int)BrainAction::Shield_Foreground;
     if (s.find("Maintain") != std::string::npos) return (int)BrainAction::Maintain;
     return -1;
@@ -102,6 +102,7 @@ static std::string ActionToString(int action) {
         case BrainAction::Suspend_Services: return "Suspend_Services";
         case BrainAction::Release_Pressure: return "Release_Pressure";
         case BrainAction::Shield_Foreground: return "Shield_Foreground";
+        case BrainAction::Boost_Process: return "Boost_Process"; // [FIX] Added case
         case BrainAction::Maintain: return "Maintain";
         default: return "Maintain";
     }
@@ -110,19 +111,22 @@ static std::string ActionToString(int action) {
 std::string PolicyGuard::SerializePolicy(const PolicyLimits& limits) {
     std::stringstream ss;
     ss << "{\n";
-    ss << "  \"allowed_actions\": [";
-    bool first = true;
-    for (int act : limits.allowedActions) {
-        if (!first) ss << ", ";
-        ss << "\"" << ActionToString(act) << "\"";
-        first = false;
-    }
-    ss << "],\n";
+    // 1. Budget & Thresholds first (User Preference)
     ss << "  \"max_authority_budget\": " << limits.maxAuthorityBudget << ",\n";
     ss << "  \"min_confidence_threshold\": {\n";
     ss << "    \"cpu_variance\": " << limits.minConfidence.cpuVariance << ",\n";
     ss << "    \"latency_variance\": " << limits.minConfidence.latencyVariance << "\n";
-    ss << "  }\n";
+    ss << "  },\n";
+    
+    // 2. Allowed Actions last
+    ss << "  \"allowed_actions\": [\n";
+    bool first = true;
+    for (int act : limits.allowedActions) {
+        if (!first) ss << ",\n";
+        ss << "    \"" << ActionToString(act) << "\"";
+        first = false;
+    }
+    ss << "\n  ]\n";
     ss << "}";
     return ss.str();
 }
@@ -194,14 +198,28 @@ bool PolicyGuard::ParsePolicy(const std::string& json) {
 }
 
 bool PolicyGuard::Load(const std::wstring& path) {
-    // 1. Compute Hash (Pinning)
+    // 1. Auto-Create Default if Missing
+    if (!std::filesystem::exists(path)) {
+        Log("[POLICY] Policy file missing. Creating default safety contract.");
+        PolicyLimits defaults;
+        defaults.allowedActions = {
+            (int)BrainAction::Maintain,
+            (int)BrainAction::Throttle_Mild,
+            (int)BrainAction::Optimize_Memory,
+            (int)BrainAction::Release_Pressure,
+            (int)BrainAction::Boost_Process
+        };
+        Save(path, defaults);
+    }
+
+    // 2. Compute Hash (Pinning)
     m_hash = ComputeFileHash(path);
     if (m_hash.find("HASH_FAIL") != std::string::npos) {
         Log("[POLICY] Failed to compute hash. Policy load aborted.");
         return false;
     }
 
-    // 2. Load Content
+    // 3. Load Content
     std::ifstream t(path);
     if (!t.is_open()) return false;
     
