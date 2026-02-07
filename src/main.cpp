@@ -539,8 +539,6 @@ static void RunAutonomousCycle() {
     std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
                       " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
                       budgetLog +
-                      " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
-                      budgetLog +
                       " ArbAct:" + std::to_string((int)decision.selectedAction) + 
                       " Shadow:[" + std::to_string(shadowDelta.cpuLoadDelta) + 
                       "," + std::to_string(shadowDelta.thermalDelta) + 
