@@ -303,11 +303,7 @@ namespace GuiManager {
     }
 
     void ShowTuneUpWindow() {
-        if (!g_isInitialized) Init();
-        g_activeMode = GuiMode::TuneUp;
-        g_isOpen = true;
-        ShowWindow(g_hwnd, SW_SHOW);
-        SetForegroundWindow(g_hwnd);
+        ShowConfigWindow();
     }
 
     void ShowAboutWindow() {
@@ -787,68 +783,58 @@ namespace GuiManager {
                     ImGui::EndTabItem();
                 }
 
-                ImGui::EndTabBar();
-            }
-        }
-        else if (g_activeMode == GuiMode::TuneUp)
-        {
-            if (ImGui::BeginTabBar("TweakTabs")) {
-
-                if (ImGui::BeginTabItem("Recommended")) {
-                    BeginCard("rec", {0.12f, 0.16f, 0.14f, 1.0f});
-
-                    ImGui::Checkbox("Network Optimizations", &g_config.network);
-                    HelpMarker("Improves TCP/IP and latency behavior.");
-
-                    ImGui::Checkbox("Privacy & Telemetry", &g_config.privacy);
-                    HelpMarker("Disables diagnostics and tracking.");
-
-                    ImGui::Checkbox("Visual Effects", &g_config.explorer);
-                    HelpMarker("Reduces UI overhead.");
-
-                    ImGui::Checkbox("Power Plan Tuning", &g_config.power);
-                    HelpMarker("Optimizes power behavior.");
-
-                    EndCard();
-                    ImGui::EndTabItem();
-                }
-
-                if (ImGui::BeginTabItem("Functional")) {
-                    BeginCard("func", {0.14f, 0.14f, 0.18f, 1.0f});
-
-                    ImGui::Checkbox("Set Services to Manual", &g_config.services);
-                    HelpMarker("Sets non-critical services to Manual.");
-
-                    ImGui::Checkbox("Disable Location Services", &g_config.location);
-                    HelpMarker("Globally disables Windows location APIs.");
-
-                    ImGui::Checkbox("Disable GameDVR / Xbox", &g_config.dvr);
-                    HelpMarker("Disables background recording.");
-
-                    EndCard();
-                    ImGui::EndTabItem();
-                }
-
-                if (ImGui::BeginTabItem("Aggressive")) {
-                    BeginCard("agg", {0.18f, 0.10f, 0.10f, 1.0f});
-
-                    ImGui::Checkbox("Remove UWP Bloatware", &g_config.bloatware);
-                    HelpMarker("Permanent removal of bundled apps.");
-
-                    EndCard();
-                    ImGui::EndTabItem();
-                }
-
-                if (ImGui::BeginTabItem("Future")) {
-                    BeginCard("future", {0.10f, 0.10f, 0.14f, 1.0f});
-
-                    ImGui::TextDisabled("Reserved for future expansion:");
-                    ImGui::BulletText("Kernel scheduling controls");
-                    ImGui::BulletText("Advanced memory management");
-                    ImGui::BulletText("Per-app CPU affinity");
-                    ImGui::BulletText("I/O prioritization");
-
-                    EndCard();
+                if (ImGui::BeginTabItem("TuneUp")) {
+                    if (ImGui::BeginTabBar("TweakTabs")) {
+                        if (ImGui::BeginTabItem("Recommended")) {
+                            BeginCard("rec", {0.12f, 0.16f, 0.14f, 1.0f});
+                            ImGui::Checkbox("Network Optimizations", &g_config.network);
+                            HelpMarker("Improves TCP/IP and latency behavior.");
+                            ImGui::Checkbox("Privacy & Telemetry", &g_config.privacy);
+                            HelpMarker("Disables diagnostics and tracking.");
+                            ImGui::Checkbox("Visual Effects", &g_config.explorer);
+                            HelpMarker("Reduces UI overhead.");
+                            ImGui::Checkbox("Power Plan Tuning", &g_config.power);
+                            HelpMarker("Optimizes power behavior.");
+                            EndCard();
+                            ImGui::EndTabItem();
+                        }
+                        if (ImGui::BeginTabItem("Functional")) {
+                            BeginCard("func", {0.14f, 0.14f, 0.18f, 1.0f});
+                            ImGui::Checkbox("Set Services to Manual", &g_config.services);
+                            HelpMarker("Sets non-critical services to Manual.");
+                            ImGui::Checkbox("Disable Location Services", &g_config.location);
+                            HelpMarker("Globally disables Windows location APIs.");
+                            ImGui::Checkbox("Disable GameDVR / Xbox", &g_config.dvr);
+                            HelpMarker("Disables background recording.");
+                            EndCard();
+                            ImGui::EndTabItem();
+                        }
+                        if (ImGui::BeginTabItem("Aggressive")) {
+                            BeginCard("agg", {0.18f, 0.10f, 0.10f, 1.0f});
+                            ImGui::Checkbox("Remove UWP Bloatware", &g_config.bloatware);
+                            HelpMarker("Permanent removal of bundled apps.");
+                            EndCard();
+                            ImGui::EndTabItem();
+                        }
+                        if (ImGui::BeginTabItem("Future")) {
+                            BeginCard("future", {0.10f, 0.10f, 0.14f, 1.0f});
+                            ImGui::TextDisabled("Reserved for future expansion:");
+                            ImGui::BulletText("Kernel scheduling controls");
+                            ImGui::BulletText("Advanced memory management");
+                            ImGui::BulletText("Per-app CPU affinity");
+                            ImGui::BulletText("I/O prioritization");
+                            EndCard();
+                            ImGui::EndTabItem();
+                        }
+                        ImGui::EndTabBar();
+                    }
+                    ImGui::Separator();
+                    if (ImGui::Button("Apply Tweaks", ImVec2(140, 32))) {
+                        if (ApplyStaticTweaks(g_config)) {
+                            SaveTweakPreferences(g_config);
+                            MessageBoxW(g_hwnd, L"Your selected optimizations have been applied.", L"Success", MB_OK | MB_ICONINFORMATION);
+                        }
+                    }
                     ImGui::EndTabItem();
                 }
 
@@ -951,37 +937,12 @@ namespace GuiManager {
         // ----------------------------------------------------------------------------------------
         // FOOTER
         // ----------------------------------------------------------------------------------------
-        if (g_activeMode == GuiMode::TuneUp)
-        {
-            if (ImGui::Button("Apply", ImVec2(120, 36))) {
-                if (ApplyStaticTweaks(g_config)) {
-                    SaveTweakPreferences(g_config);
-                    MessageBoxW(
-                        g_hwnd,
-                        L"Your selected optimizations have been applied.",
-                        L"Success",
-                        MB_OK | MB_ICONINFORMATION
-                    );
-                }
-                g_isOpen = false;
-                ShowWindow(g_hwnd, SW_HIDE);
-            }
-
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel", ImVec2(120, 36))) {
-                g_isOpen = false;
-                ShowWindow(g_hwnd, SW_HIDE);
-            }
-        }
-        else
-        {
-            // Single Close Button for Info windows
-            float width = 120.0f;
-            ImGui::SetCursorPosX((ImGui::GetWindowWidth() - width) * 0.5f);
-            if (ImGui::Button("Close", ImVec2(width, 36))) {
-                g_isOpen = false;
-                ShowWindow(g_hwnd, SW_HIDE);
-            }
+        // Single Close Button for all windows (Apply buttons are now inside tabs)
+        float width = 120.0f;
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - width) * 0.5f);
+        if (ImGui::Button("Close", ImVec2(width, 36))) {
+            g_isOpen = false;
+            ShowWindow(g_hwnd, SW_HIDE);
         }
 
         if (g_pFontRegular) ImGui::PopFont(); // Pop Main Font

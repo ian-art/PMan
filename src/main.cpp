@@ -1052,6 +1052,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             // Apply Dark Mode styles to the context menu
             DarkMode::ApplyToMenu(hMenu);
             
+            // 0. Control Panel
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, L"Control Panel");
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+
             bool paused = g_userPaused.load();
 
             // 1. Dashboards Submenu
@@ -1084,9 +1088,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             }
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hThemeMenu, L"Icon Theme");
 
-			// 2. Control Panel
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, L"Control Panel");
-
             // 3. Controls Submenu
             HMENU hControlMenu = CreatePopupMenu();
             AppendMenuW(hControlMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Activity" : L"Pause Activity");
@@ -1095,8 +1096,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             bool idlePaused = g_pauseIdle.load();
             AppendMenuW(hControlMenu, MF_STRING | (idlePaused ? MF_CHECKED : 0), ID_TRAY_PAUSE_IDLE, L"Passive Mode");
 			AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
-            AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_APPLY_TWEAKS, L"TuneUp System");
-            AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
 			bool awake = g_keepAwake.load();
             AppendMenuW(hControlMenu, MF_STRING | (awake ? MF_CHECKED : 0), ID_TRAY_KEEP_AWAKE, L"Keep System Awake");
             AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
@@ -1260,10 +1259,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         else if (wmId == ID_TRAY_UPDATE) {
             OpenUpdatePage();
         }
-        else if (wmId == ID_TRAY_APPLY_TWEAKS) {
-            // Open the new GUI Window instead of the old message box
-            GuiManager::ShowTuneUpWindow();
-        } 
         else if (wmId == ID_TRAY_REFRESH_GPU) {
             // Simulate Win+Ctrl+Shift+B to reset graphics driver
             INPUT inputs[8] = {};
