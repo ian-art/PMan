@@ -248,7 +248,16 @@ static void RunAutonomousCycle() {
     );
 
     // 4. DecisionArbiter (Decide)
-    ArbiterDecision decision = ctx.subs.arbiter->Decide(priorities, consequences, currentConfidence);
+    // [FIX] Pass allowed actions to enable "Stability Disabled" logic
+    std::unordered_set<int> currentAllowed;
+    if (ctx.subs.policy) {
+        currentAllowed = ctx.subs.policy->GetLimits().allowedActions;
+    } else {
+        // Fallback: If no policy, assume Maintain is allowed (Safety Default)
+        currentAllowed.insert((int)BrainAction::Maintain); 
+    }
+
+    ArbiterDecision decision = ctx.subs.arbiter->Decide(priorities, consequences, currentConfidence, currentAllowed);
 
     // [GATE] Policy Enforcement Layer
     if (ctx.subs.policy && decision.selectedAction != BrainAction::Maintain) {

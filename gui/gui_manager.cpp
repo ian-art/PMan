@@ -637,8 +637,13 @@ namespace GuiManager {
                     ImGui::Separator();
                     ImGui::Text("Allowed Actions:");
 
-                    ImGui::Checkbox("Maintain (Idle)", &g_configState.allowMaintain);
-                    HelpMarker("Safety baseline. Allows the system to explicitly choose no action. Disabling is not recommended.");
+                    // [FIX] Force "Stability" to be always enabled.
+                    // "Intelligence is the ability to choose NOT to act."
+                    //g_configState.allowMaintain = true;
+                    //ImGui::BeginDisabled();
+                    ImGui::Checkbox("Stability (Inaction)", &g_configState.allowMaintain);
+                    //ImGui::EndDisabled();
+                    HelpMarker("The 'Do Nothing' choice. Required for stability. Without this, the\nAI would be forced to constantly intervene, causing jitter.\nBut if you want a Maximum Responsiveness, try to toggle off");
 
                     ImGui::Checkbox("Throttle (Mild)", &g_configState.allowThrottleMild);
                     HelpMarker("Allows mild, reversible priority reduction.\nSubject to policy, verdict, confidence, and budget.");

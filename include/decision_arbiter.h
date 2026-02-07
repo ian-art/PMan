@@ -23,13 +23,15 @@
 #include "types.h"
 #include "confidence_tracker.h"
 #include <unordered_map>
+#include <unordered_set> // [FIX] Required for policyAllowedActions
 
 class DecisionArbiter {
 public:
     // Public API
     // Single Responsibility: Select exactly one outcome per cycle.
     // Deterministic, Auditable, Safe.
-    ArbiterDecision Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence, const ConfidenceMetrics& confidence);
+    // [FIX] Added policyAllowedActions to handle "Active Ready State" (Stability Disabled)
+    ArbiterDecision Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence, const ConfidenceMetrics& confidence, const std::unordered_set<int>& policyAllowedActions);
 
     // Reset internal cooldown states (e.g., on configuration reload)
     void Reset();

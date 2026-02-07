@@ -20,13 +20,24 @@
 #include "decision_arbiter.h"
 #include "utils.h" // For time helpers if needed
 #include "constants.h"
+#include <unordered_set> // [FIX] Required for policyAllowedActions
 
-ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence, const ConfidenceMetrics& confidence) {
+ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence, const ConfidenceMetrics& confidence, const std::unordered_set<int>& policyAllowedActions) {
     ArbiterDecision decision;
     decision.decisionTime = GetTickCount64();
+
+    // Check if "Stability (Inaction)" is disabled in policy
+    bool maintainForbidden = (policyAllowedActions.find((int)BrainAction::Maintain) == policyAllowedActions.end());
     
     // 1. Identify Candidate
     BrainAction intentAction = MapIntentToAction(govDecision);
+
+    // [LOGIC] "Active Ready State" Promotion
+    // If the Governor wants to Maintain (Idle), but the user forbids Inaction,
+    // we promote the intent to "Boost_Process" to keep the system ready.
+    if (intentAction == BrainAction::Maintain && maintainForbidden) {
+        intentAction = BrainAction::Boost_Process;
+    }
     
     // 2. Evaluate Constraints
     bool hardReject = false;
@@ -53,8 +64,33 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
 
     // 3. Determine Final Selection
     if (hardReject || confReject || cooldownReject) {
-        decision.selectedAction = BrainAction::Maintain;
-        decision.reason = rejectReason;
+        // [LOGIC] Smart Fallback
+        // If the primary action failed, check if we can fallback to an Active Ready State
+        // instead of doing nothing.
+        
+        bool fallbackSuccess = false;
+
+        if (maintainForbidden) {
+             // Try to fallback to Boost_Process (Low risk active state)
+             // But ONLY if it wasn't the action we just rejected.
+             if (intentAction != BrainAction::Boost_Process) {
+                 DecisionReason dummyReason;
+                 if (CheckCooldown(BrainAction::Boost_Process, dummyReason)) {
+                     decision.selectedAction = BrainAction::Boost_Process;
+                     decision.reason = DecisionReason::Approved; // Fallback Approved
+                     m_cooldowns[BrainAction::Boost_Process] = decision.decisionTime;
+                     fallbackSuccess = true;
+                 }
+             }
+        }
+
+        if (!fallbackSuccess) {
+            // [SAFETY] Hard Physical Limit
+            // Even if the user wants "Always Active", if we can't safely boost,
+            // we MUST Maintain to prevent damage or instability.
+            decision.selectedAction = BrainAction::Maintain;
+            decision.reason = rejectReason;
+        }
     } else {
         decision.selectedAction = intentAction;
         if (intentAction == BrainAction::Maintain) {
