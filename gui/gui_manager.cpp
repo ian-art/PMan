@@ -510,7 +510,8 @@ namespace GuiManager {
                     ImGui::Checkbox("Idle Revert Mode", &g_configState.idleRevert);
                     HelpMarker("Automatically revert to Browser Mode if system is idle for specified time and no game is currently running.");
 
-                    ImGui::SliderInt("Idle Timeout", &g_configState.idleTimeoutSec, 10, 600);
+                    // [FIX] Use InputInt for uniformity with other tabs
+                    ImGui::InputInt("Idle Timeout", &g_configState.idleTimeoutSec);
                     HelpMarker("Time in seconds before idle mode activates.");
 
                     ImGui::Separator();
@@ -585,7 +586,8 @@ namespace GuiManager {
                     HelpMarker("Optimizes Windows UI only when system is truly idle. Admin rights required for DWM boosting.");
 
                     if (g_configState.expEnabled) {
-                        ImGui::SliderInt("Idle Threshold", &g_configState.expIdleThresholdSec, 5, 600);
+                        // [FIX] Use InputInt for uniformity
+                        ImGui::InputInt("Idle Threshold", &g_configState.expIdleThresholdSec);
                         HelpMarker("Time in seconds with no user input and no foreground game before boost activates.");
 
                         ImGui::Checkbox("Boost DWM", &g_configState.boostDwm);
@@ -600,7 +602,8 @@ namespace GuiManager {
                         ImGui::Checkbox("Prevent Shell Paging", &g_configState.preventPaging);
                         HelpMarker("Prevents Windows from paging out Explorer/DWM during gaming.");
 
-                        ImGui::SliderInt("Scan Interval", &g_configState.scanIntervalSec, 1, 60);
+                        // [FIX] Use InputInt for uniformity
+                        ImGui::InputInt("Scan Interval", &g_configState.scanIntervalSec);
                         HelpMarker("Time in seconds on how often to check for new Explorer windows.");
                         
                         ImGui::Checkbox("Debug Logging", &g_configState.debugLog);
@@ -616,6 +619,27 @@ namespace GuiManager {
                         g_configState.preventPaging = true;
                         g_configState.scanIntervalSec = 5;
                         g_configState.debugLog = false;
+                    }
+
+                    ImGui::SameLine();
+
+                    if (ImGui::Button("Save Settings", ImVec2(140, 32))) {
+                        // Apply Explorer Config
+                        ExplorerConfig ec;
+                        ec.enabled = g_configState.expEnabled;
+                        ec.idleThresholdMs = g_configState.expIdleThresholdSec * 1000;
+                        ec.boostDwm = g_configState.boostDwm;
+                        ec.boostIoPriority = g_configState.boostIo;
+                        ec.disablePowerThrottling = g_configState.disableEco;
+                        ec.preventShellPaging = g_configState.preventPaging;
+                        ec.scanIntervalMs = g_configState.scanIntervalSec * 1000;
+                        ec.debugLogging = g_configState.debugLog;
+
+                        SetExplorerConfigShadow(ec);
+                        SaveConfig();
+                        g_reloadNow.store(true);
+
+                        //MessageBoxW(g_hwnd, L"Explorer settings saved successfully.", L"PMan", MB_OK);
                     }
 
                     EndCard();
