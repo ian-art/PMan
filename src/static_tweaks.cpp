@@ -83,6 +83,28 @@ static void BackupRegistryKey(const std::wstring& keyName, const std::wstring& f
     }
 }
 
+static void RunSilentCommand(const std::wstring& cmdLine)
+{
+    std::vector<wchar_t> buf(cmdLine.begin(), cmdLine.end());
+    buf.push_back(0);
+    
+    STARTUPINFOW si = { sizeof(si) };
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi = {};
+
+    if (CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, 
+                       CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        // Use RAII UniqueHandle if available, otherwise raw handles as per existing style in this file
+        WaitForSingleObject(pi.hProcess, 10000); // 10s timeout for tools like DISM/LODCTR
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        Log("[CMD] Executed: " + WideToUtf8(cmdLine.c_str()));
+    } else {
+        Log("[ERROR] Failed to execute: " + WideToUtf8(cmdLine.c_str()));
+    }
+}
+
 static void PerformSafetyBackup()
 {
     // Backup critical areas we are about to touch
@@ -350,6 +372,8 @@ bool ApplyStaticTweaks(const TweakConfig& config)
     if (config.power) {
         Log("[TWEAK] Applying System Responsiveness tweaks...");
         
+        // [FIX] PrioritySeparation=26 (0x1A) balances foreground/background quanta to prevent starvation
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\PriorityControl", L"Win32PrioritySeparation", 26);
         ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", L"SystemResponsiveness", 0);
         ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", L"GPU Priority", 8);
         ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games", L"Priority", 6);
@@ -362,6 +386,16 @@ bool ApplyStaticTweaks(const TweakConfig& config)
         
         ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"LargeSystemCache", 0);
         ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"DisablePagingExecutive", 1);
+        
+        // [FIX] Stop background I/O starvation (IoPriority=2 Normal)
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"IoPriority", 2);
+        
+        // [FIX] Prevent ETW event loss/throttling during high load
+        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\WMI", L"MaxBufferSize", 256);
+
+        // [FIX] Enforce consistent platform timers (kills synthetic latency)
+        RunSilentCommand(L"bcdedit /set useplatformtick yes");
+        RunSilentCommand(L"bcdedit /set disabledynamictick yes");
     }
 
     // ============================================================================
@@ -374,6 +408,9 @@ bool ApplyStaticTweaks(const TweakConfig& config)
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\AdvertisingInfo", L"Enabled", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\DataCollection", L"AllowTelemetry", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection", L"AllowTelemetry", 0);
+    
+    // [FIX] Reduce AMSI overhead by disabling unused PSv2 engine
+    RunSilentCommand(L"dism /online /disable-feature /featurename:MicrosoftWindowsPowerShellV2 /NoRestart");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection", L"AllowTelemetry", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows\\DataCollection", L"DoNotShowFeedbackNotifications", 1);
     ConfigureRegistry(HKEY_CURRENT_USER, L"Software\\Policies\\Microsoft\\Windows\\CloudContent", L"DisableTailoredExperiencesWithDiagnosticData", 1);
@@ -500,6 +537,8 @@ bool ApplyStaticTweaks(const TweakConfig& config)
     // ============================================================================
     if (config.power) {
     Log("[TWEAK] Applying Performance & Memory Management tweaks...");
+    // [FIX] Rebuild counters to ensure honest per-core reporting
+    RunSilentCommand(L"lodctr /R");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"DisablePagingExecutive", 1);
     // [FIX] LargeSystemCache=1 is detrimental to interactive desktop/gaming performance. 
     // It steals RAM for file caching, starving network drivers and apps.
@@ -544,11 +583,22 @@ bool ApplyStaticTweaks(const TweakConfig& config)
     if (config.power) {
     Log("[TWEAK] Applying Graphics & DWM settings...");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\GraphicsDrivers", L"HwSchMode", 2);
+    // [FIX] Disable MPO (Multi-Plane Overlay) to fix stutter/glitches
+    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\Dwm", L"OverlayTestMode", 5);
 
     // ============================================================================
     // POWER & BOOT
     // ============================================================================
     Log("[TWEAK] Applying Power & Boot settings...");
+    
+    // [FIX] Force Performance EPP (Energy Performance Preference) -> 0
+    RunSilentCommand(L"powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PERFENERGYBIAS 0");
+    RunSilentCommand(L"powercfg /setactive SCHEME_CURRENT");
+
+    // [FIX] Disable Core Parking (Min/Max Cores = 100%)
+    RunSilentCommand(L"powercfg -setacvalueindex SCHEME_CURRENT SUB_PROCESSOR CPMINCORES 100");
+    RunSilentCommand(L"powercfg -setacvalueindex SCHEME_CURRENT SUB_PROCESSOR CPMAXCORES 100");
+
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\BootControl", L"BootProgressAnimation", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Citrix", L"EnableVisualEffect", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Power\\PowerSettings\\54533251-82be-4824-96c1-47b60b740d00\\94d3a615-a899-4ac5-ae2b-e4d8f634367f", L"Attributes", 1);
