@@ -115,6 +115,8 @@ namespace GuiManager {
     static uint64_t g_lastLogCheck = 0;
     static std::streampos g_logLastPos = 0;
 	static size_t g_logPrevSize = 0;
+    static float g_logMaxWidth = 0.0f;
+    static int g_logLineCount = 0;
 
     static void UpdateLogContent() {
         uint64_t now = GetTickCount64();
@@ -133,6 +135,7 @@ namespace GuiManager {
         if (size.QuadPart < g_logLastPos) {
             g_logLastPos = 0; // File was truncated/reset
             g_logBuffer.clear();
+            g_logMaxWidth = 0.0f;
         }
 
         if (size.QuadPart > g_logLastPos) {
@@ -152,7 +155,8 @@ namespace GuiManager {
                 buffer[bytesRead] = '\0';
                 g_logBuffer.append(buffer.data());
                 g_logLastPos += bytesRead;
-            }
+
+                }
         }
         CloseHandle(hFile);
     }
@@ -967,7 +971,18 @@ namespace GuiManager {
         {
             UpdateLogContent();
 
-            if (ImGui::Button("Clear Log")) { g_logBuffer.clear(); }
+            // [FIX] Calculate dimensions safely inside the frame loop
+            if (g_logBuffer.size() != g_logPrevSize) {
+                 g_logMaxWidth = ImGui::CalcTextSize(g_logBuffer.c_str()).x;
+                 g_logLineCount = (int)std::count(g_logBuffer.begin(), g_logBuffer.end(), '\n') + 1;
+                 g_logPrevSize = g_logBuffer.size();
+            }
+
+            if (ImGui::Button("Clear Log")) { 
+                g_logBuffer.clear(); 
+                g_logMaxWidth = 0.0f; 
+                g_logLineCount = 0;
+            }
             ImGui::SameLine();
             ImGui::Checkbox("Auto-scroll", &g_logAutoScroll);
             ImGui::SameLine();
@@ -988,8 +1003,20 @@ namespace GuiManager {
                 ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
                 ImGuiInputTextFlags flags = ImGuiInputTextFlags_ReadOnly;
                 ImVec2 size = ImGui::GetContentRegionAvail();
-                ImGui::InputTextMultiline("##log", &g_logBuffer[0], g_logBuffer.size() + 1, 
-                    size, flags);
+                
+                // Force width to match text content + padding to prevent wrapping
+                // This enables the parent window's horizontal scrollbar
+                float contentWidth = (std::max)(size.x, g_logMaxWidth + 20.0f);
+                
+                // [FIX] Calculate full height to force parent-managed vertical scrolling
+                // If we restrict height to size.y, the widget's internal scrollbar appears off-screen (due to wide width)
+                float minHeight = (std::max)(size.y, g_logLineCount * ImGui::GetTextLineHeight() + ImGui::GetStyle().FramePadding.y * 2);
+
+                // [FIX] Safe buffer access for empty strings
+                // Use a mutable empty char for safety if buffer is empty
+                static char empty = 0;
+                ImGui::InputTextMultiline("##log", g_logBuffer.empty() ? &empty : &g_logBuffer[0], g_logBuffer.size() + 1, 
+                    ImVec2(contentWidth, minHeight), flags);
                 ImGui::PopStyleColor();
             }
             
