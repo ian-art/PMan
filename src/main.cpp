@@ -1084,16 +1084,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             }
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hThemeMenu, L"Icon Theme");
 
-			// 2. Configuration Submenu
-            HMENU hConfigMenu = CreatePopupMenu();
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, L"Open Control Center");
-            AppendMenuW(hConfigMenu, MF_SEPARATOR, 0, nullptr);
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_GAMES, (L"Edit Games List" + editorName).c_str());
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_BROWSERS, (L"Edit Browsers List" + editorName).c_str());
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_VIDEO_PLAYERS, (L"Edit Video Players List" + editorName).c_str());
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_IGNORED, (L"Edit Ignored Processes" + editorName).c_str());
-            AppendMenuW(hConfigMenu, MF_STRING, ID_TRAY_EDIT_LAUNCHERS, (L"Edit Custom Launchers" + editorName).c_str());
-            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hConfigMenu, L"Configuration");
+			// 2. Control Panel
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, L"Control Panel");
 
             // 3. Controls Submenu
             HMENU hControlMenu = CreatePopupMenu();
@@ -1158,7 +1150,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			);
             
             DestroyMenu(hControlMenu);
-            DestroyMenu(hConfigMenu);
+            // hConfigMenu removed
             DestroyMenu(hDashMenu);
             DestroyMenu(hThemeMenu);
             DestroyMenu(hHelpMenu);

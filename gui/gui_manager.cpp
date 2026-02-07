@@ -26,6 +26,8 @@
 #include "policy_contract.h"
 #include "external_verdict.h"
 #include "globals.h"
+#include "editor_manager.h"
+#include "constants.h"
 
 #include <d3d11.h>
 #include <dwmapi.h> // Required for transparency
@@ -759,6 +761,32 @@ namespace GuiManager {
                     EndCard();
                     ImGui::EndTabItem();
                 }
+
+                if (ImGui::BeginTabItem("Lists")) {
+                    BeginCard("lists", {0.14f, 0.14f, 0.16f, 1.0f});
+
+                    ImGui::TextDisabled("Manage Process Lists");
+                    ImGui::Separator();
+                    ImGui::Spacing();
+
+                    if (ImGui::Button("Edit Games List", ImVec2(-1, 32))) EditorManager::OpenConfigAtSection(L"[games]");
+                    if (ImGui::Button("Edit Browsers List", ImVec2(-1, 32))) EditorManager::OpenConfigAtSection(L"[browsers]");
+                    if (ImGui::Button("Edit Video Players", ImVec2(-1, 32))) EditorManager::OpenConfigAtSection(L"[video_players]");
+                    
+                    ImGui::Spacing();
+                    ImGui::Separator();
+                    ImGui::Spacing();
+
+                    if (ImGui::Button("Edit Custom Launchers", ImVec2(-1, 32))) EditorManager::OpenFile(CUSTOM_LAUNCHERS_FILENAME);
+                    HelpMarker("Apps listed here are treated as Background Launchers (Low Priority).");
+
+                    if (ImGui::Button("Edit Ignored Processes", ImVec2(-1, 32))) EditorManager::OpenFile(IGNORED_PROCESSES_FILENAME);
+                    HelpMarker("System processes listed here are ignored by the optimization engine.");
+
+                    EndCard();
+                    ImGui::EndTabItem();
+                }
+
                 ImGui::EndTabBar();
             }
         }
