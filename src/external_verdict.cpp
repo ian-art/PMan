@@ -135,7 +135,14 @@ ExternalVerdict::VerdictData ExternalVerdict::ParseVerdict(const std::string& js
 
 ExternalVerdict::VerdictData ExternalVerdict::LoadVerdict(const std::wstring& path) {
     std::ifstream t(path);
-    if (!t.is_open()) return {VerdictType::NONE};
+    if (!t.is_open()) {
+        // [FIX] Auto-create default verdict (ALLOW) if missing
+        SaveVerdict(path, VerdictType::ALLOW, 86400); // Default 24h allow
+
+        // Re-open
+        t.open(path);
+        if (!t.is_open()) return {VerdictType::NONE};
+    }
 
     std::stringstream buffer;
     buffer << t.rdbuf();
