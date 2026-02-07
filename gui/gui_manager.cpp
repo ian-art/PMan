@@ -619,13 +619,13 @@ namespace GuiManager {
                     BeginCard("pol", {0.14f, 0.10f, 0.10f, 1.0f});
                     
                     ImGui::InputInt("Authority Budget", &g_configState.maxBudget);
-                    HelpMarker("Finite authority limit. Each action consumes budget. When exhausted, the system permanently reverts to Maintain until externally reset.");
+                    HelpMarker("Finite authority limit. Each action consumes budget.\nWhen exhausted, the system permanently reverts to Maintain until externally reset.");
 
                     ImGui::InputFloat("CPU Variance", &g_configState.cpuVar, 0.001f, 0.01f, "%.4f");
-                    HelpMarker("Confidence threshold. Lower values require more predictable CPU behavior before actions are allowed.");
+                    HelpMarker("Confidence threshold. Lower values require more predictable\nCPU behavior before actions are allowed.");
 
                     ImGui::InputFloat("Latency Variance", &g_configState.latVar, 0.001f, 0.01f, "%.4f");
-                    HelpMarker("Confidence threshold for latency prediction. High variance disables authority regardless of intent.");
+                    HelpMarker("Confidence threshold for latency prediction.\nHigh variance disables authority regardless of intent.");
 
                     ImGui::Separator();
                     ImGui::Text("Allowed Actions:");
@@ -634,16 +634,16 @@ namespace GuiManager {
                     HelpMarker("Safety baseline. Allows the system to explicitly choose no action. Disabling is not recommended.");
 
                     ImGui::Checkbox("Throttle (Mild)", &g_configState.allowThrottleMild);
-                    HelpMarker("Allows mild, reversible priority reduction. Subject to policy, verdict, confidence, and budget.");
+                    HelpMarker("Allows mild, reversible priority reduction.\nSubject to policy, verdict, confidence, and budget.");
 
                     ImGui::Checkbox("Throttle (Aggressive)", &g_configState.allowThrottleAggressive);
-                    HelpMarker("Allows stronger throttling. May be vetoed by policy, confidence, or external authority.");
+                    HelpMarker("Allows stronger throttling.\nMay be vetoed by policy, confidence, or external authority.");
 
                     ImGui::Checkbox("Optimize Memory", &g_configState.allowOptimize);
-                    HelpMarker("Allows memory cleanup actions. Execution depends on sandbox safety and external permission.");
+                    HelpMarker("Allows memory cleanup actions.\nExecution depends on sandbox safety and external permission.");
 
                     ImGui::Checkbox("Suspend Services", &g_configState.allowSuspend);
-                    HelpMarker("High-impact action. Requires explicit policy and external authorization.");
+                    HelpMarker("High-impact action.\nRequires explicit policy and external authorization.");
 
                     ImGui::Checkbox("Pressure Relief", &g_configState.allowPressure);
                     HelpMarker("Emergency action category. Rarely permitted and strictly audited.");
@@ -691,7 +691,7 @@ namespace GuiManager {
                     BeginCard("verd", {0.14f, 0.14f, 0.18f, 1.0f});
                     
                     ImGui::TextDisabled("External Safety Override System");
-                    HelpMarker("A global safety switch that allows you (or external tools) to forcefully ALLOW, DENY, or LIMIT the AI's control over your PC for a set period of time.");
+                    HelpMarker("A global safety switch that allows you (or external tools) to forcefully\nALLOW, DENY, or LIMIT the AI's control over your PC for a set period of time.");
                     
                     ImGui::Separator();
 
