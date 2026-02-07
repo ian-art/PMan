@@ -87,10 +87,12 @@ namespace GuiManager {
         int maxBudget = 100;
         float cpuVar = 0.01f;
         float latVar = 0.02f;
-        bool allowThrottle = true;
+        bool allowThrottleMild = true;
+        bool allowThrottleAggressive = true;
         bool allowOptimize = true;
         bool allowSuspend = true;
         bool allowPressure = true;
+        bool allowMaintain = true;
 
         // Tab 4: Verdict
         int verdictIdx = 0; // 0=ALLOW, 1=DENY, 2=CONSTRAIN
@@ -366,10 +368,12 @@ namespace GuiManager {
             g_configState.cpuVar = (float)lim.minConfidence.cpuVariance;
             g_configState.latVar = (float)lim.minConfidence.latencyVariance;
             
-            g_configState.allowThrottle = lim.allowedActions.count((int)BrainAction::Throttle_Mild);
+            g_configState.allowThrottleMild = lim.allowedActions.count((int)BrainAction::Throttle_Mild);
+            g_configState.allowThrottleAggressive = lim.allowedActions.count((int)BrainAction::Throttle_Aggressive);
             g_configState.allowOptimize = lim.allowedActions.count((int)BrainAction::Optimize_Memory);
             g_configState.allowSuspend = lim.allowedActions.count((int)BrainAction::Suspend_Services);
             g_configState.allowPressure = lim.allowedActions.count((int)BrainAction::Release_Pressure);
+            g_configState.allowMaintain = lim.allowedActions.count((int)BrainAction::Maintain);
         }
 
         g_isOpen = true;
@@ -499,7 +503,7 @@ namespace GuiManager {
                     ImGui::Checkbox("Idle Revert Mode", &g_configState.idleRevert);
                     HelpMarker("Automatically revert to Browser Mode if system is idle for specified time and no game is currently running.");
 
-                    ImGui::SliderInt("Idle Timeout (s)", &g_configState.idleTimeoutSec, 10, 600);
+                    ImGui::SliderInt("Idle Timeout", &g_configState.idleTimeoutSec, 10, 600);
                     HelpMarker("Time in seconds before idle mode activates.");
 
                     ImGui::Separator();
@@ -574,8 +578,8 @@ namespace GuiManager {
                     HelpMarker("Optimizes Windows UI only when system is truly idle. Admin rights required for DWM boosting.");
 
                     if (g_configState.expEnabled) {
-                        ImGui::SliderInt("Idle Threshold (s)", &g_configState.expIdleThresholdSec, 5, 600);
-                        HelpMarker("Time with NO user input AND no foreground game before boost activates.");
+                        ImGui::SliderInt("Idle Threshold", &g_configState.expIdleThresholdSec, 5, 600);
+                        HelpMarker("Time in seconds with no user input and no foreground game before boost activates.");
 
                         ImGui::Checkbox("Boost DWM", &g_configState.boostDwm);
                         HelpMarker("Also boost Desktop Window Manager (dwm.exe) for smoother animations.");
@@ -589,8 +593,8 @@ namespace GuiManager {
                         ImGui::Checkbox("Prevent Shell Paging", &g_configState.preventPaging);
                         HelpMarker("Prevents Windows from paging out Explorer/DWM during gaming.");
 
-                        ImGui::SliderInt("Scan Interval (s)", &g_configState.scanIntervalSec, 1, 60);
-                        HelpMarker("How often to check for new Explorer windows.");
+                        ImGui::SliderInt("Scan Interval", &g_configState.scanIntervalSec, 1, 60);
+                        HelpMarker("Time in seconds on how often to check for new Explorer windows.");
                         
                         ImGui::Checkbox("Debug Logging", &g_configState.debugLog);
                     }
@@ -615,17 +619,34 @@ namespace GuiManager {
                     BeginCard("pol", {0.14f, 0.10f, 0.10f, 1.0f});
                     
                     ImGui::InputInt("Authority Budget", &g_configState.maxBudget);
-                    HelpMarker("Max actions per cycle.");
-                    
+                    HelpMarker("Finite authority limit. Each action consumes budget. When exhausted, the system permanently reverts to Maintain until externally reset.");
+
                     ImGui::InputFloat("CPU Variance", &g_configState.cpuVar, 0.001f, 0.01f, "%.4f");
+                    HelpMarker("Confidence threshold. Lower values require more predictable CPU behavior before actions are allowed.");
+
                     ImGui::InputFloat("Latency Variance", &g_configState.latVar, 0.001f, 0.01f, "%.4f");
+                    HelpMarker("Confidence threshold for latency prediction. High variance disables authority regardless of intent.");
 
                     ImGui::Separator();
                     ImGui::Text("Allowed Actions:");
-                    ImGui::Checkbox("Throttle", &g_configState.allowThrottle);
+
+                    ImGui::Checkbox("Maintain (Idle)", &g_configState.allowMaintain);
+                    HelpMarker("Safety baseline. Allows the system to explicitly choose no action. Disabling is not recommended.");
+
+                    ImGui::Checkbox("Throttle (Mild)", &g_configState.allowThrottleMild);
+                    HelpMarker("Allows mild, reversible priority reduction. Subject to policy, verdict, confidence, and budget.");
+
+                    ImGui::Checkbox("Throttle (Aggressive)", &g_configState.allowThrottleAggressive);
+                    HelpMarker("Allows stronger throttling. May be vetoed by policy, confidence, or external authority.");
+
                     ImGui::Checkbox("Optimize Memory", &g_configState.allowOptimize);
+                    HelpMarker("Allows memory cleanup actions. Execution depends on sandbox safety and external permission.");
+
                     ImGui::Checkbox("Suspend Services", &g_configState.allowSuspend);
+                    HelpMarker("High-impact action. Requires explicit policy and external authorization.");
+
                     ImGui::Checkbox("Pressure Relief", &g_configState.allowPressure);
+                    HelpMarker("Emergency action category. Rarely permitted and strictly audited.");
 
                     if (ImGui::Button("Apply Policy", ImVec2(140, 32))) {
                         PolicyLimits limits;
@@ -633,10 +654,11 @@ namespace GuiManager {
                         limits.minConfidence.cpuVariance = g_configState.cpuVar;
                         limits.minConfidence.latencyVariance = g_configState.latVar;
                         
-                        if (g_configState.allowThrottle) {
-                            limits.allowedActions.insert((int)BrainAction::Throttle_Mild);
-                            limits.allowedActions.insert((int)BrainAction::Throttle_Aggressive);
-                        }
+                        if (g_configState.allowThrottleMild) limits.allowedActions.insert((int)BrainAction::Throttle_Mild);
+                        if (g_configState.allowThrottleAggressive) limits.allowedActions.insert((int)BrainAction::Throttle_Aggressive);
+                        
+                        if (g_configState.allowMaintain) limits.allowedActions.insert((int)BrainAction::Maintain);
+
                         if (g_configState.allowOptimize) {
                              limits.allowedActions.insert((int)BrainAction::Optimize_Memory);
                              limits.allowedActions.insert((int)BrainAction::Optimize_Memory_Gentle);
@@ -646,6 +668,13 @@ namespace GuiManager {
                             limits.allowedActions.insert((int)BrainAction::Release_Pressure);
                             limits.allowedActions.insert((int)BrainAction::Shield_Foreground);
                         }
+
+                        // [FIX] Implicitly Allow Core Actions (Boost)
+                        // Boost is required for the Governor but hidden from simple toggles to prevent user error
+                        limits.allowedActions.insert((int)BrainAction::Boost_Process);
+                        
+                        // Ensure Maintain is present if user checked it (redundant safety)
+                        if (g_configState.allowMaintain) limits.allowedActions.insert((int)BrainAction::Maintain);
                         
                         // Save Policy
                         if (PManContext::Get().subs.policy) {
@@ -661,15 +690,27 @@ namespace GuiManager {
                 if (ImGui::BeginTabItem("Verdict")) {
                     BeginCard("verd", {0.14f, 0.14f, 0.18f, 1.0f});
                     
+                    ImGui::TextDisabled("External Safety Override System");
+                    HelpMarker("A global safety switch that allows you (or external tools) to forcefully ALLOW, DENY, or LIMIT the AI's control over your PC for a set period of time.");
+                    
+                    ImGui::Separator();
+
                     const char* items[] = { "ALLOW", "DENY", "CONSTRAIN" };
                     ImGui::Combo("Verdict Status", &g_configState.verdictIdx, items, IM_ARRAYSIZE(items));
+                    HelpMarker("ALLOW: AI has full control.\nDENY: AI is completely disabled.\nCONSTRAIN: AI is restricted to specific safe actions only.");
                     
-                    ImGui::InputInt("Duration (Hours)", &g_configState.durationHours);
+                    ImGui::InputInt("Duration", &g_configState.durationHours);
+                    HelpMarker("Time in hours on how long this override should last before returning to normal operation.");
+
+                    ImGui::Separator();
 
                     if (ImGui::Button("Revoke Authority Now", ImVec2(180, 32))) {
                         ExternalVerdict::SaveVerdict(GetLogPath() / L"verdict.json", VerdictType::DENY, 3600);
                     }
+                    HelpMarker("PANIC BUTTON: Immediately stops the AI from doing anything for 1 hour.");
+
                     ImGui::SameLine();
+                    
                     if (ImGui::Button("Grant Authority", ImVec2(180, 32))) {
                         VerdictType type = VerdictType::ALLOW;
                         if (g_configState.verdictIdx == 1) type = VerdictType::DENY;
@@ -677,6 +718,7 @@ namespace GuiManager {
                         
                         ExternalVerdict::SaveVerdict(GetLogPath() / L"verdict.json", type, g_configState.durationHours * 3600);
                     }
+                    HelpMarker("Applies the selected Status and Duration.");
 
                     EndCard();
                     ImGui::EndTabItem();
