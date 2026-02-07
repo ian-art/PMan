@@ -197,6 +197,13 @@ namespace GuiManager {
         colors[ImGuiCol_Button]   = ImVec4(0.20f, 0.25f, 0.35f, 1.00f);
         colors[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.38f, 0.50f, 1.00f);
         colors[ImGuiCol_ButtonActive]  = ImVec4(0.40f, 0.50f, 0.65f, 1.00f);
+
+        // [FIX] Tab Highlighting
+        colors[ImGuiCol_Tab]                = ImVec4(0.15f, 0.20f, 0.30f, 1.00f);
+        colors[ImGuiCol_TabHovered]         = ImVec4(0.35f, 0.50f, 0.80f, 0.80f);
+        colors[ImGuiCol_TabActive]          = ImVec4(0.28f, 0.45f, 0.75f, 1.00f);
+        colors[ImGuiCol_TabUnfocused]       = ImVec4(0.10f, 0.12f, 0.18f, 1.00f);
+        colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.18f, 0.28f, 0.50f, 1.00f);
     }
 
     // ============================================================================================
