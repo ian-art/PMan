@@ -85,6 +85,13 @@ namespace GuiManager {
         int scanIntervalSec = 5;
         bool debugLog = false;
         
+        // Tab Debug: Faults
+        bool faultLedger = false;
+        bool faultBudget = false;
+        bool faultSandbox = false;
+        bool faultIntent = false;
+        bool faultConfidence = false;
+
         // Tab 3: Policy
         int maxBudget = 100;
         float cpuVar = 0.01f;
@@ -367,6 +374,14 @@ namespace GuiManager {
         g_configState.scanIntervalSec = ec.scanIntervalMs / 1000;
         g_configState.debugLog = ec.debugLogging;
 
+        // Populate Fault State
+        auto& f = PManContext::Get().fault;
+        g_configState.faultLedger = f.ledgerWriteFail;
+        g_configState.faultBudget = f.budgetCorruption;
+        g_configState.faultSandbox = f.sandboxError;
+        g_configState.faultIntent = f.intentInvalid;
+        g_configState.faultConfidence = f.confidenceInvalid;
+
         if (auto& pol = PManContext::Get().subs.policy) {
             const auto& lim = pol->GetLimits();
             g_configState.maxBudget = lim.maxAuthorityBudget;
@@ -603,8 +618,6 @@ namespace GuiManager {
                         // [FIX] Use InputInt for uniformity
                         ImGui::InputInt("Scan Interval", &g_configState.scanIntervalSec);
                         HelpMarker("Time in seconds on how often to check for new Explorer windows.");
-                        
-                        ImGui::Checkbox("Debug Logging", &g_configState.debugLog);
                     }
                     
                     ImGui::Separator();
@@ -778,6 +791,59 @@ namespace GuiManager {
 
                     if (ImGui::Button("Edit Ignored Processes", ImVec2(-1, 32))) EditorManager::OpenFile(IGNORED_PROCESSES_FILENAME);
                     HelpMarker("System processes listed here are ignored by the optimization engine.");
+
+                    EndCard();
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Debug")) {
+                    BeginCard("dbg", {0.15f, 0.10f, 0.10f, 1.0f});
+
+                    ImGui::TextDisabled("Fault Injection (Adversarial Testing)");
+                    ImGui::Separator();
+
+                    ImGui::Checkbox("Simulate Ledger Write Fail", &g_configState.faultLedger);
+                    HelpMarker("Simulates a failure in the audit system.\nVerifies that the AI reports the error and stops.");
+
+                    ImGui::Checkbox("Simulate Budget Corruption", &g_configState.faultBudget);
+                    HelpMarker("Simulates a budget tracking error.\nVerifies that the AI locks down to prevent unauthorized usage.");
+
+                    ImGui::Checkbox("Simulate Sandbox Error", &g_configState.faultSandbox);
+                    HelpMarker("Simulates a failure in the safety sandbox.\nVerifies that the AI correctly reports the crash.");
+
+                    ImGui::Checkbox("Simulate Invalid Intent", &g_configState.faultIntent);
+                    HelpMarker("Simulates a logic mismatch.\nVerifies that the AI rejects the action as unsafe.");
+
+                    ImGui::Checkbox("Simulate Invalid Confidence", &g_configState.faultConfidence);
+                    HelpMarker("Simulates unreliable data.\nVerifies that the AI reverts to a safe state.");
+
+                    ImGui::Spacing();
+                    ImGui::TextDisabled("Logging & Diagnostics");
+                    ImGui::Separator();
+
+                    ImGui::Checkbox("Explorer Debug Logging", &g_configState.debugLog);
+                    HelpMarker("Enables verbose logging for the Smart Shell Booster subsystem.");
+
+                    ImGui::Spacing();
+                    ImGui::Separator();
+
+                    if (ImGui::Button("Apply Debug Settings", ImVec2(180, 32))) {
+                        // Apply Faults
+                        auto& f = PManContext::Get().fault;
+                        f.ledgerWriteFail = g_configState.faultLedger;
+                        f.budgetCorruption = g_configState.faultBudget;
+                        f.sandboxError = g_configState.faultSandbox;
+                        f.intentInvalid = g_configState.faultIntent;
+                        f.confidenceInvalid = g_configState.faultConfidence;
+                        Log("[USER] Debug settings applied.");
+
+                        // Apply Debug Logging
+                        ExplorerConfig ec = GetExplorerConfigShadow();
+                        ec.debugLogging = g_configState.debugLog;
+                        SetExplorerConfigShadow(ec);
+                        SaveConfig();
+                        g_reloadNow.store(true);
+                    }
 
                     EndCard();
                     ImGui::EndTabItem();

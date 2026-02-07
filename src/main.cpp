@@ -99,14 +99,6 @@ static UINT g_wmTaskbarCreated = 0;
 
 #define ID_TRAY_EXPORT_LOG 5001 // Unique ID for Audit Export
 
-// --- Fault Injection IDs ---
-#define ID_TRAY_FAULT_BASE        6000
-#define ID_TRAY_FAULT_LEDGER      6001
-#define ID_TRAY_FAULT_BUDGET      6002
-#define ID_TRAY_FAULT_SANDBOX     6003
-#define ID_TRAY_FAULT_INTENT      6004
-#define ID_TRAY_FAULT_CONFIDENCE  6005
-// -----------------------------
 HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
 static GUID* g_pSleepScheme = nullptr;
@@ -1066,16 +1058,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_EXPORT_LOG, L"Export Authority Log (JSON)");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hDashMenu, L"Monitor & Logs");
 
-            // --- Fault Injection Submenu (Adversarial Testing) ---
-            HMENU hFaultMenu = CreatePopupMenu();
-            auto& f = PManContext::Get().fault;
-            AppendMenuW(hFaultMenu, MF_STRING | (f.ledgerWriteFail ? MF_CHECKED : 0), ID_TRAY_FAULT_LEDGER, L"Simulate Ledger Write Fail");
-            AppendMenuW(hFaultMenu, MF_STRING | (f.budgetCorruption ? MF_CHECKED : 0), ID_TRAY_FAULT_BUDGET, L"Simulate Budget Corruption");
-            AppendMenuW(hFaultMenu, MF_STRING | (f.sandboxError ? MF_CHECKED : 0), ID_TRAY_FAULT_SANDBOX, L"Simulate Sandbox Error");
-            AppendMenuW(hFaultMenu, MF_STRING | (f.intentInvalid ? MF_CHECKED : 0), ID_TRAY_FAULT_INTENT, L"Simulate Invalid Intent");
-            AppendMenuW(hFaultMenu, MF_STRING | (f.confidenceInvalid ? MF_CHECKED : 0), ID_TRAY_FAULT_CONFIDENCE, L"Simulate Invalid Confidence");
-            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hFaultMenu, L"Fault Injection (Debug)");
-
             // --- Theme Selection Submenu ---
             HMENU hThemeMenu = CreatePopupMenu();
             AppendMenuW(hThemeMenu, MF_STRING | (g_iconTheme == L"Default" ? MF_CHECKED : 0), ID_TRAY_THEME_BASE, L"Default (Embedded)");
@@ -1153,7 +1135,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             DestroyMenu(hDashMenu);
             DestroyMenu(hThemeMenu);
             DestroyMenu(hHelpMenu);
-            DestroyMenu(hFaultMenu);
             DestroyMenu(hMenu);
         }
         return 0;
@@ -1162,17 +1143,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     {
         DWORD wmId = LOWORD(wParam);
         
-        // --- Fault Handler ---
-        if (wmId >= ID_TRAY_FAULT_BASE && wmId <= ID_TRAY_FAULT_CONFIDENCE) {
-            auto& f = PManContext::Get().fault;
-            if (wmId == ID_TRAY_FAULT_LEDGER) f.ledgerWriteFail = !f.ledgerWriteFail;
-            else if (wmId == ID_TRAY_FAULT_BUDGET) f.budgetCorruption = !f.budgetCorruption;
-            else if (wmId == ID_TRAY_FAULT_SANDBOX) f.sandboxError = !f.sandboxError;
-            else if (wmId == ID_TRAY_FAULT_INTENT) f.intentInvalid = !f.intentInvalid;
-            else if (wmId == ID_TRAY_FAULT_CONFIDENCE) f.confidenceInvalid = !f.confidenceInvalid;
-            Log("[FAULT] Fault Injection State Toggled.");
-        }
-
         // --- Theme Handler ---
         if (wmId >= ID_TRAY_THEME_BASE && wmId < ID_TRAY_THEME_BASE + 100) {
             std::wstring newTheme = L"Default";
