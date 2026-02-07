@@ -585,7 +585,7 @@ namespace GuiManager {
                         SaveConfig();
                         g_reloadNow.store(true);
                         
-                        MessageBoxW(g_hwnd, L"Configuration saved successfully.", L"PMan", MB_OK);
+                        //MessageBoxW(g_hwnd, L"Configuration saved successfully.", L"PMan", MB_OK);
                     }
 
                     EndCard();
