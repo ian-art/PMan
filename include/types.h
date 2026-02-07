@@ -372,12 +372,13 @@ enum class BrainAction : uint8_t {
     Suspend_Services,
     Release_Pressure,
     Shield_Foreground, // [DCM] Universal Foreground Shielding (Boost FG + IO)
+    Boost_Process, // [FIX] Restored core action to match policy.json
     Count // Compile-time fixed size
 };
 
 // Compile-time check
 constexpr size_t ACTION_COUNT = static_cast<size_t>(BrainAction::Count);
-static_assert(ACTION_COUNT == 8, "BrainAction count");
+static_assert(ACTION_COUNT == 9, "BrainAction count");
 
 // Decision Arbiter Types
 enum class DecisionReason : uint8_t {
