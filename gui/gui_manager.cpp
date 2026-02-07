@@ -1001,9 +1001,9 @@ namespace GuiManager {
 
     void CleanupDeviceD3D() {
         CleanupRenderTarget();
-        if (g_pSwapChain) g_pSwapChain->Release();
-        if (g_pd3dDeviceContext) g_pd3dDeviceContext->Release();
-        if (g_pd3dDevice) g_pd3dDevice->Release();
+        if (g_pSwapChain) { g_pSwapChain->Release(); g_pSwapChain = nullptr; }
+        if (g_pd3dDeviceContext) { g_pd3dDeviceContext->Release(); g_pd3dDeviceContext = nullptr; }
+        if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = nullptr; }
     }
 
     void CreateRenderTarget() {
