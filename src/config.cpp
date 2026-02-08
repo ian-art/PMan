@@ -722,6 +722,7 @@ void LoadConfig()
 		Log("Config loaded: " + std::to_string(g_games.size()) + " games, " +
             std::to_string(g_browsers.size()) + " browsers, " +
             std::to_string(g_videoPlayers.size()) + " video players, " +
+            std::to_string(g_shadowBackgroundApps.size()) + " background apps, " + // [FIX] Added missing log
             std::to_string(g_oldGames.size()) + " legacy games, " +
             std::to_string(g_ignoredProcesses.size()) + " ignored, " +
             std::to_string(g_customLaunchers.size()) + " custom launchers, " +
