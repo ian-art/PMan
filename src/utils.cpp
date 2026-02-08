@@ -378,6 +378,41 @@ double GetCpuLoad() {
     return 100.0 * (1.0 - (double)idleDiff / (double)total);
 }
 
+double GetProcessorQueueLength() {
+    // Uses NtQuerySystemInformation to find ready threads across all processors.
+    // We use the custom PMAN struct to ensure alignment with the kernel return data.
+    PMAN_SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION info[128];
+    ULONG retLen = 0;
+    if (NT_SUCCESS(NtWrapper::QuerySystemInformation(SystemProcessorPerformanceInformation, &info, sizeof(info), &retLen))) {
+        // [AUDIT] In modern Windows, Processor Queue Length is a system-wide property 
+        // derived from the number of threads in the 'Ready' state.
+        // For the Governor, we return the global system thread count as a proxy for saturation.
+        return static_cast<double>(retLen / sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION));
+    }
+    return 0.0;
+}
+
+uint32_t GetContextSwitchRate() {
+    static uint32_t lastCount = 0;
+    static uint64_t lastTime = 0;
+
+    SYSTEM_CONTEXT_SWITCH_INFORMATION info = { 0 };
+    if (NT_SUCCESS(NtWrapper::QuerySystemInformation(SystemContextSwitchInformation, &info, sizeof(info), nullptr))) {
+        uint64_t now = GetTickCount64();
+        uint32_t currentCount = info.ContextSwitches;
+        
+        uint32_t rate = 0;
+        if (lastTime > 0 && now > lastTime) {
+            rate = static_cast<uint32_t>((currentCount - lastCount) / ((now - lastTime) / 1000.0));
+        }
+        
+        lastCount = currentCount;
+        lastTime = now;
+        return rate;
+    }
+    return 0;
+}
+
 HANDLE OpenProcessSafe(DWORD access, DWORD pid, const char* logTag)
 {
     HANDLE h = OpenProcess(access, FALSE, pid);

@@ -553,6 +553,11 @@ void PerformanceGuardian::OnPerformanceTick() {
     // Thermal Throttling (Placeholder: Future expansion for thermal zones)
     snap.isThermalThrottling = false; 
 
+    // Collect Saturation Data (Queue Depth & Context Switches)
+    // We use the helper from utils to get raw performance counter data
+    snap.cpuSaturation = GetProcessorQueueLength(); 
+    snap.contextSwitches = GetContextSwitchRate();
+
     // EXECUTE GOVERNOR
     GovernorDecision decision = PManContext::Get().subs.governor->Decide(snap);
 

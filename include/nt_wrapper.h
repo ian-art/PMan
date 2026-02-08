@@ -74,6 +74,26 @@ typedef struct _PROCESS_POWER_THROTTLING_STATE {
 #define SystemProcessorPerformanceInformation (SYSTEM_INFORMATION_CLASS)8
 #endif
 
+// Context Switch Information
+#ifndef SystemContextSwitchInformation
+#define SystemContextSwitchInformation (SYSTEM_INFORMATION_CLASS)21
+#endif
+
+typedef struct _SYSTEM_CONTEXT_SWITCH_INFORMATION {
+    ULONG ContextSwitches;
+    ULONG FindAnyProcessor;
+    ULONG FindLastProcessor;
+    ULONG FindIdealProcessor;
+    ULONG IdleAnyProcessor;
+    ULONG IdleCurrentProcessor;
+    ULONG IdleLastProcessor;
+    ULONG IdleIdealProcessor;
+    ULONG PreemptAnyProcessor;
+    ULONG PreemptCurrentProcessor;
+    ULONG PreemptLastProcessor;
+    ULONG SwitchToIdle;
+} SYSTEM_CONTEXT_SWITCH_INFORMATION, *PSYSTEM_CONTEXT_SWITCH_INFORMATION;
+
 // We define a custom mapping to access the full kernel data.
 typedef struct _PMAN_SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION {
     LARGE_INTEGER IdleTime;

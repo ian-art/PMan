@@ -339,6 +339,8 @@ enum class AllowedActionClass : uint8_t {
 
 struct SystemSignalSnapshot {
     double cpuLoad;            // 0.0 - 100.0
+    double cpuSaturation;      // Processor Queue Length (Ready threads)
+    uint32_t contextSwitches;  // Context Switches / sec
     double memoryPressure;     // 0.0 - 100.0
     double diskQueueLen;       // Raw Queue Depth
     double latencyMs;          // Input/Audio latency

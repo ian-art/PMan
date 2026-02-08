@@ -68,6 +68,8 @@ DWORD GetCurrentPrioritySeparation();
 
 // Get Global CPU Load Percentage
 double GetCpuLoad();
+double GetProcessorQueueLength();
+uint32_t GetContextSwitchRate();
 
 // RAII Helpers
 HANDLE OpenProcessSafe(DWORD access, DWORD pid, const char* logTag = nullptr);

@@ -18,12 +18,19 @@
  */
 
 #include "governor.h"
+#include "globals.h"
 #include <algorithm>
 
 // 5.2 Normalized Signals
 PerformanceGovernor::NormalizedSignals PerformanceGovernor::Normalize(const SystemSignalSnapshot& raw) {
     NormalizedSignals sig;
-    sig.cpu = std::clamp(raw.cpuLoad / 100.0, 0.0, 1.0);
+    
+    // CPU Usage vs Saturation logic
+    // We treat the higher of the two as the CPU signal.
+    // Saturation is normalized against logical core count (e.g., Queue of 8 on 8 cores = 1.0)
+    double saturation = raw.cpuSaturation / static_cast<double>(g_logicalCoreCount);
+    sig.cpu = (std::max)((std::clamp)(raw.cpuLoad / 100.0, 0.0, 1.0), (std::clamp)(saturation, 0.0, 1.0));
+    
     sig.memory = std::clamp(raw.memoryPressure / 100.0, 0.0, 1.0);
     sig.disk = std::clamp(raw.diskQueueLen / 5.0, 0.0, 1.0);
     if (raw.latencyMs <= 10.0) sig.latency = 0.0;
@@ -38,8 +45,11 @@ void PerformanceGovernor::UpdatePolicy(const PolicyParameters& params) {
 
 // 5.4 Dominant Pressure Selector
 DominantPressure PerformanceGovernor::SelectDominant(const NormalizedSignals& signals) {
-    // Use tunable parameters instead of constants
+    // If Saturation is high but CPU Load is low, Latency is the underlying pressure.
     if (signals.latency > m_params.latencyThreshold) return DominantPressure::Latency;
+    
+    // Use tunable parameters instead of constants
+    if (signals.memory > m_params.memThreshold) return DominantPressure::Memory;
     if (signals.memory > m_params.memThreshold) return DominantPressure::Memory;
     if (signals.disk > m_params.diskThreshold) return DominantPressure::Disk;
     if (signals.cpu > m_params.cpuThreshold) return DominantPressure::Cpu;
