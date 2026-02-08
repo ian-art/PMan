@@ -48,6 +48,13 @@ static std::unordered_set<std::wstring> GetDefaultCustomLaunchers() {
     };
 }
 
+static std::unordered_set<std::wstring> GetDefaultBrowsers() {
+    return {
+        L"chrome.exe", L"firefox.exe", L"msedge.exe", L"brave.exe", L"opera.exe",
+        L"vivaldi.exe", L"discord.exe", L"spotify.exe", L"slack.exe", L"teams.exe"
+    };
+}
+
 static std::unordered_set<std::wstring> GetDefaultIgnoredProcesses() {
     return {
         L"searchhost.exe", L"startmenuexperiencehost.exe",
@@ -364,7 +371,7 @@ bool CreateDefaultConfig(const std::filesystem::path& configPath)
         
         WriteConfigurationFile(
             configPath,
-            {}, {}, {}, GetDefaultBackgroundApps(), {}, {}, {}, // Empty sets for games, browsers, etc.
+            {}, GetDefaultBrowsers(), {}, GetDefaultBackgroundApps(), {}, {}, {}, 
             GetDefaultCustomLaunchers(), GetDefaultIgnoredProcesses(),
             true,    // ignoreNonInteractive
             true,    // restoreOnExit
@@ -699,6 +706,17 @@ void LoadConfig()
         if (backgroundApps.empty()) {
             backgroundApps = GetDefaultBackgroundApps();
         }
+		
+		// Apply Default Browsers if config is empty
+        if (browsers.empty()) {
+            browsers = GetDefaultBrowsers();
+        }
+		
+		// Apply Default Browsers (includes Electron apps like Discord/Spotify)
+        if (browsers.empty()) {
+            browsers = GetDefaultBrowsers();
+        }
+		
         g_shadowBackgroundApps = backgroundApps; // Update shadow copy
         g_networkMonitor.SetBackgroundApps(backgroundApps);
 
