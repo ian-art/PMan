@@ -220,6 +220,7 @@ struct CPUInfo
 struct OSCapabilities
 {
     bool isWindows10OrNewer = false;
+    bool supportsEcoQoS = false;    // Windows 11+ Efficiency Mode
     bool hasAdminRights = false;    // Can write to HKLM
     bool canUseEtw = false;         // Can start kernel traces
     bool hasSessionApi = false;     // Can use ProcessIdToSessionId

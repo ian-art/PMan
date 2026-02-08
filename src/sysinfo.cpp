@@ -829,6 +829,12 @@ void DetectOSCapabilities()
                 }
                 
                 Log("System Init ID: " + std::to_string(secretId));
+
+                // Detect EcoQoS / Efficiency Mode support (Windows 10 21H2+)
+                if (rovi.dwMajorVersion >= 10 && rovi.dwBuildNumber >= 19044) {
+                    g_caps.supportsEcoQoS = true;
+                    Log("[HYBRID] EcoQoS / Efficiency Mode support: AVAILABLE");
+                }
             }
         }
     }

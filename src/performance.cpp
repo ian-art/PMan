@@ -592,8 +592,25 @@ void PerformanceGuardian::OnPerformanceTick() {
             allowEst = false;    // Only one per tick
         }
 
-        // 2. Stutter Analysis (Emergency Response)
-        if (now - session.lastAnalysisTime > 2000) {
+        // Silence polling background apps when a game is active
+    if (!m_sessions.empty()) {
+        static uint64_t lastAppSilence = 0;
+        if (now - lastAppSilence > 10000) { // Every 10 seconds
+            ForEachProcess([](const PROCESSENTRY32W& pe) {
+                std::wstring name = pe.szExeFile;
+                asciiLower(name);
+                
+                // Only target known "poller" apps that are NOT the current game
+                if (g_browsers.count(name) || name == L"discord.exe" || name == L"spotify.exe") {
+                    SetBackgroundPowerPolicy(pe.th32ProcessID, true);
+                }
+            });
+            lastAppSilence = now;
+        }
+    }
+
+    // 2. Stutter Analysis (Emergency Response)
+    if (now - session.lastAnalysisTime > 2000) {
             // CRITICAL FIX: Validate Process Identity before analysis
             uint64_t currentCreation = GetProcessCreationTimeHelper(session.pid);
             if (currentCreation != 0 && session.creationTime != 0 && currentCreation != session.creationTime) {

@@ -891,6 +891,33 @@ void SetWorkingSetLimits(DWORD pid, int mode)
     CloseHandle(hProcess);
 }
 
+void SetBackgroundPowerPolicy(DWORD pid, bool aggressive)
+{
+    if (!g_caps.supportsPowerThrottling) return;
+
+    UniqueHandle hProcess(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (!hProcess) return;
+
+    // Core Truth #3: Stop background apps from polling
+    // We force IGNORE_TIMER_RESOLUTION to stop 1ms polling from waking the CPU.
+    PROCESS_POWER_THROTTLING_STATE throttlingState = { 0 };
+    throttlingState.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    
+    if (aggressive) {
+        // Enable Throttling + Ignore Timer Resolution
+        throttlingState.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED | 
+                                     PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+        throttlingState.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED | 
+                                   PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+    } else {
+        // Disable Throttling (Restore performance)
+        throttlingState.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+        throttlingState.StateMask = 0;
+    }
+
+    NtWrapper::SetInformationProcess(hProcess.get(), ProcessPowerThrottling, &throttlingState, sizeof(throttlingState));
+}
+
 void SetPriorityBoostControl(DWORD pid, int mode)
 {
     if (!g_dpcLatencyAvailable.load()) return;

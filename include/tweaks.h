@@ -37,6 +37,7 @@ void SetWorkingSetLimits(DWORD pid, int mode);
 void OptimizeDpcIsrLatency(DWORD pid, int mode);
 void CleanupProcessState(DWORD pid);
 void SetTimerCoalescingControl(int mode);
+void SetBackgroundPowerPolicy(DWORD pid, bool aggressive);
 
 // Tiered Optimization (Tier 1: Core, Tier 2: Worker, Tier 3: Launcher)
 void ApplyTieredOptimization(DWORD pid, int mode, bool isGameChild);
