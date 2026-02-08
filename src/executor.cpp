@@ -28,6 +28,8 @@
 #include <psapi.h>
 #include <algorithm>
 #include <shellapi.h> // For SHQueryUserNotificationState
+#include <wct.h>      // Wait Chain Traversal
+#pragma comment(lib, "advapi32.lib")
 
 // [DCM] Universal Security Product Detection (Heuristic)
 // We define a local compatible struct to check Process Protection Level (PPL)
@@ -164,12 +166,21 @@ void Executor::Initialize() {
     // Initialize the safety monitoring thread
     m_watchdogRunning = true;
     m_watchdogThread = std::thread(&Executor::WatchdogLoop, this);
+
+    // Initialize Wait Chain Traversal (Sync Mode)
+    // This gives us a handle to query the Kernel Dispatcher directly.
+    m_hWctSession = OpenThreadWaitChainSession(0, NULL);
 }
 
 void Executor::Shutdown() {
     m_watchdogRunning = false;
     if (m_watchdogThread.joinable()) m_watchdogThread.join();
     EmergencyRevertAll();
+
+    if (m_hWctSession) {
+        CloseThreadWaitChainSession(m_hWctSession);
+        m_hWctSession = nullptr;
+    }
 }
 
 void Executor::WatchdogLoop() {
@@ -227,16 +238,24 @@ std::optional<Executor::Receipt> Executor::Execute(const ActionIntent& intent) {
             // Triggered when "Universal AV Awareness" detects background pressure.
             {
                 DWORD fgPid = 0;
-                GetWindowThreadProcessId(GetForegroundWindow(), &fgPid);
+                DWORD fgTid = GetWindowThreadProcessId(GetForegroundWindow(), &fgPid);
+                
+                // Clear targets to ensure we only track what we actually touch here
+                targets.targets.clear();
+
+                // [WCT] Anti-Deadlock: Check if the foreground thread is blocked by a background process
+                // Any dependency found (e.g. Audiodg.exe) is boosted and added to 'targets' for later Revert.
+                ResolveDependencies(fgTid, targets.targets);
+
                 if (fgPid > 4 && ApplyForegroundShield_Impl(fgPid)) {
-                    // Record the target specifically so we can Revert (Unboost) it later
-                    targets.targets.clear(); // Clear generic targets
-                    targets.targets.push_back({fgPid, {0, 0}}); 
+                    // Add the main foreground window
+                    targets.targets.push_back({fgPid, {0, 0}});
+                    success = true;
+                } else if (!targets.targets.empty()) {
+                    // We successfully boosted a dependency even if the foreground app failed/was protected
                     success = true;
                 }
             }
-            break;
-        default:
             break;
     }
 
@@ -464,6 +483,35 @@ void Executor::SubmitActionResult(ActionResult result) {
         // back to the Brain here.
     } else {
         // Log("Executor: Action Success. CPU=" + std::to_string(result.actualCpuAfter));
+    }
+}
+
+void Executor::ResolveDependencies(DWORD rootThreadId, std::vector<ProcessIdentity>& boosted) {
+    if (!m_hWctSession || rootThreadId == 0) return;
+
+    WAITCHAIN_NODE_INFO NodeInfoArray[WCT_MAX_NODE_COUNT];
+    DWORD NodeCount = WCT_MAX_NODE_COUNT;
+    BOOL IsCycle = FALSE;
+
+    // Ask the Kernel: "Who is holding this thread?"
+    if (GetThreadWaitChain(m_hWctSession, NULL, 0, rootThreadId, &NodeCount, NodeInfoArray, &IsCycle)) {
+        for (DWORD i = 0; i < NodeCount; i++) {
+            if (NodeInfoArray[i].ObjectType == WctThreadType) {
+                DWORD blockerPid = NodeInfoArray[i].ThreadObject.ProcessId;
+                
+                // If it's a valid process (not System/Idle)
+                if (blockerPid > 4 && blockerPid != GetCurrentProcessId()) {
+                    
+                    // Apply Shield
+                    if (ApplyForegroundShield_Impl(blockerPid)) {
+                         Log("[WCT] Anti-Deadlock: Boosted dependency PID " + std::to_string(blockerPid));
+                         
+                         // Add to list so we can Revert (Unboost) it later
+                         boosted.push_back({blockerPid, {0, 0}});
+                    }
+                }
+            }
+        }
     }
 }
 

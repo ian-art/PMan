@@ -117,4 +117,10 @@ private:
     std::atomic<uint64_t> m_nextReceiptId{1};
     
     std::unique_ptr<ProcessScout> m_scout;
+    
+    // [ADD] Wait Chain Traversal (WCT) for Anti-Deadlock
+    // "X-Ray Vision" for thread dependencies
+    void* m_hWctSession = nullptr;
+    // Populates 'boosted' with any dependencies found and shielded
+    void ResolveDependencies(DWORD rootThreadId, std::vector<ProcessIdentity>& boosted);
 };
