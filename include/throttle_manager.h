@@ -63,9 +63,9 @@ private:
 
     // [FIX] Per-process Job Objects for granular CPU capping
     // Allows aggressive 5% Hard Cap vs Mild 40% Soft Cap
-    std::unordered_map<DWORD, HANDLE> m_processJobs;
+    std::unordered_map<DWORD, UniqueHandle> m_processJobs;
 
-    HANDLE m_hJob;
+    UniqueHandle m_hJob;
     std::mutex m_mtx;
     std::unordered_set<DWORD> m_managedPids;
     std::unordered_map<DWORD, DWORD> m_originalPriorities; // [FIX] Track original state (Source 1 Invariant)

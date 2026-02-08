@@ -36,13 +36,13 @@ ThrottleManager::~ThrottleManager() {
     if (m_hJob) {
         // Ensure limits are explicitly cleared before closing handle
         UpdateJobLimits(false); 
-        CloseHandle(m_hJob);
+        m_hJob.reset();
     }
 }
 
 void ThrottleManager::Initialize() {
     // Create an anonymous Job Object
-    m_hJob = CreateJobObject(nullptr, nullptr);
+    m_hJob.reset(CreateJobObject(nullptr, nullptr));
     if (!m_hJob) {
         Log("[THROTTLE] Failed to create Job Object. Adaptive Background Throttling is unavailable. Error: " + std::to_string(GetLastError()));
         return;
@@ -152,7 +152,7 @@ void ThrottleManager::ManageProcess(DWORD pid) {
         // 1. Permanently assign to Job Object (Cannot be removed, only limits changed)
         HANDLE hProc = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, pid);
         if (hProc) {
-            if (!AssignProcessToJobObject(m_hJob, hProc)) {
+            if (!AssignProcessToJobObject(m_hJob.get(), hProc)) {
                 // Common error: Process already in a job.
                 // We silently fail here because we can still manage it via Priority API.
             }
@@ -180,7 +180,7 @@ void ThrottleManager::UpdateJobLimits(bool enableThrottle) {
         cpuRate.ControlFlags = 0; 
     }
 
-    if (!SetInformationJobObject(m_hJob, JobObjectCpuRateControlInformation, &cpuRate, sizeof(cpuRate))) {
+    if (!SetInformationJobObject(m_hJob.get(), JobObjectCpuRateControlInformation, &cpuRate, sizeof(cpuRate))) {
         DWORD err = GetLastError();
         // [FIX] Ignore Error 87 (Invalid Parameter) regardless of enableThrottle state.
         // Since we are setting ControlFlags=0 in both cases (Safe Mode), 
@@ -208,18 +208,16 @@ void ThrottleManager::ApplyThrottle(DWORD pid, ThrottleLevel level) {
     HANDLE hJob = nullptr;
     auto jobIt = m_processJobs.find(pid);
     if (jobIt != m_processJobs.end()) {
-        hJob = jobIt->second;
+        hJob = jobIt->second.get();
     } else {
         // Create dedicated job for this process if implied by policy
         // Note: Processes can only be in one job unless nested jobs are used.
         // We assume we are the primary manager.
-        hJob = CreateJobObject(nullptr, nullptr);
-        if (hJob) {
-            if (AssignProcessToJobObject(hJob, hProcess)) {
-                m_processJobs[pid] = hJob;
-            } else {
-                CloseHandle(hJob); // Failed to assign
-                hJob = nullptr;
+        UniqueHandle newJob(CreateJobObject(nullptr, nullptr));
+        if (newJob) {
+            if (AssignProcessToJobObject(newJob.get(), hProcess)) {
+                hJob = newJob.get();
+                m_processJobs[pid] = std::move(newJob);
             }
         }
     }
@@ -351,9 +349,6 @@ void ThrottleManager::RestoreAll() {
     }
     
     // [FIX] Clean up granular Job Objects
-    for (auto& pair : m_processJobs) {
-        if (pair.second) CloseHandle(pair.second);
-    }
     m_processJobs.clear();
 
     m_managedPids.clear();
