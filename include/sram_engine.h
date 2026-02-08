@@ -29,6 +29,7 @@
 #include <cstdint>
 #include "responsiveness_provider.h"
 #include <memory> // Required for std::unique_ptr
+#include <vector>
 
 // Aligned for 16-byte atomic operations (CMPXCHG16B) to ensure lock-free readout
 struct alignas(16) LagStatus {
@@ -73,6 +74,13 @@ private:
     void* m_hPdhQuery = nullptr; // PdhQuery Handle
     void* m_hPdhCounter = nullptr; // Processor Queue Length
     double m_cpuQueueLength = 0.0;
+
+    // [ADD] Kernel Latency (DPC/ISR)
+    // "Ghost Latency" detector: High DPC blocks execution even if CPU Load is low.
+    void CollectDpcStats();
+    std::vector<uint8_t> m_prevProcInfo; // Previous snapshot for delta calc
+    double m_maxDpcPercent = 0.0;     // Highest single-core DPC usage
+    double m_maxIsrPercent = 0.0;     // Highest single-core ISR usage
 
     // --- Logic Engine ---
     void EvaluateState();

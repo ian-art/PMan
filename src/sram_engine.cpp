@@ -19,6 +19,7 @@
 
 #include "sram_engine.h"
 #include "logger.h"
+#include "nt_wrapper.h"
 #include <pdh.h>
 #include <dwmapi.h>
 
@@ -220,6 +221,59 @@ void SramEngine::CollectSystemPressure() {
     }
 }
 
+void SramEngine::CollectDpcStats() {
+    SYSTEM_INFO sysInfo;
+    GetSystemInfo(&sysInfo);
+    DWORD numProcs = sysInfo.dwNumberOfProcessors;
+    // Calculate required buffer size
+    ULONG bufferSize = sizeof(PMAN_SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION) * numProcs;
+    ULONG returnLength = 0;
+
+    // Initialize or Resize Buffer
+    if (m_prevProcInfo.size() < bufferSize) {
+        m_prevProcInfo.resize(bufferSize);
+        // First fetch to seed the delta (no calculation yet)
+        NtWrapper::QuerySystemInformation(SystemProcessorPerformanceInformation, m_prevProcInfo.data(), bufferSize, &returnLength);
+        return;
+    }
+
+    std::vector<uint8_t> currentProcInfo(bufferSize);
+    if (NT_SUCCESS(NtWrapper::QuerySystemInformation(SystemProcessorPerformanceInformation, currentProcInfo.data(), bufferSize, &returnLength))) {
+        
+        auto* pCurrent = reinterpret_cast<PMAN_SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION*>(currentProcInfo.data());
+        auto* pPrev = reinterpret_cast<PMAN_SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION*>(m_prevProcInfo.data());
+
+        double maxDpc = 0.0;
+        double maxIsr = 0.0;
+
+        for (DWORD i = 0; i < numProcs; i++) {
+            // Calculate Deltas
+            // Note: KernelTime includes IdleTime in this struct. 
+            // Total Time = UserTime + KernelTime.
+            uint64_t d_kernel = pCurrent[i].KernelTime.QuadPart - pPrev[i].KernelTime.QuadPart;
+            uint64_t d_user = pCurrent[i].UserTime.QuadPart - pPrev[i].UserTime.QuadPart;
+            uint64_t total = d_kernel + d_user;
+
+            if (total > 0) {
+                uint64_t d_dpc = pCurrent[i].DpcTime.QuadPart - pPrev[i].DpcTime.QuadPart;
+                uint64_t d_isr = pCurrent[i].InterruptTime.QuadPart - pPrev[i].InterruptTime.QuadPart;
+
+                double dpcPct = (double)d_dpc * 100.0 / total;
+                double isrPct = (double)d_isr * 100.0 / total;
+
+                if (dpcPct > maxDpc) maxDpc = dpcPct;
+                if (isrPct > maxIsr) maxIsr = isrPct;
+            }
+        }
+
+        m_maxDpcPercent = maxDpc;
+        m_maxIsrPercent = maxIsr;
+
+        // Update History
+        m_prevProcInfo = currentProcInfo;
+    }
+}
+
 float SramEngine::NormalizeMetric(float value, float minThreshold, float maxThreshold) {
     if (value <= minThreshold) return 0.0f;
     if (value >= maxThreshold) return 1.0f;
@@ -256,15 +310,18 @@ void SramEngine::EvaluateState() {
     // but raw values work for general "responsiveness" tuning.
     float n_cpu   = NormalizeMetric((float)m_cpuQueueLength, 2.0f, 16.0f);
 
+    // DPC Latency: >5% is noticeable, >10% is pressure, >20% is lagging.
+    float n_dpc   = NormalizeMetric((float)m_maxDpcPercent, 5.0f, 20.0f);
+
     // 3. Composite Scoring (Weighted Formula)
     float c_ui    = n_ui * 0.30f;
     float c_dwm   = n_dwm * 0.20f;
     float c_input = n_input * 0.20f;
     float c_cpu   = n_cpu * 0.15f;
+    float c_dpc   = n_dpc * 0.15f; // New 15% weight
     
-    // Normalize score to 0.0 - 1.0 range (Sum of weights is 0.85)
-    // This accounts for the unimplemented GPU/IO weight (0.15)
-    float score = (c_ui + c_dwm + c_input + c_cpu) / 0.85f;
+    // Normalize score to 0.0 - 1.0 range (Sum of weights is 1.0)
+    float score = (c_ui + c_dwm + c_input + c_cpu + c_dpc);
 
     // 4. Map to Raw State
     LagState rawState = LagState::SNAPPY;
@@ -325,6 +382,7 @@ void SramEngine::EvaluateState() {
         if (c_dwm > maxVal) { maxVal = c_dwm; culprit = "DWM Drops (" + std::to_string(dwmDelta) + ")"; }
         if (c_cpu > maxVal) { maxVal = c_cpu; culprit = "CPU Queue (" + std::to_string(m_cpuQueueLength) + ")"; }
         if (c_input > maxVal) { maxVal = c_input; culprit = "Input Delay"; }
+        if (c_dpc > maxVal) { maxVal = c_dpc; culprit = "DPC Latency (" + std::to_string(m_maxDpcPercent) + "%)"; }
 
         // Format score to 2 decimal places
         char scoreBuf[16];
@@ -398,6 +456,7 @@ void SramEngine::WorkerThread() {
                 CollectUiLatency();
                 CollectDwmStats();
                 CollectSystemPressure();
+                CollectDpcStats();
                 
                 // Run Logic Engine
                 EvaluateState();

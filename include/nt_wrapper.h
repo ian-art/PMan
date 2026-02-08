@@ -69,6 +69,21 @@ typedef struct _PROCESS_POWER_THROTTLING_STATE {
 #define PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION 0x4
 #endif
 
+// Processor Performance (DPC/ISR)
+#ifndef SystemProcessorPerformanceInformation
+#define SystemProcessorPerformanceInformation (SYSTEM_INFORMATION_CLASS)8
+#endif
+
+// We define a custom mapping to access the full kernel data.
+typedef struct _PMAN_SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION {
+    LARGE_INTEGER IdleTime;
+    LARGE_INTEGER KernelTime;
+    LARGE_INTEGER UserTime;
+    LARGE_INTEGER DpcTime;
+    LARGE_INTEGER InterruptTime;
+    ULONG InterruptCount;
+} PMAN_SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION, *PPMAN_SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION;
+
 // Timer Resolution
 #ifndef NT_SUCCESS
 #define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
