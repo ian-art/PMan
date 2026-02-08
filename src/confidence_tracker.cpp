@@ -23,8 +23,9 @@
 
 void ConfidenceTracker::RunningStat::Push(double x) {
     m_n++;
-    // [PATCH] Adaptive EMA: Forgets old history (approx last 20 samples relevant)
-    constexpr double alpha = 0.10; 
+    // [PATCH] Adaptive EMA: Reduced to 0.05 for stability (approx 40 samples history)
+    // This prevents confidence from fluctuating too wildly, making Policy tuning easier.
+    constexpr double alpha = 0.05; 
 
     if (m_n == 1.0) {
         m_newM = x;
