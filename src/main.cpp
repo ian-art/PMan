@@ -93,6 +93,9 @@
 // Force Linker to embed Manifest for Visual Styles (Required for TaskDialog)
 #pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
+// [PATCH] Forward Declaration for Tab Redirect
+namespace GuiManager { void OpenPolicyTab(); }
+
 // GLOBAL VARIABLE
 HINSTANCE g_hInst = nullptr;
 static UINT g_wmTaskbarCreated = 0;
@@ -347,7 +350,7 @@ static void RunAutonomousCycle() {
         Log("Abort: Provenance Ledger Unhealthy");
     }
 
-    // [NEW] Authority Budget & Pre-Execution Capture
+    // Authority Budget & Pre-Execution Capture
     int actionCost = 0;
     int budgetBefore = 0;
     bool budgetExhausted = false;
@@ -356,10 +359,23 @@ static void RunAutonomousCycle() {
         budgetBefore = ctx.subs.budget->GetUsed();
         bool rejectBudget = false;
         
+        // [PATCH] Budget Exhaustion Notification
+        static bool s_exhaustionNotified = false;
+
         if (ctx.subs.budget->IsExhausted()) {
+             if (!s_exhaustionNotified) {
+                 TrayAnimator::Get().ShowNotification(
+                     L"Authority Budget Exhausted", 
+                     L"The AI has reached its intervention limit. Click here to reset or adjust Policy.", 
+                     NIIF_WARNING
+                 );
+                 s_exhaustionNotified = true;
+             }
              rejectBudget = true;
              budgetExhausted = true;
         } else {
+             s_exhaustionNotified = false; // Reset state if budget is replenished
+             
              actionCost = ctx.subs.budget->GetCost(decision.selectedAction);
              if (!ctx.subs.budget->CanSpend(actionCost)) {
                  rejectBudget = true;
@@ -1029,7 +1045,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_TRAYICON:
-        if (lParam == WM_RBUTTONUP || lParam == WM_LBUTTONUP)
+        // [PATCH] Handle Balloon Click (NIN_BALLOONUSERCLICK = 0x0405)
+        if (lParam == 0x0405) {
+            // If budget is exhausted, redirect user to Policy tab
+            if (PManContext::Get().subs.budget && PManContext::Get().subs.budget->IsExhausted()) {
+                 GuiManager::OpenPolicyTab();
+            }
+        }
+        else if (lParam == WM_RBUTTONUP || lParam == WM_LBUTTONUP)
         {
             SetForegroundWindow(hwnd);
             

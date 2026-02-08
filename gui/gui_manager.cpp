@@ -61,6 +61,14 @@ namespace GuiManager {
     
     enum class GuiMode { TuneUp, About, Help, LogViewer, Config };
     static GuiMode g_activeMode = GuiMode::TuneUp;
+    
+    // [PATCH] Tab Navigation Request
+    static std::string g_requestedTab = "";
+
+    void OpenPolicyTab() {
+        ShowConfigWindow();
+        g_requestedTab = "Policy";
+    }
 
     // Config Window State
     struct ConfigState {
@@ -661,7 +669,14 @@ namespace GuiManager {
                     ImGui::EndTabItem();
                 }
 
-                if (ImGui::BeginTabItem("Policy")) {
+                // [PATCH] Auto-Select Policy Tab if requested
+                int polFlags = 0;
+                if (g_requestedTab == "Policy") {
+                    polFlags = ImGuiTabItemFlags_SetSelected;
+                    g_requestedTab = ""; // Consumed
+                }
+
+                if (ImGui::BeginTabItem("Policy", nullptr, polFlags)) {
                     BeginCard("pol", {0.14f, 0.10f, 0.10f, 1.0f});
                     
                     // [PATCH] Preset Buttons
