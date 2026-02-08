@@ -664,6 +664,32 @@ namespace GuiManager {
                 if (ImGui::BeginTabItem("Policy")) {
                     BeginCard("pol", {0.14f, 0.10f, 0.10f, 1.0f});
                     
+                    // [PATCH] Preset Buttons
+                    if (ImGui::Button("Safest Default", ImVec2(140, 32))) {
+                        g_configState.maxBudget = 150;
+                        g_configState.cpuVar = 0.005f; // Strict stability required
+                        g_configState.latVar = 0.010f;
+                        g_configState.allowThrottleMild = true;
+                        g_configState.allowThrottleAggressive = false;
+                        g_configState.allowOptimize = true;
+                        g_configState.allowSuspend = false;
+                        g_configState.allowPressure = false;
+                        g_configState.allowMaintain = true;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Fast Actions (Gamer)", ImVec2(160, 32))) {
+                        g_configState.maxBudget = 300;
+                        g_configState.cpuVar = 0.040f; // Allow jitter for speed
+                        g_configState.latVar = 0.050f;
+                        g_configState.allowThrottleMild = true;
+                        g_configState.allowThrottleAggressive = true;
+                        g_configState.allowOptimize = true;
+                        g_configState.allowSuspend = true;
+                        g_configState.allowPressure = true;
+                        g_configState.allowMaintain = true;
+                    }
+                    ImGui::Separator();
+
                     ImGui::InputInt("Authority Budget", &g_configState.maxBudget);
                     HelpMarker("Finite authority limit. Each action consumes budget.\nWhen exhausted, the system permanently reverts to Maintain until externally reset.");
 
