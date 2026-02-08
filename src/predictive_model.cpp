@@ -148,16 +148,19 @@ void PredictiveModel::Feedback(SystemMode mode, DominantPressure pressure, Allow
     double errDisk = actual.diskDelta - predicted.diskDelta;
     double errLat = actual.latencyRisk - predicted.latencyRisk;
     
+    // [PATCH] Fast-Start: Learn fast (0.35) for first 15 samples, then stabilize
+    double alpha = (stats.sampleCount < 15) ? 0.35 : LEARNING_RATE;
+
     // Update Mean Error (Exponential Moving Average)
-    stats.meanErrorCpu = (stats.meanErrorCpu * (1.0 - LEARNING_RATE)) + (errCpu * LEARNING_RATE);
-    stats.meanErrorDisk = (stats.meanErrorDisk * (1.0 - LEARNING_RATE)) + (errDisk * LEARNING_RATE);
-    stats.meanErrorLatency = (stats.meanErrorLatency * (1.0 - LEARNING_RATE)) + (errLat * LEARNING_RATE);
+    stats.meanErrorCpu = (stats.meanErrorCpu * (1.0 - alpha)) + (errCpu * alpha);
+    stats.meanErrorDisk = (stats.meanErrorDisk * (1.0 - alpha)) + (errDisk * alpha);
+    stats.meanErrorLatency = (stats.meanErrorLatency * (1.0 - alpha)) + (errLat * alpha);
     
     stats.sampleCount++;
     
     // Update Variance (Simplified L1 Norm)
     double totalError = std::abs(errCpu) + std::abs(errDisk) + std::abs(errLat);
-    stats.variance = (stats.variance * (1.0 - LEARNING_RATE)) + (totalError * LEARNING_RATE);
+    stats.variance = (stats.variance * (1.0 - alpha)) + (totalError * alpha);
     
     // Update Confidence (Inverse of Variance)
     // Base confidence 1.0, reduces as variance increases

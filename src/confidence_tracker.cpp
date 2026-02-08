@@ -23,22 +23,26 @@
 
 void ConfidenceTracker::RunningStat::Push(double x) {
     m_n++;
-    // Welford's Algorithm for streaming variance
-    if (m_n == 1.0) {
-        m_oldM = m_newM = x;
-        m_oldS = 0.0;
-    } else {
-        m_newM = m_oldM + (x - m_oldM) / m_n;
-        m_newS = m_oldS + (x - m_oldM) * (x - m_newM);
+    // [PATCH] Adaptive EMA: Forgets old history (approx last 20 samples relevant)
+    constexpr double alpha = 0.10; 
 
-        // Prepare for next iteration
-        m_oldM = m_newM;
-        m_oldS = m_newS;
+    if (m_n == 1.0) {
+        m_newM = x;
+        m_newS = 0.0;
+    } else {
+        double diff = x - m_newM;
+        double inc = alpha * diff;
+        m_newM += inc;
+        
+        // EMA Variance: (1-a)*Var + a*diff^2
+        // We reuse m_newS to store Variance directly instead of SumSq
+        m_newS = (1.0 - alpha) * m_newS + alpha * (diff * diff);
     }
 }
 
 double ConfidenceTracker::RunningStat::Variance() const {
-    return (m_n > 1.0) ? m_newS / (m_n - 1.0) : 0.0;
+    // [PATCH] m_newS now holds the EMA Variance directly
+    return m_newS;
 }
 
 void ConfidenceTracker::Observe(const PredictionError& error) {
