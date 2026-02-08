@@ -40,6 +40,10 @@ static void DetectAMDChipletTopology();
 static void DetectAMDFeatures();
 #endif
 
+#if defined(_M_ARM64)
+static void DetectARM64Features();
+#endif
+
 static void DetectCPUVendor()
 {
 #if defined(_M_ARM64)
@@ -70,6 +74,9 @@ static void DetectCPUVendor()
         {
             g_cpuInfo.brandString += " (Crypto Extensions)";
         }
+        
+        // ARM64 Extended Feature Detection
+        DetectARM64Features();
     }
 #elif defined(_M_AMD64) || defined(_M_IX86)
     int cpuInfo[4] = {0};
@@ -293,6 +300,55 @@ static void DetectAMDChipletTopology()
 }
 #endif
 
+#if defined(_M_ARM64)
+static void DetectARM64Features()
+{
+    // 1. Detect Atomic Instructions (LSE) - Critical for lock-free perf
+    if (IsProcessorFeaturePresent(PF_ARM_V81_ATOMIC_INSTRUCTIONS_AVAILABLE)) {
+        g_cpuInfo.hasLSE = true;
+    }
+
+    // 2. Detect Scalable Vector Extensions (SVE)
+    // Note: Constants might be missing in older SDKs. 
+    // PF_ARM_SVE_INSTRUCTIONS_AVAILABLE is typically 46.
+#ifdef PF_ARM_SVE_INSTRUCTIONS_AVAILABLE
+    if (IsProcessorFeaturePresent(PF_ARM_SVE_INSTRUCTIONS_AVAILABLE)) {
+        g_cpuInfo.hasSVE = true;
+    }
+#endif
+
+    // 3. Topology & Cluster Detection (L3 Cache Groups)
+    DWORD bufferSize = 0;
+    if (!GetLogicalProcessorInformationEx(RelationCache, nullptr, &bufferSize) && 
+        GetLastError() == ERROR_INSUFFICIENT_BUFFER) 
+    {
+        std::vector<BYTE> buffer(bufferSize);
+        auto* info = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buffer.data());
+        
+        if (GetLogicalProcessorInformationEx(RelationCache, info, &bufferSize)) 
+        {
+            BYTE* ptr = buffer.data();
+            BYTE* end = buffer.data() + bufferSize;
+            
+            while (ptr < end) 
+            {
+                auto* current = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(ptr);
+                
+                // On ARM64 SoCs, L3 (or sometimes L2) defines the "Cluster"
+                // Do not assume L3 is present; check highest available level > 1.
+                if (current->Cache.Level >= 2) 
+                {
+                    // Logic to map shared caches could go here to identify clusters.
+                    // For now, we rely on EfficiencyClass in DetectHybridCoreSupport
+                    // as that is more reliable for PMan's scheduling needs on Windows on ARM.
+                }
+                ptr += current->Size;
+            }
+        }
+    }
+}
+#endif
+
 bool DetectIoPrioritySupport()
 {
     // Test if we can actually set I/O priority on this system
@@ -436,9 +492,19 @@ void DetectHybridCoreSupport()
             
             if (g_cpuInfo.vendor == CPUVendor::ARM64)
             {
-                // ARM: Class 0 = Efficiency (Silver), Class 1+ = Performance/Prime
-                if (effClass == 0) eCores.push_back(cpuSetId);
-                else pCores.push_back(cpuSetId);
+                // ARM: Class 0 = Efficiency (Silver), Class 1 = Performance (Gold), Class 2+ = Prime (X-Core)
+                if (effClass == 0) {
+                    eCores.push_back(cpuSetId);
+                }
+                else if (effClass == 1) {
+                    pCores.push_back(cpuSetId);
+                }
+                else {
+                    // Prime Cores (Cortex-X series)
+                    g_cpuInfo.primeCoreSets.push_back(cpuSetId);
+                    // Add to P-cores as well for fallback logic compatibility
+                    pCores.push_back(cpuSetId);
+                }
             }
             else
             {
@@ -460,6 +526,10 @@ void DetectHybridCoreSupport()
         
         Log("[HYBRID] CPU has " + std::to_string(g_pCoreSets.size()) + 
             " P-cores and " + std::to_string(g_eCoreSets.size()) + " E-cores detected");
+
+        if (g_cpuInfo.vendor == CPUVendor::ARM64 && !g_cpuInfo.primeCoreSets.empty()) {
+             Log("[ARM64] Prime Cores (Cortex-X) detected: " + std::to_string(g_cpuInfo.primeCoreSets.size()));
+        }
     }
     else
     {
@@ -773,9 +843,19 @@ void DetectOSCapabilities()
             USHORT processMachine = 0, nativeMachine = 0;
             if (pIsWow64Process2(GetCurrentProcess(), &processMachine, &nativeMachine)) {
                 // IMAGE_FILE_MACHINE_ARM64 = 0xAA64, IMAGE_FILE_MACHINE_AMD64 = 0x8664
-                if (nativeMachine == 0xAA64 && processMachine == 0x8664) {
-                    Log("[ARM64] x64 emulation (Prism) detected - enabling aggressive isolation");
-                    g_caps.isPrismEmulated = true;
+                // IMAGE_FILE_MACHINE_ARM64EC = 0xA641
+                if (nativeMachine == 0xAA64) {
+                    if (processMachine == 0x8664) {
+                        Log("[ARM64] x64 emulation (Prism) detected - enabling aggressive isolation");
+                        g_caps.isPrismEmulated = true;
+                    }
+                }
+                
+                // Handle Arm64EC (Emulation Compatible)
+                // Treat as native for affinity but acknowledge potential overhead
+                if (nativeMachine == 0xA641 || processMachine == 0xA641) {
+                     Log("[ARM64] Arm64EC process detected - Treating as Hybrid Native");
+                     g_caps.isPrismEmulated = false;
                 }
             }
         }

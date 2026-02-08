@@ -205,10 +205,15 @@ struct CPUInfo
     DWORD coresPerCcd;       // Cores per chiplet
     std::vector<ULONG> ccd0CoreSets;  // CCD0 (with 3D V-Cache if present)
     std::vector<ULONG> ccd1CoreSets;  // CCD1+ (no 3D V-Cache)
-    
+
+    // ARM64-specific
+    bool hasLSE;            // Large System Extensions (Atomics)
+    bool hasSVE;            // Scalable Vector Extensions
+    std::vector<ULONG> primeCoreSets; // ARM64 Cortex-X (Class 2+)
+
     CPUInfo() : vendor(CPUVendor::Unknown), hasAVX(false), hasAVX2(false), 
                 hasAVX512(false), hasAmd3DVCache(false), hasZen3Plus(false),
-                ccdCount(0), coresPerCcd(0) {}
+                ccdCount(0), coresPerCcd(0), hasLSE(false), hasSVE(false) {}
 };
 
 // Capabilities structure
