@@ -38,6 +38,7 @@
 #include <cguid.h> // Required for GUID_NULL
 #pragma comment(lib, "Psapi.lib")
 #pragma comment(lib, "PowrProf.lib")
+#pragma comment(lib, "Advapi32.lib") // Required for QueryAllTraces
 
 // =========================================================
 // RAII IMPLEMENTATIONS (Derived from implement_this.txt)
@@ -373,12 +374,56 @@ GameProfile PerformanceGuardian::GetProfile(const std::wstring& exeName) {
     return GameProfile(); // Default
 }
 
+// Local State for ETW Safety
+// We track disabled sessions locally to avoid changing the header file dependencies.
+static std::mutex g_etwSafetyMtx;
+static std::unordered_set<DWORD> g_etwDisabledPids;
+
+static bool IsEtwCongested() {
+    const ULONG MAX_SESSIONS = 64;
+    // QueryAllTraces requires an array of pointers to structs
+    std::vector<PEVENT_TRACE_PROPERTIES> pointers(MAX_SESSIONS);
+    // Structs + 1024 bytes for names
+    const size_t STRUCT_SIZE = sizeof(EVENT_TRACE_PROPERTIES) + 1024;
+    std::vector<BYTE> data(MAX_SESSIONS * STRUCT_SIZE);
+    
+    for (ULONG i = 0; i < MAX_SESSIONS; ++i) {
+        pointers[i] = reinterpret_cast<PEVENT_TRACE_PROPERTIES>(&data[i * STRUCT_SIZE]);
+        pointers[i]->Wnode.BufferSize = static_cast<ULONG>(STRUCT_SIZE);
+        pointers[i]->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
+        pointers[i]->LogFileNameOffset = sizeof(EVENT_TRACE_PROPERTIES) + 512;
+    }
+    
+    ULONG sessionCount = 0;
+    if (QueryAllTracesW(pointers.data(), MAX_SESSIONS, &sessionCount) == ERROR_SUCCESS) {
+        // Context switching explodes with high-frequency sessions
+        // If we see > 10 sessions, the system is already heavily instrumented.
+        if (sessionCount > 10) {
+            Log("[ETW] Safety Limit: High tracing load detected (" + std::to_string(sessionCount) + " sessions). Frame analysis disabled.");
+            return true;
+        }
+    }
+    return false;
+}
+
 void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     // Safety & Context Awareness (Laptop Saver)
     PowerMonitorGuard powerMonitor;
     if (powerMonitor.IsOnBattery()) {
         Log("[PERF] Battery detected. Optimizations ABORTED for " + WideToUtf8(exeName.c_str()));
         return;
+    }
+
+    // ETW Congestion Check
+    // We check this ONCE at startup. If the system is overloaded, we disable 
+    // frame analysis for this session to prevent destabilization.
+    {
+        std::lock_guard lock(g_etwSafetyMtx);
+        if (IsEtwCongested()) {
+            g_etwDisabledPids.insert(pid);
+        } else {
+            g_etwDisabledPids.erase(pid);
+        }
     }
 
     std::lock_guard lock(m_mtx);
@@ -571,8 +616,38 @@ void PerformanceGuardian::OnPerformanceTick() {
         // Optimizer runs in main loop, not here.
     }
 
-    std::lock_guard lock(m_mtx);
+std::lock_guard lock(m_mtx);
     uint64_t now = GetTickCount64();
+
+    // Global Background App Throttling
+    // Moved outside the per-session loop to ensure it runs exactly once per tick.
+    if (!m_sessions.empty()) {
+        static uint64_t lastAppSilence = 0;
+        if (now - lastAppSilence > 10000) { // Every 10 seconds
+            
+            // 1. Capture Active Game PIDs to prevent self-throttling
+            std::vector<DWORD> activeGamePids;
+            for (const auto& s : m_sessions) activeGamePids.push_back(s.first);
+
+            // 2. Enforce Polling Limits on Background Apps
+            ForEachProcess([activeGamePids](const PROCESSENTRY32W& pe) {
+                // Safety: NEVER throttle the active game(s)
+                for (DWORD gamePid : activeGamePids) {
+                    if (pe.th32ProcessID == gamePid) return;
+                }
+
+                std::wstring name = pe.szExeFile;
+                asciiLower(name);
+                
+                // Use Configurable List
+                // Discord/Spotify are now in GetDefaultBrowsers() in config.cpp
+                if (g_browsers.count(name)) {
+                    SetBackgroundPowerPolicy(pe.th32ProcessID, true);
+                }
+            });
+            lastAppSilence = now;
+        }
+    }
 
     // Global rate limit: Max 1 CPU estimation per tick to save resources
     static uint64_t lastGlobalEst = 0;
@@ -592,22 +667,7 @@ void PerformanceGuardian::OnPerformanceTick() {
             allowEst = false;    // Only one per tick
         }
 
-        // Silence polling background apps when a game is active
-    if (!m_sessions.empty()) {
-        static uint64_t lastAppSilence = 0;
-        if (now - lastAppSilence > 10000) { // Every 10 seconds
-            ForEachProcess([](const PROCESSENTRY32W& pe) {
-                std::wstring name = pe.szExeFile;
-                asciiLower(name);
-                
-                // Only target known "poller" apps that are NOT the current game
-                if (g_browsers.count(name) || name == L"discord.exe" || name == L"spotify.exe") {
-                    SetBackgroundPowerPolicy(pe.th32ProcessID, true);
-                }
-            });
-            lastAppSilence = now;
-        }
-    }
+        // [MOVED] Background silencing logic moved to global scope above for safety
 
     // 2. Stutter Analysis (Emergency Response)
     if (now - session.lastAnalysisTime > 2000) {
@@ -633,6 +693,11 @@ void PerformanceGuardian::OnPerformanceTick() {
 }
 
 void PerformanceGuardian::OnGameStop(DWORD pid) {
+    {
+        std::lock_guard lock(g_etwSafetyMtx);
+        g_etwDisabledPids.erase(pid);
+    }
+
     std::lock_guard lock(m_mtx);
     auto it = m_sessions.find(pid);
     if (it != m_sessions.end()) {
@@ -663,6 +728,12 @@ void PerformanceGuardian::OnGameStop(DWORD pid) {
 }
 
 void PerformanceGuardian::OnPresentEvent(DWORD pid, uint64_t timestamp) {
+    // Circuit Breaker
+    {
+        std::lock_guard lock(g_etwSafetyMtx);
+        if (g_etwDisabledPids.count(pid)) return;
+    }
+
     std::lock_guard lock(m_mtx);
     auto it = m_sessions.find(pid);
     if (it == m_sessions.end()) return;
