@@ -665,9 +665,14 @@ namespace GuiManager {
                     BeginCard("pol", {0.14f, 0.10f, 0.10f, 1.0f});
                     
                     // [PATCH] Preset Buttons
-                    if (ImGui::Button("Safest Default", ImVec2(140, 32))) {
+                    // Dynamic layout: Calculates exact width to fit 5 buttons in one row
+                    float availW = ImGui::GetContentRegionAvail().x;
+                    float gap = ImGui::GetStyle().ItemSpacing.x;
+                    float btnW = (availW - (gap * 4.0f)) / 5.0f;
+
+                    if (ImGui::Button("Safest", ImVec2(btnW, 32))) {
                         g_configState.maxBudget = 150;
-                        g_configState.cpuVar = 0.005f; // Strict stability required
+                        g_configState.cpuVar = 0.005f;
                         g_configState.latVar = 0.010f;
                         g_configState.allowThrottleMild = true;
                         g_configState.allowThrottleAggressive = false;
@@ -677,10 +682,46 @@ namespace GuiManager {
                         g_configState.allowMaintain = true;
                     }
                     ImGui::SameLine();
-                    if (ImGui::Button("Fast Actions (Gamer)", ImVec2(160, 32))) {
+                    if (ImGui::Button("Balanced", ImVec2(btnW, 32))) {
+                        g_configState.maxBudget = 225;
+                        g_configState.cpuVar = 0.020f;
+                        g_configState.latVar = 0.030f;
+                        g_configState.allowThrottleMild = true;
+                        g_configState.allowThrottleAggressive = true;
+                        g_configState.allowOptimize = true;
+                        g_configState.allowSuspend = false;
+                        g_configState.allowPressure = false;
+                        g_configState.allowMaintain = true;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Gamer", ImVec2(btnW, 32))) {
                         g_configState.maxBudget = 300;
-                        g_configState.cpuVar = 0.040f; // Allow jitter for speed
+                        g_configState.cpuVar = 0.040f;
                         g_configState.latVar = 0.050f;
+                        g_configState.allowThrottleMild = true;
+                        g_configState.allowThrottleAggressive = true;
+                        g_configState.allowOptimize = true;
+                        g_configState.allowSuspend = true;
+                        g_configState.allowPressure = true;
+                        g_configState.allowMaintain = true;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Insomnia", ImVec2(btnW, 32))) {
+                        g_configState.maxBudget = 500;
+                        g_configState.cpuVar = 0.20f;
+                        g_configState.latVar = 0.25f;
+                        g_configState.allowThrottleMild = true;
+                        g_configState.allowThrottleAggressive = true;
+                        g_configState.allowOptimize = true;
+                        g_configState.allowSuspend = true;
+                        g_configState.allowPressure = true;
+                        g_configState.allowMaintain = true;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Tetris", ImVec2(btnW, 32))) {
+                        g_configState.maxBudget = 1000;
+                        g_configState.cpuVar = 0.80f;
+                        g_configState.latVar = 0.85f;
                         g_configState.allowThrottleMild = true;
                         g_configState.allowThrottleAggressive = true;
                         g_configState.allowOptimize = true;
@@ -693,10 +734,16 @@ namespace GuiManager {
                     ImGui::InputInt("Authority Budget", &g_configState.maxBudget);
                     HelpMarker("Finite authority limit. Each action consumes budget.\nWhen exhausted, the system permanently reverts to Maintain until externally reset.");
 
-                    ImGui::InputFloat("CPU Variance", &g_configState.cpuVar, 0.001f, 0.01f, "%.4f");
+                    // [PATCH] Enforce Safety Limits (0.1% to 100%)
+                    // Min 0.001 ensures the AI isn't permanently frozen by impossible standards.
+                    ImGui::InputFloat("CPU Variance", &g_configState.cpuVar, 0.005f, 0.01f, "%.3f");
+                    if (g_configState.cpuVar > 1.0f) g_configState.cpuVar = 1.0f;
+                    if (g_configState.cpuVar < 0.001f) g_configState.cpuVar = 0.001f;
                     HelpMarker("Confidence threshold. Lower values require more predictable\nCPU behavior before actions are allowed.");
 
-                    ImGui::InputFloat("Latency Variance", &g_configState.latVar, 0.001f, 0.01f, "%.4f");
+                    ImGui::InputFloat("Latency Variance", &g_configState.latVar, 0.005f, 0.01f, "%.3f");
+                    if (g_configState.latVar > 1.0f) g_configState.latVar = 1.0f;
+                    if (g_configState.latVar < 0.001f) g_configState.latVar = 0.001f;
                     HelpMarker("Confidence threshold for latency prediction.\nHigh variance disables authority regardless of intent.");
 
                     ImGui::Separator();
@@ -708,7 +755,8 @@ namespace GuiManager {
                     //ImGui::BeginDisabled();
                     ImGui::Checkbox("Stability (Inaction)", &g_configState.allowMaintain);
                     //ImGui::EndDisabled();
-                    HelpMarker("The 'Do Nothing' choice. Required for stability. Without this, the\nAI would be forced to constantly intervene, causing jitter.\nBut if you want a Maximum Responsiveness, try to toggle off");
+                    // [PATCH] Corrected description: Disabling 'Maintain' causes syscall spam, reducing performance.
+                    HelpMarker("The 'Do Nothing' choice. Required for stability. Without this, the\nAI is forced to constantly intervene, wasting CPU cycles on unnecessary API calls.\nWARNING: Unchecking this will likely INCREASE input lag.");
 
                     ImGui::Checkbox("Throttle (Mild)", &g_configState.allowThrottleMild);
                     HelpMarker("Allows mild, reversible priority reduction.\nSubject to policy, verdict, confidence, and budget.");
@@ -726,37 +774,53 @@ namespace GuiManager {
                     HelpMarker("Emergency action category. Rarely permitted and strictly audited.");
 
                     if (ImGui::Button("Apply Policy", ImVec2(140, 32))) {
-                        PolicyLimits limits;
-                        limits.maxAuthorityBudget = g_configState.maxBudget;
-                        limits.minConfidence.cpuVariance = g_configState.cpuVar;
-                        limits.minConfidence.latencyVariance = g_configState.latVar;
-                        
-                        if (g_configState.allowThrottleMild) limits.allowedActions.insert((int)BrainAction::Throttle_Mild);
-                        if (g_configState.allowThrottleAggressive) limits.allowedActions.insert((int)BrainAction::Throttle_Aggressive);
-                        
-                        if (g_configState.allowMaintain) limits.allowedActions.insert((int)BrainAction::Maintain);
+                        bool proceed = true;
 
-                        if (g_configState.allowOptimize) {
-                             limits.allowedActions.insert((int)BrainAction::Optimize_Memory);
-                             limits.allowedActions.insert((int)BrainAction::Optimize_Memory_Gentle);
-                        }
-                        if (g_configState.allowSuspend) limits.allowedActions.insert((int)BrainAction::Suspend_Services);
-                        if (g_configState.allowPressure) {
-                            limits.allowedActions.insert((int)BrainAction::Release_Pressure);
-                            limits.allowedActions.insert((int)BrainAction::Shield_Foreground);
+                        // [PATCH] Safety Warning for Max Variance
+                        if (g_configState.cpuVar >= 0.99f || g_configState.latVar >= 0.99f) {
+                            if (MessageBoxW(g_hwnd, 
+                                L"DANGER: You are setting Variance to 100% (1.0).\n\n"
+                                L"This effectively DISABLES the stability governor. "
+                                L"The AI will make changes even during extreme lag or CPU spikes.\n\n"
+                                L"Are you sure you want to remove these safety rails?", 
+                                L"PMan Policy Warning", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
+                                proceed = false;
+                            }
                         }
 
-                        // [FIX] Implicitly Allow Core Actions (Boost)
-                        // Boost is required for the Governor but hidden from simple toggles to prevent user error
-                        limits.allowedActions.insert((int)BrainAction::Boost_Process);
-                        
-                        // Ensure Maintain is present if user checked it (redundant safety)
-                        if (g_configState.allowMaintain) limits.allowedActions.insert((int)BrainAction::Maintain);
-                        
-                        // Save Policy
-                        if (PManContext::Get().subs.policy) {
-                            PManContext::Get().subs.policy->Save(GetLogPath() / L"policy.json", limits);
-                            g_reloadNow.store(true); // Trigger hot-reload
+                        if (proceed) {
+                            PolicyLimits limits;
+                            limits.maxAuthorityBudget = g_configState.maxBudget;
+                            limits.minConfidence.cpuVariance = g_configState.cpuVar;
+                            limits.minConfidence.latencyVariance = g_configState.latVar;
+                            
+                            if (g_configState.allowThrottleMild) limits.allowedActions.insert((int)BrainAction::Throttle_Mild);
+                            if (g_configState.allowThrottleAggressive) limits.allowedActions.insert((int)BrainAction::Throttle_Aggressive);
+                            
+                            if (g_configState.allowMaintain) limits.allowedActions.insert((int)BrainAction::Maintain);
+
+                            if (g_configState.allowOptimize) {
+                                limits.allowedActions.insert((int)BrainAction::Optimize_Memory);
+                                limits.allowedActions.insert((int)BrainAction::Optimize_Memory_Gentle);
+                            }
+                            if (g_configState.allowSuspend) limits.allowedActions.insert((int)BrainAction::Suspend_Services);
+                            if (g_configState.allowPressure) {
+                                limits.allowedActions.insert((int)BrainAction::Release_Pressure);
+                                limits.allowedActions.insert((int)BrainAction::Shield_Foreground);
+                            }
+
+                            // [FIX] Implicitly Allow Core Actions (Boost)
+                            // Boost is required for the Governor but hidden from simple toggles to prevent user error
+                            limits.allowedActions.insert((int)BrainAction::Boost_Process);
+                            
+                            // Ensure Maintain is present if user checked it (redundant safety)
+                            if (g_configState.allowMaintain) limits.allowedActions.insert((int)BrainAction::Maintain);
+                            
+                            // Save Policy
+                            if (PManContext::Get().subs.policy) {
+                                PManContext::Get().subs.policy->Save(GetLogPath() / L"policy.json", limits);
+                                g_reloadNow.store(true); // Trigger hot-reload
+                            }
                         }
                     }
 
