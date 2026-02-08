@@ -1847,12 +1847,14 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                         PManContext::Get().subs.policy->Load(GetLogPath() / L"policy.json");
                     }
                     
-                    // [RECOVERY] Reset Budget on External Signal (Config Reload)
+                    // [RECOVERY] Sync Budget Cap (But do NOT reset usage)
+                    // Changing config.ini (games/apps) should not grant budget amnesty.
+                    // Only a Policy change (maxAuthorityBudget) should affect the ceiling.
                     if (PManContext::Get().subs.budget) {
                         if (PManContext::Get().subs.policy) {
                             PManContext::Get().subs.budget->SetMax(PManContext::Get().subs.policy->GetLimits().maxAuthorityBudget);
                         }
-                        PManContext::Get().subs.budget->ResetByExternalSignal();
+                        // REMOVED: PManContext::Get().subs.budget->ResetByExternalSignal();
                     }
                 });
             }
