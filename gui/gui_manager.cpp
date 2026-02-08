@@ -779,6 +779,12 @@ namespace GuiManager {
                     BeginCard("lists", {0.14f, 0.14f, 0.16f, 1.0f});
 
                     ImGui::TextDisabled("Manage Process Lists");
+                    HelpMarker("Here you can categorize your applications to ensure they get the correct optimization strategy:\n\n"
+                        "- Games: Assigned High Priority and fixed short quantum (0x28) for maximum frame stability.\n"
+                        "- Browsers: Assigned Above Normal priority and variable quantum (0x26) for responsiveness.\n"
+                        "- Video Players: Boosted to prevent playback stuttering.\n"
+                        "- Custom Launchers: Treated as background noise (Low Priority) to save CPU for the actual game.\n"
+                        "- Ignored Processes: System components that PMan should never touch or modify.");
                     ImGui::Separator();
                     ImGui::Spacing();
 
@@ -790,11 +796,9 @@ namespace GuiManager {
                     ImGui::Separator();
                     ImGui::Spacing();
 
-                    if (ImGui::Button("Edit Custom Launchers", ImVec2(-1, 32))) EditorManager::OpenFile(CUSTOM_LAUNCHERS_FILENAME);
-                    HelpMarker("Apps listed here are treated as Background Launchers (Low Priority).");
-
-                    if (ImGui::Button("Edit Ignored Processes", ImVec2(-1, 32))) EditorManager::OpenFile(IGNORED_PROCESSES_FILENAME);
-                    HelpMarker("System processes listed here are ignored by the optimization engine.");
+                    // [FIX] Redirect to config.ini sections instead of opening orphan files
+                    if (ImGui::Button("Edit Custom Launchers", ImVec2(-1, 32))) EditorManager::OpenConfigAtSection(L"[custom_launchers]");
+                    if (ImGui::Button("Edit Ignored Processes", ImVec2(-1, 32))) EditorManager::OpenConfigAtSection(L"[ignored_processes]");
 
                     EndCard();
                     ImGui::EndTabItem();

@@ -121,6 +121,7 @@ namespace EditorManager {
                 std::transform(lowerEditor.begin(), lowerEditor.end(), lowerEditor.begin(), ::towlower);
 
                 if (lowerEditor.find(L"notepad++.exe") != std::wstring::npos) {
+                    // [FIX] Ensure space between flag and filename, and support npp's specific line format
                     params = L"-n" + std::to_wstring(jumpToLine) + L" \"" + path.wstring() + L"\"";
                 } else if (lowerEditor.find(L"code.exe") != std::wstring::npos) {
                     params = L"-g \"" + path.wstring() + L":" + std::to_wstring(jumpToLine) + L"\"";
