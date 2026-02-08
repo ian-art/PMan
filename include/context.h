@@ -63,6 +63,7 @@ class AuthorityBudget;   // Cumulative Cost Limiter
 class ProvenanceLedger;  // Decision Provenance
 class PolicyGuard;       // Policy Boundary Contract
 class ExternalVerdict;   // External Verdict Interface
+class Investigator;      // The System Detective
 
 class PManContext {
 public:
@@ -257,6 +258,7 @@ public:
         std::unique_ptr<ProvenanceLedger>      provenance;// Post-Hoc Justification
         std::unique_ptr<PolicyGuard>           policy;    // Policy Boundary Contract
         std::unique_ptr<ExternalVerdict>       verdict;   // External Verdict Interface
+        std::unique_ptr<Investigator>          investigator; // The System Detective
     } subs;
 
 private:

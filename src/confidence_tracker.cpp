@@ -68,3 +68,16 @@ ConfidenceMetrics ConfidenceTracker::GetMetrics() const {
         m_latencyStat.Variance()
     };
 }
+
+// [INVESTIGATOR] Forcefully restore confidence after a False Alarm
+void ConfidenceTracker::ForceConfidence(double amount) {
+    // Reset variances to 0 (or reduce them significantly) to represent "Clear Skies"
+    // Since we use Welford's algorithm, we can't easily "subtract" variance.
+    // Instead, we re-initialize the stats if the boost is absolute (1.0).
+    
+    if (amount >= 1.0) {
+        m_cpuStat = RunningStat();
+        m_thermalStat = RunningStat();
+        m_latencyStat = RunningStat();
+    }
+}

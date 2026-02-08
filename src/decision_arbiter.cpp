@@ -20,6 +20,8 @@
 #include "decision_arbiter.h"
 #include "utils.h" // For time helpers if needed
 #include "constants.h"
+#include "context.h"
+#include "investigator.h"
 #include <unordered_set> // [FIX] Required for policyAllowedActions
 
 ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence, const ConfidenceMetrics& confidence, const std::unordered_set<int>& policyAllowedActions) {
@@ -54,8 +56,38 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
              confidence.thermalVariance > MAX_THERM_VARIANCE ||
              confidence.latencyVariance > MAX_LAT_VARIANCE ||
              consequence.confidence < CONFIDENCE_MIN) {
-        confReject = true;
-        rejectReason = DecisionReason::LowConfidence;
+        
+        // [INVESTIGATOR] The System Detective Trigger
+        // Before failing closed due to low confidence, summon the Investigator.
+        auto& investigator = PManContext::Get().subs.investigator;
+        bool investigationResolved = false;
+
+        if (investigator) {
+            InvestigationVerdict verdict = investigator->Diagnose(govDecision);
+            
+            if (verdict.resolved) {
+                // If the Investigator cleared the confusion (e.g., Aliasing detected),
+                // we override the confidence rejection.
+                if (verdict.recommendVeto) {
+                    // Recommendation: Do Nothing (False Alarm)
+                    // We treat this as "NoActionNeeded" rather than "LowConfidence" failure.
+                    decision.selectedAction = BrainAction::Maintain;
+                    decision.reason = DecisionReason::NoActionNeeded; // "False Alarm" effectively
+                    decision.decisionTime = GetTickCount64();
+                    return decision; // Return immediately
+                } else {
+                    // Recommendation: Proceed (True Pressure Confirmed)
+                    investigationResolved = true;
+                    // Note: Ideally we update the ConfidenceTracker here via PManContext
+                    // PManContext::Get().subs.confidence->ForceConfidence(verdict.confidenceBoost);
+                }
+            }
+        }
+
+        if (!investigationResolved) {
+            confReject = true;
+            rejectReason = DecisionReason::LowConfidence;
+        }
     }
     // C. Cooldown Rules (Only check if we actually have an intent)
     else if (intentAction != BrainAction::Maintain && !CheckCooldown(intentAction, rejectReason)) {

@@ -37,6 +37,9 @@ public:
     // Accessor for current statistical state.
     ConfidenceMetrics GetMetrics() const;
 
+    // Forcefully inject confidence (used by Investigator)
+    void ForceConfidence(double amount);
+
 private:
     struct RunningStat {
         double m_n = 0.0;

@@ -360,6 +360,7 @@ struct GovernorDecision {
     SystemMode mode;
     DominantPressure dominant;
     AllowedActionClass allowedActions;
+    DWORD targetPid = 0; // The primary process being targeted/evaluated
 };
 
 // BrainAction Enum (Fixed & Auditable)
@@ -368,7 +369,7 @@ enum class BrainAction : uint8_t {
     Throttle_Mild,
     Throttle_Aggressive,
     Optimize_Memory,
-    Optimize_Memory_Gentle, // [NEW] Soft trim (skip small processes)
+    Optimize_Memory_Gentle, // Soft trim (skip small processes)
     Suspend_Services,
     Release_Pressure,
     Shield_Foreground, // [DCM] Universal Foreground Shielding (Boost FG + IO)

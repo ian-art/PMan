@@ -41,6 +41,7 @@
 #include "provenance_ledger.h"
 #include "policy_contract.h"
 #include "external_verdict.h"
+#include "investigator.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -68,6 +69,7 @@ PManContext::PManContext() {
     subs.provenance = std::make_unique<ProvenanceLedger>();
     subs.policy     = std::make_unique<PolicyGuard>();
     subs.verdict    = std::make_unique<ExternalVerdict>();
+    subs.investigator = std::make_unique<Investigator>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)
