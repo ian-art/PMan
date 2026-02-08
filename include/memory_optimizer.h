@@ -49,6 +49,11 @@ public:
     // One-Shot Trigger
     void PerformSmartTrim(const std::vector<DWORD>& targets, TrimIntensity intensity);
 
+    // Memory Shield
+    // Locks the target process's working set into RAM, preventing the OS from paging it out
+    // during Alt-Tab or high memory pressure.
+    void HardenProcess(DWORD pid);
+
 private:
     struct ProcessState {
         std::chrono::steady_clock::time_point lastTrimTime;

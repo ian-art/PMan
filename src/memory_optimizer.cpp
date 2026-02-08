@@ -69,13 +69,43 @@ void MemoryOptimizer::Shutdown() {
     }
 }
 
+// [SUPERIOR] Implementation
+void MemoryOptimizer::HardenProcess(DWORD pid) {
+    HANDLE hProc = OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc) return;
+
+    PROCESS_MEMORY_COUNTERS pmc;
+    if (GetProcessMemoryInfo(hProc, (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+        // We set the Minimum Working Set to the current usage, and Enable the "Hard Limit".
+        // This tells the OS: "Under no circumstances should you trim this process below this amount."
+        // We leave Maximum as -1 (Unlimited).
+        SIZE_T current = pmc.WorkingSetSize;
+        
+        // Safety: Only harden if the game has loaded significant assets (>200MB)
+        if (current > 200 * 1024 * 1024) {
+            // QUOTA_LIMITS_HARDWS_MIN_ENABLE = 0x1 (Defined in types.h)
+            // This flag is the "Magic Shield" that prevents paging.
+            SetProcessWorkingSetSizeEx(hProc, current, (SIZE_T)-1, QUOTA_LIMITS_HARDWS_MIN_ENABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE);
+            
+            // Log only once per process/session to avoid spam
+            static DWORD lastHardenedPid = 0;
+            if (lastHardenedPid != pid) {
+                Log("[MEMOPT] HARDENED Process " + std::to_string(pid) + ". Memory is now PINNED to RAM.");
+                lastHardenedPid = pid;
+            }
+        }
+    }
+    CloseHandle(hProc);
+}
+
 void MemoryOptimizer::EnablePrivileges() {
     HANDLE hToken;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) 
         return;
 
     // We need SeProfileSingleProcessPrivilege to purge the Standby List
-    const wchar_t* privileges[] = { L"SeDebugPrivilege", L"SeProfileSingleProcessPrivilege" };
+    // We need SeIncreaseQuotaPrivilege to Hard-Lock (Pin) game memory
+    const wchar_t* privileges[] = { L"SeDebugPrivilege", L"SeProfileSingleProcessPrivilege", L"SeIncreaseQuotaPrivilege" };
     
     TOKEN_PRIVILEGES tp;
     tp.PrivilegeCount = 1;
@@ -403,6 +433,12 @@ void MemoryOptimizer::RunThread() {
                 // Cooldown to prevent spamming trims
                 for (int i=0; i<5 && m_running; i++) Sleep(1000); 
             }
+
+            // [SUPERIOR] Constantly reinforce the Shield on the active game
+            // This ensures that as the game loads more assets (level streaming),
+            // the "Hard Minimum" floor rises to protect the new data.
+            HardenProcess(fgPid);
+
         } else {
             // Passive cleanup for map to prevent memory leaks
             if (m_processTracker.size() > 1000) m_processTracker.clear();
