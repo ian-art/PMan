@@ -687,8 +687,8 @@ namespace GuiManager {
 
                     if (ImGui::Button("Safest", ImVec2(btnW, 32))) {
                         g_configState.maxBudget = 150;
-                        g_configState.cpuVar = 0.005f;
-                        g_configState.latVar = 0.010f;
+                        g_configState.cpuVar = 0.01f; // Strict 0.1% margin
+                        g_configState.latVar = 0.02f;
                         g_configState.allowThrottleMild = true;
                         g_configState.allowThrottleAggressive = false;
                         g_configState.allowOptimize = true;
@@ -698,9 +698,9 @@ namespace GuiManager {
                     }
                     ImGui::SameLine();
                     if (ImGui::Button("Balanced", ImVec2(btnW, 32))) {
-                        g_configState.maxBudget = 225;
-                        g_configState.cpuVar = 0.020f;
-                        g_configState.latVar = 0.030f;
+                        g_configState.maxBudget = 300;
+                        g_configState.cpuVar = 0.50f; // 0.7% margin (Standard)
+                        g_configState.latVar = 1.00f;
                         g_configState.allowThrottleMild = true;
                         g_configState.allowThrottleAggressive = true;
                         g_configState.allowOptimize = true;
@@ -710,9 +710,9 @@ namespace GuiManager {
                     }
                     ImGui::SameLine();
                     if (ImGui::Button("Gamer", ImVec2(btnW, 32))) {
-                        g_configState.maxBudget = 300;
-                        g_configState.cpuVar = 0.040f;
-                        g_configState.latVar = 0.050f;
+                        g_configState.maxBudget = 1000;
+                        g_configState.cpuVar = 4.0f;  // 2.0% margin (Aggressive)
+                        g_configState.latVar = 8.0f;
                         g_configState.allowThrottleMild = true;
                         g_configState.allowThrottleAggressive = true;
                         g_configState.allowOptimize = true;
@@ -722,9 +722,9 @@ namespace GuiManager {
                     }
                     ImGui::SameLine();
                     if (ImGui::Button("Insomnia", ImVec2(btnW, 32))) {
-                        g_configState.maxBudget = 500;
-                        g_configState.cpuVar = 0.20f;
-                        g_configState.latVar = 0.25f;
+                        g_configState.maxBudget = 5000;
+                        g_configState.cpuVar = 10.0f; // 3.1% margin (Very Aggressive)
+                        g_configState.latVar = 20.0f;
                         g_configState.allowThrottleMild = true;
                         g_configState.allowThrottleAggressive = true;
                         g_configState.allowOptimize = true;
@@ -734,9 +734,9 @@ namespace GuiManager {
                     }
                     ImGui::SameLine();
                     if (ImGui::Button("Tetris", ImVec2(btnW, 32))) {
-                        g_configState.maxBudget = 1000;
-                        g_configState.cpuVar = 0.80f;
-                        g_configState.latVar = 0.85f;
+                        g_configState.maxBudget = 10000;
+                        g_configState.cpuVar = 25.0f; // 5.0% margin (ENGINE LIMIT)
+                        g_configState.latVar = 50.0f;
                         g_configState.allowThrottleMild = true;
                         g_configState.allowThrottleAggressive = true;
                         g_configState.allowOptimize = true;
@@ -749,15 +749,16 @@ namespace GuiManager {
                     ImGui::InputInt("Authority Budget", &g_configState.maxBudget);
                     HelpMarker("Finite authority limit. Each action consumes budget.\nWhen exhausted, the system permanently reverts to Maintain until externally reset.");
 
-                    // [PATCH] Enforce Safety Limits (0.1% to 100%)
-                    // Min 0.001 ensures the AI isn't permanently frozen by impossible standards.
+                    // [PATCH] Enforce Safety Limits (0.1% to Engine Max)
+                    // Min 0.001 ensures the AI isn't permanently frozen.
+                    // Max 25.0/50.0 matches decision_arbiter.h hard limits.
                     ImGui::InputFloat("CPU Variance", &g_configState.cpuVar, 0.005f, 0.01f, "%.3f");
-                    if (g_configState.cpuVar > 1.0f) g_configState.cpuVar = 1.0f;
+                    if (g_configState.cpuVar > 25.0f) g_configState.cpuVar = 25.0f; // Matches MAX_CPU_VARIANCE
                     if (g_configState.cpuVar < 0.001f) g_configState.cpuVar = 0.001f;
                     HelpMarker("Confidence threshold. Lower values require more predictable\nCPU behavior before actions are allowed.");
 
                     ImGui::InputFloat("Latency Variance", &g_configState.latVar, 0.005f, 0.01f, "%.3f");
-                    if (g_configState.latVar > 1.0f) g_configState.latVar = 1.0f;
+                    if (g_configState.latVar > 50.0f) g_configState.latVar = 50.0f; // Matches MAX_LAT_VARIANCE
                     if (g_configState.latVar < 0.001f) g_configState.latVar = 0.001f;
                     HelpMarker("Confidence threshold for latency prediction.\nHigh variance disables authority regardless of intent.");
 
@@ -791,10 +792,11 @@ namespace GuiManager {
                     if (ImGui::Button("Apply Policy", ImVec2(140, 32))) {
                         bool proceed = true;
 
-                        // [PATCH] Safety Warning for Max Variance
-                        if (g_configState.cpuVar >= 0.99f || g_configState.latVar >= 0.99f) {
+                        // [PATCH] Safety Warning for High Variance
+                        // Warn if user sets variance >= 1.0 (Chaos Mode), but allow it.
+                        if (g_configState.cpuVar >= 1.0f || g_configState.latVar >= 1.0f) {
                             if (MessageBoxW(g_hwnd, 
-                                L"DANGER: You are setting Variance to 100% (1.0).\n\n"
+                                L"DANGER: You are setting extremely high Variance (>= 1.0).\n\n"
                                 L"This effectively DISABLES the stability governor. "
                                 L"The AI will make changes even during extreme lag or CPU spikes.\n\n"
                                 L"Are you sure you want to remove these safety rails?", 
