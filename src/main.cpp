@@ -1070,8 +1070,26 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                  GuiManager::OpenPolicyTab();
             }
         }
+        // Double Click -> Open Neural Center
+        else if (lParam == WM_LBUTTONDBLCLK) {
+            GuiManager::ShowConfigWindow();
+            // Suppress the trailing WM_LBUTTONUP that follows this double-click
+            // to prevent the menu from popping up over the window.
+            static bool s_suppressMenu = true; 
+            // Note: We use a static flag that persists to the next message
+            SetPropW(hwnd, L"PMan_SuppressMenu", (HANDLE)1);
+            return 0;
+        }
         else if (lParam == WM_RBUTTONUP || lParam == WM_LBUTTONUP)
         {
+            // Check suppression flag
+            if (lParam == WM_LBUTTONUP) {
+                if (GetPropW(hwnd, L"PMan_SuppressMenu")) {
+                    RemovePropW(hwnd, L"PMan_SuppressMenu");
+                    return 0;
+                }
+            }
+
             SetForegroundWindow(hwnd);
             
             // Ensure owner window state is current before menu creation
