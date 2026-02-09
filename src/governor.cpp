@@ -50,7 +50,6 @@ DominantPressure PerformanceGovernor::SelectDominant(const NormalizedSignals& si
     
     // Use tunable parameters instead of constants
     if (signals.memory > m_params.memThreshold) return DominantPressure::Memory;
-    if (signals.memory > m_params.memThreshold) return DominantPressure::Memory;
     if (signals.disk > m_params.diskThreshold) return DominantPressure::Disk;
     if (signals.cpu > m_params.cpuThreshold) return DominantPressure::Cpu;
     return DominantPressure::None;
