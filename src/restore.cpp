@@ -638,17 +638,38 @@ HANDLE LaunchRegistryGuard(DWORD originalVal)
 
     PROCESS_INFORMATION pi{};
 
-    if (CreateProcessW(
+    // [FIX] Try Breakaway first, Fallback if Access Denied (Job Object Restriction)
+    DWORD flags = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB;
+    BOOL success = CreateProcessW(
             nullptr,
             cmd.data(),
             nullptr,
             nullptr,
             FALSE,
-            CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB,
+            flags,
             nullptr,
             nullptr,
             &si,
-            &pi))
+            &pi);
+
+    if (!success && GetLastError() == ERROR_ACCESS_DENIED)
+    {
+        Log("[GUARD] Breakaway blocked (Job/AV). Retrying standard launch...");
+        flags &= ~CREATE_BREAKAWAY_FROM_JOB; // Remove the breakaway flag
+        success = CreateProcessW(
+            nullptr,
+            cmd.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            flags,
+            nullptr,
+            nullptr,
+            &si,
+            &pi);
+    }
+
+    if (success)
     {
         Log("[GUARD] Registry Safety Guard launched (PID " +
             std::to_string(pi.dwProcessId) + ")");
