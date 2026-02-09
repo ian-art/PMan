@@ -58,9 +58,9 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
         hardReject = true;
     }
     // B. Confidence Rules
-    else if (confidence.cpuVariance > MAX_CPU_VARIANCE ||
-             confidence.thermalVariance > MAX_THERM_VARIANCE ||
-             confidence.latencyVariance > MAX_LAT_VARIANCE ||
+    else if (confidence.cpuVariance > m_maxCpuVariance ||
+             confidence.thermalVariance > m_maxThermVariance ||
+             confidence.latencyVariance > m_maxLatVariance ||
              consequence.confidence < CONFIDENCE_MIN) {
         
         // [INVESTIGATOR] The System Detective Trigger
@@ -270,4 +270,10 @@ BrainAction DecisionArbiter::MapIntentToAction(const GovernorDecision& gov) {
 
 void DecisionArbiter::Reset() {
     m_cooldowns.clear();
+}
+
+void DecisionArbiter::SetConfidenceThresholds(double cpuVar, double thermVar, double latVar) {
+    m_maxCpuVariance = cpuVar;
+    m_maxThermVariance = thermVar;
+    m_maxLatVariance = latVar;
 }

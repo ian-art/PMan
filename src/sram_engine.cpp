@@ -304,11 +304,15 @@ void SramEngine::EvaluateState() {
     // Effectively, if we are processing input messages, n_input is low.
     float n_input = NormalizeMetric((float)m_inputLatencyMs, 16.0f, 60.0f);
 
-    // CPU Pressure: Queue Length relative to cores (approx).
-    // Assuming 8 cores avg. Queue > 4 is pressure. Queue > 12 is critical.
-    // A more robust way is to divide by std::thread::hardware_concurrency(), 
-    // but raw values work for general "responsiveness" tuning.
-    float n_cpu   = NormalizeMetric((float)m_cpuQueueLength, 2.0f, 16.0f);
+    // CPU Pressure: Queue Length relative to logical cores.
+    // Pressure = Queue > 0.5x cores. Critical = Queue > 2.0x cores.
+    unsigned int cores = std::thread::hardware_concurrency();
+    if (cores == 0) cores = 4; // Fallback
+    
+    float thresholdPressure = cores * 0.5f;
+    float thresholdCritical = cores * 2.0f;
+
+    float n_cpu = NormalizeMetric((float)m_cpuQueueLength, thresholdPressure, thresholdCritical);
 
     // DPC Latency: >5% is noticeable, >10% is pressure, >20% is lagging.
     float n_dpc   = NormalizeMetric((float)m_maxDpcPercent, 5.0f, 20.0f);
