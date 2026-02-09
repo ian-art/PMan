@@ -1,199 +1,144 @@
-# System Architecture
+# System Architecture v5.0
 
 ## Overview
 
-PMan is a multi-threaded, event-driven Windows performance manager built around three core asynchronous primitives: ETW (Event Tracing for Windows), IOCP (I/O Completion Ports), and a background worker thread pool. The architecture prioritizes safety, scalability, and minimal system impact through careful resource bounding and privilege-aware operation.
+PMan v5 represents a paradigm shift from a **Rule-Based System** to an **Autonomous Agent**. Instead of static "If/Then" triggers, the system operates on a **Cognitive Control Loop** (Observation → Prediction → Arbitration → Execution → Learning).
 
-## Component Structure
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         PMan Process                                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
-│  │   Main Thread│  │   ETW Thread │  │  IOCP Thread │               │
-│  │  (UI & Msg)  │  │  (Providers) │  │   (Watcher)  │               │
-│  └──────┬───────┘  └────────┬─────┘  └──────────┬───┘               │
-│         │                   │                   │                   │
-│         │  Process Events   │  Config Changes   │                   │
-│         └─────────┬─────────┴──────────┬────────┘                   │
-│                     │                  │                            │
-│              ┌──────▼──────────────────▼───────┐                    │
-│              │       IOCP Queue (g_hIocp)      │                    │
-│              └──────┬────────────────────────┬─┘                    │
-│                     │                        │                      │
-│            ┌────────▼────────┐      ┌───────▼────────┐              │
-│            │ Policy Worker   │      │ Crash Safety   │              │
-│            │ (Single Thread) │      │ Registry Guard │              │
-│            └────────┬────────┘      └────────────────┘              │
-│                     │                                               │
-│            ┌────────▼────────┐                                      │
-│            │   Apply Tweaks  │                                      │
-│            │  (Rate-Limited) │                                      │
-│            └─────────────────┘                                      │
-│                                                                     │
-│  Background Workers:                                                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
-│  │ Mem Optimizer│  │ Perf Guardian│  │ Net Monitor  │               │
-│  │   (1s loop)  │  │  (2s loop)   │  │ (5-30s loop) │               │
-│  └──────────────┘  └──────────────┘  └──────────────┘               │
-│                                                                     │
-│  Global State & Utilities:                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
-│  │  globals.cpp │  │  logger.cpp  │  │   utils.cpp  │               │
-│  │  (State Mgmt)│  │   (Logging)  │  │  (Helpers)   │               │
-│  └──────────────┘  └──────────────┘  └──────────────┘               │
-│                                                                     │
-│  Optional/Specialized:                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
-│  │   restore.cpp│  │services_watch│  │ static_tweaks│               │
-│  │ (Snapshots)  │  │   (Trim)     │  │ (One-time)   │               │
-│  └──────────────┘  └──────────────┘  └──────────────┘               │
-│                                                                     │
-│  Network Intelligence:                                              │
-│  ┌────────────────┐                                                 │
-│  │throttle_mgr.cpp│                                                 │
-│  │ (Adaptive QoS) │                                                 │
-│  └────────────────┘                                                 │
-└─────────────────────────────────────────────────────────────────────┘
+The system is designed as a **Governor**, not a simple optimizer. It possesses a "budget" of authority and must "pay" for interventions using confidence credits. If its predictions fail to materialize in reality, it loses confidence and reduces its own authority.
+
+---
+
+## The Cognitive Pipeline (The "Brain")
+
+The core logic resides in `RunAutonomousCycle`, executing the following pipeline once per tick:
+```mermaid
+graph TD
+    Sensors[System Telemetry + SRAM] --> Governor
+    Governor[Performance Governor] -->|Proposal| Evaluator
+    Evaluator[Consequence Evaluator] -->|Cost Vector| Arbiter
+    
+    subgraph "The Decider"
+        Arbiter[Decision Arbiter]
+        Budget[Authority Budget]
+        Policy[Policy Contract]
+    end
+    
+    Arbiter -->|Intent| Shadow[Shadow Executor]
+    Shadow -->|Prediction| Ledger
+    
+    Arbiter -->|Action| Sandbox[Sandbox Executor]
+    Sandbox -->|Lease| OS[Windows Kernel]
+    
+    OS -->|Reality| Sampler[Reality Sampler]
+    Sampler -->|Error| Confidence[Confidence Tracker]
+    Confidence -->|Feedback| Arbiter
 ```
 
-## Core Execution Model
+---
 
-### 1. Event Ingestion Layer
+### 1. Perception Layer (The Eyes)
 
-**ETW Thread (EtwThread):** Runs a private real-time ETW session monitoring:
+**SystemSignalSnapshot**: A normalized vector containing CPU load, saturation (Queue Length), memory pressure, disk I/O, and thermal status.
 
-- Process start/end (KernelProcessGuid)
-- DXGI/D3D9/D3D10 Present events for frame time tracking
-- DPC/ISR latency events
+**SRAM (System Responsiveness Awareness Module)**: A dedicated sidecar thread that measures actual human-perceptible lag.
+- **Technique**: Sends `WM_NULL` messages to the foreground window and measures round-trip time.
+- **Output**: `LagState` (Snappy, Pressure, Lagging, Critical).
 
-Events are immediately posted to the IOCP queue as IocpJob structures
+**Input Guardian**: Monitors raw HID (Mouse/Keyboard) interrupts to detect user intent vs. idle activity.
 
-**Raw Input Thread:** Monitors HID input via RegisterRawInputDevices for user activity detection
+---
 
-**Config Watcher Thread (IocpConfigWatcher):** Uses ReadDirectoryChangesW on %ProgramData%\PriorityMgr to trigger config reload
+### 2. Decision Layer (The Brain)
 
-### 2. Job Queue & Processing
+**Performance Governor** (`governor.cpp`):
+- **Role**: The Strategist.
+- **Logic**: Analyzes `DominantPressure` (e.g., is the bottleneck Disk or CPU?). Resolves the `SystemMode` (Interactive vs. Sustained Load).
+- **Output**: `GovernorDecision` (e.g., "We are in Interactive Mode, causing Latency Pressure; I propose Scheduling Intervention").
 
-**IOCP Handle (g_hIocp):** Central dispatch queue with 1000-job limit to prevent memory exhaustion
+**Consequence Evaluator**:
+- **Role**: The Simulator.
+- **Logic**: Calculates the "Cost" of the proposed action. (e.g., "Boosting priority here will starve Audio threads by 15%").
 
-**Job Types:** Policy, Config, PerformanceEmergency
+**Decision Arbiter** (`decision_arbiter.cpp`):
+- **Role**: The Judge.
+- **Logic**: Weighs the Proposal against the Authority Budget and Confidence Levels.
+- **Counterfactuals**: It records not just what it decided, but why it rejected the alternatives (e.g., "Rejected Boost due to Low Confidence").
 
-**Single Policy Worker:** Dequeues jobs sequentially to avoid race conditions. Each job triggers:
+---
 
-- Process identity validation (PID + creation time)
-- Classification via name lists, window detection, hierarchy inheritance
-- Tiered optimization application (affinity, priority, QoS)
+### 3. Execution Layer (The Hands)
 
-### 3. Background Workers
+**Sandbox Executor** (`sandbox_executor.cpp`):
+- **Role**: The Operator.
+- **Mechanism**: Leased Authority.
+- **Logic**: Actions are not "set and forgotten." They are "leased" for a specific duration (e.g., 5000ms). If the Brain does not explicitly renew the lease in the next tick, the Sandbox automatically reverts the changes. This ensures that a frozen or crashed agent cannot leave the system in a modified state.
 
-**Memory Optimizer (MemoryOptimizer::RunThread):** 1Hz loop that monitors RAM pressure and triggers standby purge + working set trim when memoryLoad > 80% or hardFaults > 100/sec
+---
 
-**Performance Guardian (PerformanceGuardian::OnPerformanceTick):** 0.5Hz loop analyzing frame history (ETW Present events) to detect stutter (>5% spikes or variance >8ms) and trigger emergency boosts
+### 4. Accountability Layer (The Conscience)
 
-**Network Monitor (NetworkMonitor::WorkerThread):** Adaptive polling (5s unstable/30s stable) performing ICMP probes to 1.1.1.1/8.8.8.8. Throttles background PIDs when latency >600ms or packet loss detected
+**Provenance Ledger** (`provenance_ledger.cpp`):
+- **Role**: The Black Box.
+- **Logic**: Cryptographically hashes and logs every decision tick. It provides an audit trail proving why the AI acted (or refused to act).
 
-**Idle Affinity Manager (IdleAffinityManager::OnIdleStateChanged):** Activates after 30s idle, parks processes on last N cores (respecting foreground app protection)
+**Outcome Guard** (`outcome_guard.cpp`):
+- **Role**: The Fail-Safe.
+- **Logic**: Compares `PredictedStateDelta` (Shadow) vs. `ObservedStateDelta` (Reality). If Reality is significantly worse than Predicted (e.g., "We optimized, but Latency increased"), it triggers an immediate Emergency Rollback.
 
-### 4. State Management
+---
 
-All global state resides in globals.cpp with strict access patterns:
+## Subsystem Details
 
-- Atomic flags for single-value state (e.g., g_running, g_sessionLocked)
-- SharedMutex for read-heavy sets (e.g., g_games, g_browsers)
-- std::mutex for write-heavy maps (e.g., g_processHierarchy)
-- SessionSmartCache: Atomic pointer swap for crash-safe PID lock verification
+### SRAM (System Responsiveness Awareness Module)
 
-## Thread Safety & Synchronization
+SRAM is a detached diagnostic engine designed to detect "Ghosting" and "Micro-stutters" that standard CPU metrics miss.
 
-| Component            | Synchronization         | Notes                                             |
-| -------------------- | ----------------------- | ------------------------------------------------- |
-| Configuration Sets   | `std::shared_mutex`     | Read-heavy, updated only on file change           |
-| Process Hierarchy    | `std::shared_mutex`     | Hierarchy traversal is read-mostly                |
-| Working Set Tracking | `std::mutex`            | Frequent updates during game switches             |
-| IOCP Queue           | `std::atomic<int>`      | Lock-free size counter; jobs dequeued under mutex |
-| Policy State         | `std::atomic<uint64_t>` | Encoded PID + mode; atomic load/store only        |
+**Thread Isolation**: Runs on a separate thread with `ABOVE_NORMAL` priority to ensure it can observe the system even under load.
 
-## Component Responsibilities
+**Metrics**:
+- **UI Latency**: `SendMessageTimeout(WM_NULL)`
+- **DWM Composition**: Frame drops in the Desktop Window Manager.
+- **Input Latency**: Delta between hardware interrupt and message queue processing.
 
-| Module                 | Responsibility                                                                      |
-| ---------------------- | ----------------------------------------------------------------------------------- |
-| `main.cpp`             | Process lifecycle, threading, UI, command parsing                                   |
-| `globals.cpp`          | Global variables, atomic flags, shared state containers                             |
-| `logger.cpp`           | Circular buffer logging, log rotation, Live Log Viewer integration                  |
-| `utils.cpp`            | String conversion, process enumeration, registry helpers, HTTP client, security checks |
-| `policy.cpp`           | Process classification, mode determination, session locking, hierarchy management   |
-| `tweaks.cpp`           | Low-level optimization: priority, affinity, QoS, memory, timer resolution           |
-| `config.cpp`           | INI parsing, defaults, upgrade handling, process list management                    |
-| `events.cpp`           | ETW session management, event routing, DPC latency tracking                         |
-| `performance.cpp`      | Frame time analysis, stutter detection, profile learning, session reports           |
-| `services.cpp`         | Service enumeration, suspension, resumption with safety whitelist                   |
-| `services_watcher.cpp` | Background scanning for idle manual-start services to stop                          |
-| `network_monitor.cpp`  | Connectivity probing, bandwidth monitoring, network state detection                 |
-| `memory_optimizer.cpp` | RAM pressure detection, standby purge, working set trim                             |
-| `idle_affinity.cpp`    | Background process parking during system idle                                       |
-| `explorer_booster.cpp` | Explorer/DWM boosting when system idle and no active game                           |
-| `input_guardian.cpp`   | Windows key blocking, input latency monitoring, foreground boosting                 |
-| `sysinfo.cpp`          | CPU topology detection (Intel P/E, AMD CCD), capability detection                   |
-| `session_cache.cpp`    | Immutable process identity for session lock validation                              |
-| `static_tweaks.cpp`    | One-time system optimization registry tweaks (manual trigger only)                  |
-| `restore.cpp`          | System restore point creation on first run (admin only)                             |
-| `throttle_manager.cpp` | Network-based adaptive CPU/I/O throttling using Job Objects                         |
-| `types.h/constants.h`  | Type definitions, GUIDs, and configuration constants                                |
+---
 
-## Configuration & Data Flow
+### The Authority Budget
 
-**Initial Load:** LoadConfig() on startup parses config.ini into global sets
+To prevent "thrashing" (rapidly changing states), the AI has a finite budget of "Authority Points."
 
-**Runtime Updates:** Config watcher detects file change, sets g_reloadNow, background worker reloads after 250ms debounce
+- **Cost Model**: High-impact actions (e.g., Thread Boosting) cost more than low-impact ones (e.g., Memory Trimming).
+- **Regen**: Budget regenerates slowly over time.
+- **Exhaustion**: If the budget hits zero, the Arbiter is forced to `BrainAction::Maintain` (Do Nothing) until it cools down.
 
-**Profile Persistence:** PerformanceGuardian serializes learned profiles to profiles.bin with magic header 0x504D414E
+---
 
-**Logging:** Circular buffer (2000 lines) flushed to %ProgramData%\PriorityMgr\log.txt every 5s or when Live Log Viewer opens
+## Safety & Crash Resilience
 
-## Error Handling & Resilience
+### 1. The "Do No Harm" Prime Directive
 
-**PID Reuse:** Every operation validates (PID, creationTime) pair via GetProcessTimes
+The system defaults to `BrainAction::Maintain`. If any component (Telemetry, Policy, Budget) fails or returns ambiguous data, the Arbiter rejects intervention.
 
-**Access Denied:** Non-admin operations skip registry writes with logged warnings
+### 2. Registry Guard (Watchdog)
 
-**ETW Failure:** Watchdog thread auto-restarts ETW session up to 3 times
+A separate process (`pman.exe --guard`) monitors the main application.
 
-**Service Deadlock:** 5s timeout + retry loop for service control operations
+- **Heartbeat**: If the main process terminates unexpectedly (crash or Task Manager kill), the Guard detects the handle closure.
+- **Restoration**: It immediately reverts global Windows settings (Win32PrioritySeparation, Power Plans) to their defaults before exiting.
 
-**Registry Corruption:** RunRegistryGuard monitors main process exit and restores Win32PrioritySeparation + power plan
+### 3. Provenance Integrity
 
-**Memory Exhaustion:** Bounded containers (2000 log lines, 1000 process tracker entries) with hourly GC
+If the `ProvenanceLedger` fails to write (disk full, permission error), the `OutcomeGuard` revokes all authority. The system cannot act if it cannot record why.
 
-## Execution Guarantees
+---
 
-**No Blocking in Hot Path:** ETW callback posts to IOCP and returns immediately; no file I/O or registry access
+## Threading Model
 
-**Bounded Latency:** Policy worker processes jobs sequentially; max queue size 1000 prevents unbounded growth
+| Thread | Priority | Responsibility |
+|--------|----------|----------------|
+| **Main Thread** | NORMAL | Window Message Pump, Policy Orchestration, UI Rendering |
+| **SRAM Worker** | ABOVE_NORMAL | Active latency probing (UI/Input sensors) |
+| **Background Worker** | LOW | Heavy lifting: Service Control, Config Reloading, Profile Analysis |
+| **ETW Consumer** | TIME_CRITICAL* | Consumes kernel events (context switches) in real-time |
+| **IOCP Watcher** | LOW | File system changes (Config hot-reload) |
 
-**Graceful Degradation:** Features silently disable if APIs unavailable (legacy OS, missing permissions)
-
-**Clean Shutdown:** RAII handles, thread joining, registry restoration on WM_DESTROY
-
-## Safety Mechanisms
-
-### Registry Anti-Hammering
-To prevent registry corruption or high CPU usage from constant writes:
-- **Mechanism:** `RegWriteDwordCached` checks the current registry value first.
-- **Logic:** `if (current == new) return; else Write();`
-- **Benefit:** Reduces registry I/O by 99% during stable states.
-
-### Service Snapshots
-PMan never "guesses" what a service's priority was.
-1. **Snapshot:** Before optimizing, PMan records the service's *actual* Affinity and Priority.
-2. **Restore:** On game exit, it applies the recorded values.
-3. **Fail-Safe:** If a service crashes or restarts, it is removed from the management list to prevent applying invalid state.
-
-### Intelligent RAM Cleaning
-- **Old Behavior:** Purged Standby List every N minutes.
-- **New Behavior:** "Emergency Only." Checks `GlobalMemoryStatusEx`.
-- **Condition:** Only purges if Physical RAM load > 90%.
-
-## Directory Structure
-- `src/`: Core C++ implementation.
-- `include/`: Header files and internal API abstractions.
-- `docs/`: Architecture and Contribution guides.
+*ETW Consumer runs at high priority but performs minimal work, pushing events to a lock-free queue for the Background Worker.

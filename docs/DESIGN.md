@@ -1,124 +1,92 @@
 # Design Rationale & Implementation Trade-offs
 
-## Core Philosophy: Observability Without Intrusiveness
+## Core Philosophy: Sovereignty with Accountability
 
-The design centers on user-mode observability of system behavior via ETW and Win32 APIs. This choice explicitly avoids kernel drivers to maintain system stability, compatibility with anti-cheat, and easy uninstallation. All optimizations are standard Windows primitives (priority classes, affinity masks, registry keys) that are reversible and well-documented.
+In **PMan v5**, we shifted from a "Tool" paradigm (user clicks button, tool acts) to an **"Agent" paradigm** (system observes, thinks, and acts).
 
-## Event-Driven vs. Polling Trade-offs
+The core design challenge was: *How do we give software the authority to modify kernel priorities without creating a runaway process that destabilizes the OS?*
 
-**Decision:** Hybrid model
+**Solution:** The system is designed as a **Licensed Operator**. It has a "Budget" of authority. It must "pay" for every intervention, and if it runs out of budget or confidence, it is physically locked out of making changes.
 
-**ETW for Process/Graphics:** Real-time notifications for process start/end and DXGI Present events provide immediate response with ~1ms overhead. Ring buffer in DPC callback avoids heap allocation.
+---
 
-**Polling for Metrics:** CPU load, memory pressure, and network stability use timed loops (1s, 10s, 30s) because:
+## 1. The "Shadow First" Execution Model
 
-- No ETW provider exists for memory pressure notifications
-- Network state requires active probing (ICMP)
-- Polling allows rate-limiting and hysteresis to prevent thrashing
+**Problem:** Traditional optimizers apply a tweak (e.g., "Set High Priority") and hope it works. If it causes stutter, the user notices it *after* the damage is done.
 
-**Trade-off:** Slightly higher baseline CPU usage (~0.1% on idle) vs. immediate reaction to all events.
+**Design:** **Shadow Execution Layer** (`ShadowExecutor`)
+Before applying any change, PMan runs a simulation:
+1.  **Snapshot:** Captures current CPU Variance and Latency.
+2.  **Predict:** Uses the internal `PredictiveModel` to estimate the state *delta* if the action were taken.
+3.  **Gate:** If the predicted benefit is lower than the `MinConfidence` threshold, the action is rejected *before* touching the OS.
 
-## Safety-First Process Classification
+**Trade-off:** This adds ~50-100µs of computational overhead per decision tick, but prevents "thrashing" (rapidly toggling states) which is the #1 cause of micro-stutter in optimization tools.
 
-**Hierarchy of Checks (in order of precedence):**
+---
 
-1. **Ignored Process List:** System processes (csrss, lsass, etc.) are hard-excluded first to prevent OS instability
-2. **Anti-Cheat Detection:** Explicitly avoids touching known anti-cheat processes; disables risky features if detected
-3. **Launcher Tier:** Custom launchers get conservative settings (IDLE priority, no hard affinity) to prevent game launch interference
-4. **Session Lock:** Once a game is detected, no mode changes are allowed until it exits (PID validated via creation time)
-5. **Window Heuristics:** Final fallback uses window title/class matching
+## 2. Authority Budgeting vs. Rate Limiting
 
-**Rationale:** Each layer protects against false positives. The cost of missing a game is lower than misclassifying a system process.
+**Old Approach:** Simple Rate Limiting (e.g., "Don't change priority more than once every 5 seconds").
+**New Approach:** **Authority Budget** (`AuthorityBudget`)
 
-## Session Lock & PID Reuse Protection
+We model system intervention as a scarce economic resource:
+* **Income:** The budget regenerates slowly over time (Time Decay).
+* **Cost:**
+    * `Throttle_Mild`: Cheap (Low Risk).
+    * `Boost_Process`: Expensive (High Risk of Starvation).
+    * `Suspend_Service`: Very Expensive.
 
-**Problem:** PID reuse can cause a new process to inherit optimizations meant for a dead game, or vice versa.
+**Rationale:** Rate limits prevents fast toggling, but they don't prevent *bad decisions*. A Budget prevents **cumulative fatigue**. If the Agent tries to fix the system 10 times in a minute and fails, it bankrupts itself and stops acting. This prevents "Optimizer Wars" where PMan fights another tool or the OS.
 
-**Solution:** SessionSmartCache stores (PID, creationTime) tuple atomically. Every operation validates identity before applying changes. The cache is immutable after creation and swapped with std::atomic_exchange to avoid torn reads.
+---
 
-**Trade-off:** OpenProcess() call per validation adds ~100us latency to each policy decision, but prevents catastrophic misapplication.
+## 3. The "Lease" Mechanism (Crash Safety)
 
-## Adaptive Learning vs. Static Rules
+**Problem:** If PMan boosts a game to `REALTIME_PRIORITY_CLASS` and then crashes, the system might hang indefinitely.
 
-**Design:** Game profiles use voting rather than hard thresholds:
+**Design:** **Time-Bound Leases** (`SandboxExecutor`)
+PMan never "sets" a priority. It "leases" it.
+1.  PMan applies `HIGH_PRIORITY`.
+2.  It records a timestamp (`LeaseStart`).
+3.  On the next tick (e.g., +1000ms), if the logic does not explicitly **Renew** the lease, the Sandbox *automatically* reverts the change.
 
-- Each optimization (I/O priority, core pinning, memory compression) gets a vote count (0-5)
-- After 30s A/B test phases, vote increments if variance improves >10%
-- Feature enabled if vote >= 2
+**Rationale:** This creates a "Dead Man's Switch." If the cognitive loop hangs, crashes, or gets stuck, the optimizations expire and the system naturally returns to Windows defaults.
 
-**Rationale:** Non-destructive experimentation. A failed test reverts automatically after 30s. Votes decay slowly, allowing adaptation to driver/OS updates.
+---
 
-## Resource Bounding
+## 4. Provenance & Counterfactuals
 
-**Memory:** All unbounded containers are capped:
+**Problem:** When an autonomous system makes a decision, it is often a "Black Box." Users don't know *why* it boosted Edge but throttled Spotify.
 
-- Log buffer: 2000 lines
-- Process trackers: 1000 entries (GC'd hourly)
-- Hierarchy map: 2000 nodes (cleared on overflow)
-- IOCP queue: 1000 jobs (new jobs dropped if full)
+**Design:** **Provenance Ledger**
+We record not just the Action, but the **Counterfactuals** (The road not taken).
+* *Record:* "Selected Action: `Optimize_Memory`."
+* *Counterfactual:* "Rejected `Boost_Process` because `Confidence (0.4) < Threshold (0.7)`."
+* *Counterfactual:* "Rejected `Throttle_Mild` because `Budget (5) < Cost (10)`."
 
-**CPU:** Background threads pinned to last physical cores with THREAD_PRIORITY_LOWEST. ETW thread runs at normal priority to prevent event loss.
+**Rationale:** Trust requires transparency. By logging *why* we didn't act, users can tune the `policy.json` (e.g., increasing the budget) if they want a more aggressive agent.
 
-**Rationale:** Prevents PMan itself from becoming a resource hog during extended uptime.
+---
 
-## Intel P/E vs. AMD 3D V-Cache Handling
+## 5. Universal Defender Cooperation (DCM)
 
-**Intel:** Uses SetProcessDefaultCpuSets API (Windows 10 2004+) to pin games to P-cores (EfficiencyClass 0). E-cores remain for background tasks.
+**Problem:** Most optimizers fight Windows Defender (`MsMpEng.exe`), treating its CPU spikes as "background noise" to be throttled. This causes scans to take longer, prolonging the disk contention.
 
-**AMD:** Detects L3 cache topology. For 3D V-Cache CPUs, identifies CCD0 (cache-equipped) vs. CCD1+ and pins games to CCD0 cores only. This leverages the 96MB L3 cache advantage.
+**Design:** **"Shield, Don't Fight"**
+When PMan detects high pressure from a Security process:
+1.  It identifies the `DominantPressure` as `Security`.
+2.  It enters `SystemMode::Interactive` (to protect the user).
+3.  It explicitly **Whitelists** the AV process, refusing to throttle it.
 
-**Fallback:** If APIs unavailable or on homogeneous CPUs, uses legacy affinity partitioning (reserve last N cores for background).
+**Rationale:** Security operations are inevitable. The fastest way to end a virus scan is to let it finish. Throttling it only drags out the performance hit.
 
-## Service Suspension Safety
+---
 
-**Problem:** Suspending critical services (RPC, Power) can brick the OS.
+## 6. Implementation Trade-offs
 
-**Solution:** Multi-layer whitelist:
-
-- **Level 0:** Hard-coded critical list (RpcSs, Power, etc.) - never touched
-- **Level 1:** Operational whitelist (BITS, wuauserv, dosvc) - only these are eligible
-- **Dependency Check:** EnumDependentServicesW verifies no active dependents before suspension
-
-**Trade-off:** More conservative than aggressive "game boosters" but guarantees system stability.
-
-## Registry Guard Pattern
-
-**Mechanism:** On start, launches pman.exe --guard <pid> <creationTime> <regValue> as a detached process. This process:
-
-1. Waits on the main process handle with SYNCHRONIZE
-2. On exit, reads current registry value
-3. If mismatched, restores original value
-4. Also verifies power plan and resumes suspended services
-
-**Rationale:** Survives crashes, kills, or power loss. No reliance on destructors or graceful shutdown.
-
-## Configuration Upgrades
-
-**Design:** Config version stored in [meta] section. On load mismatch:
-
-1. Creates backup with .old extension
-2. Injects current game/browser lists into new schema
-3. Writes upgraded config atomically
-4. Reloads from new file
-
-**Rationale:** Preserves user data across feature updates without migration scripts.
-
-## Network Throttling Hysteresis
-
-**Problem:** Flapping between STABLE/UNSTABLE causes priority oscillation.
-
-**Solution:** 10-second hold-off timer after state change. Background apps remain throttled for minimum duration, smoothing jitter.
-
-## Log Viewer Overhead
-
-**Trade-off:** Live Log Viewer (FindWindowW(L"PManLogViewer")) triggers async flush. This adds disk I/O but only when viewer is open. Circular buffer prevents unbounded memory growth.
-
-## No Telemetry Principle
-
-**Verification:** Code search shows:
-
-- No HTTP calls except to raw.githubusercontent.com for version checks
-- No data collection, metrics upload, or usage tracking
-- Logs are local only with ACL restrictions
-
-**Rationale:** System-level tools must be auditable and privacy-respecting. Update checks are opt-in via tray menu.
+| Feature | Design Choice | Trade-off |
+| :--- | :--- | :--- |
+| **Observation** | **SRAM (Sidecar Thread)** | Uses ~0.5% CPU to actively ping the UI thread. Essential for measuring *human* lag, but slightly increases idle load. |
+| **Process Scan** | **Diff-Scanning** | Instead of scanning 400 processes every tick, we rely on ETW process start/stop events. Full scans only happen on `ConfigReload`. |
+| **Memory** | **Hard Limits** | The `ProvenanceLedger` is a ring buffer. We lose history after N records to ensure PMan never consumes >50MB RAM. |
+| **Kernel** | **User-Mode Only** | We explicitly reject Kernel Drivers. This limits our ability to control thread scheduling quantum, but guarantees we never BSOD the system. |
