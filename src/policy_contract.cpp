@@ -228,7 +228,15 @@ bool PolicyGuard::Load(const std::wstring& path) {
     std::string content = buffer.str();
 
     // 3. Parse
-    return ParsePolicy(content);
+    if (ParsePolicy(content)) {
+        std::string logMsg = "[POLICY] Contract Loaded: Budget=" + std::to_string(m_limits.maxAuthorityBudget) +
+                             " | Var_CPU=" + std::to_string(m_limits.minConfidence.cpuVariance) +
+                             " | Var_Lat=" + std::to_string(m_limits.minConfidence.latencyVariance) +
+                             " | Actions=" + std::to_string(m_limits.allowedActions.size());
+        Log(logMsg);
+        return true;
+    }
+    return false;
 }
 
 bool PolicyGuard::Validate(BrainAction action, double cpuVariance, double latencyVariance) {
