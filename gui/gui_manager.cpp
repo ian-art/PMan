@@ -1230,9 +1230,11 @@ namespace GuiManager {
 
     void CreateRenderTarget() {
         ID3D11Texture2D* backBuffer = nullptr;
-        g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
-        g_pd3dDevice->CreateRenderTargetView(backBuffer, nullptr, &g_mainRenderTargetView);
-        backBuffer->Release();
+        // [FIX] Check for success to prevent null pointer dereference (C6387)
+        if (SUCCEEDED(g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)))) {
+            g_pd3dDevice->CreateRenderTargetView(backBuffer, nullptr, &g_mainRenderTargetView);
+            backBuffer->Release();
+        }
     }
 
     void CleanupRenderTarget() {
