@@ -265,7 +265,12 @@ void ExplorerBooster::UpdateBoostState() {
         std::lock_guard lock(m_mtx);
         shouldBoost = ShouldBoostNow();
     }
+    
+    // [FIX] Respect LockedOut state to prevent thrashing against Game Mode
     ExplorerBoostState targetState = shouldBoost ? ExplorerBoostState::IdleBoosted : ExplorerBoostState::Default;
+    if (m_gameOrBrowserActive.load()) {
+        targetState = ExplorerBoostState::LockedOut;
+    }
 
     // Add 5-second hysteresis to prevent rapid toggling
     static uint64_t lastStateChange = 0;
@@ -527,7 +532,10 @@ void ExplorerBooster::RevertBoosts(DWORD pid) {
 
     // Revert Processor Scheduling to "Programs" (0x26)
     // Reverts scheduler quantum to favor foreground processes (VAL_BROWSER).
-    SetPrioritySeparation(VAL_BROWSER);
+    // [FIX] Do NOT touch registry if Game Mode is active (LockedOut) - Game Mode owns this value (0x28).
+    if (!m_gameOrBrowserActive.load()) {
+        SetPrioritySeparation(VAL_BROWSER);
+    }
 
     it->second.state = ExplorerBoostState::Default;
 }
