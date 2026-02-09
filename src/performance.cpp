@@ -592,7 +592,8 @@ void PerformanceGuardian::OnPerformanceTick() {
     LASTINPUTINFO lii = { sizeof(lii) };
     if (GetLastInputInfo(&lii)) {
         // Check if input occurred within the last 30 seconds
-        snap.userActive = (GetTickCount() - lii.dwTime) < 30000;
+        // [FIX] Use GetTickCount64 cast to DWORD to satisfy C28159 while matching LASTINPUTINFO width
+        snap.userActive = (static_cast<DWORD>(GetTickCount64()) - lii.dwTime) < 30000;
     }
 
     // Thermal Throttling (Placeholder: Future expansion for thermal zones)
