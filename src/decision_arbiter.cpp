@@ -252,15 +252,15 @@ BrainAction DecisionArbiter::MapIntentToAction(const GovernorDecision& gov) {
             }
             return BrainAction::Release_Pressure; // Boost foreground I/O
 
-        case AllowedActionClass::PerformanceBoost:
-            return BrainAction::Boost_Process;
-
         case AllowedActionClass::Scheduling:
             // CPU Contention logic
             if (gov.mode == SystemMode::Interactive) {
                 return BrainAction::Release_Pressure; // Ensure responsiveness
             }
             return BrainAction::Optimize_Memory; // Fallback or distinct scheduling action
+
+        case AllowedActionClass::PerformanceBoost:
+            return BrainAction::Boost_Process;
 
         case AllowedActionClass::None:
         default:
