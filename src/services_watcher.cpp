@@ -271,7 +271,12 @@ void ServiceWatcher::SuspendAllowedServices() {
             
             DWORD bytesNeeded = 0;
             DWORD count = 0;
-            EnumDependentServicesW(hSvc.get(), SERVICE_ACTIVE, nullptr, 0, &bytesNeeded, &count);
+            
+            // [FIX] Check return value to resolve C6031. We expect FALSE + ERROR_MORE_DATA.
+            if (!EnumDependentServicesW(hSvc.get(), SERVICE_ACTIVE, nullptr, 0, &bytesNeeded, &count) && 
+                GetLastError() != ERROR_MORE_DATA) {
+                continue; // Unexpected failure, skip this service
+            }
             
             if (bytesNeeded > 0) {
                 std::vector<BYTE> buffer(bytesNeeded);
