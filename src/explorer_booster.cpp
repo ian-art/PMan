@@ -371,8 +371,9 @@ void ExplorerBooster::ApplyBoosts(DWORD pid, ExplorerBoostState state) {
     if (isDwm) {
         if (m_config.boostDwm) {
              // Safe: HIGH Priority (Not Realtime). No other tweaks allowed.
-             SetPriorityClass(hProc, HIGH_PRIORITY_CLASS);
-             if (logSuccess) Log("[EXPLORER] DWM Boosted (Safe Mode: High Priority Only)");
+             if (SetPriorityClass(hProc, HIGH_PRIORITY_CLASS)) {
+                 if (logSuccess) Log("[EXPLORER] DWM Boosted (Safe Mode: High Priority Only)");
+             }
         }
         it->second.state = state;
         return; // <--- CRITICAL: Return early to skip IO/Power/Memory hacks
@@ -662,9 +663,9 @@ void ExplorerBooster::LogState(const char* action, DWORD pid) const {
 
 const char* ExplorerBooster::StateToString(ExplorerBoostState state) const {
     switch (state) {
-        case ExplorerBoostState::Default: return "Default";
-        case ExplorerBoostState::IdleBoosted: return "IdleBoosted";
-        case ExplorerBoostState::LockedOut: return "LockedOut";
-        default: return "Unknown";
+        case ExplorerBoostState::Default: return "DEFAULT";
+        case ExplorerBoostState::IdleBoosted: return "IDLE_BOOSTED";
+        case ExplorerBoostState::LockedOut: return "LOCKED_OUT";
+        default: return "UNKNOWN";
     }
 }
