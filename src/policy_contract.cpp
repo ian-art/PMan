@@ -115,6 +115,7 @@ std::string PolicyGuard::SerializePolicy(const PolicyLimits& limits) {
     ss << "  \"max_authority_budget\": " << limits.maxAuthorityBudget << ",\n";
     ss << "  \"min_confidence_threshold\": {\n";
     ss << "    \"cpu_variance\": " << limits.minConfidence.cpuVariance << ",\n";
+    ss << "    \"thermal_variance\": " << limits.minConfidence.thermalVariance << ",\n";
     ss << "    \"latency_variance\": " << limits.minConfidence.latencyVariance << "\n";
     ss << "  },\n";
     
@@ -182,6 +183,11 @@ bool PolicyGuard::ParsePolicy(const std::string& json) {
             if (cpuPos != std::string::npos) {
                 size_t valStart = json.find(":", cpuPos) + 1;
                 m_limits.minConfidence.cpuVariance = std::stod(json.substr(valStart));
+            }
+            size_t thermPos = json.find("\"thermal_variance\"", confPos);
+            if (thermPos != std::string::npos) {
+                size_t valStart = json.find(":", thermPos) + 1;
+                m_limits.minConfidence.thermalVariance = std::stod(json.substr(valStart));
             }
             size_t latPos = json.find("\"latency_variance\"", confPos);
             if (latPos != std::string::npos) {

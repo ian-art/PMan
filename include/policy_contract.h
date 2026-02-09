@@ -35,6 +35,7 @@ struct PolicyLimits {
     
     struct {
         double cpuVariance = 0.01;
+        double thermalVariance = 5.0; // [FIX] Added missing field
         double latencyVariance = 0.02;
     } minConfidence;
     

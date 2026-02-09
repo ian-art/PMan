@@ -251,7 +251,16 @@ static void RunAutonomousCycle() {
     // [FIX] Pass allowed actions to enable "Stability Disabled" logic
     std::unordered_set<int> currentAllowed;
     if (ctx.subs.policy) {
-        currentAllowed = ctx.subs.policy->GetLimits().allowedActions;
+        auto& limits = ctx.subs.policy->GetLimits();
+        currentAllowed = limits.allowedActions;
+        
+        // [FIX] Sync dynamic confidence thresholds from Policy to Arbiter
+        // This ensures policy.json variance settings actually affect the Arbiter's logic.
+        ctx.subs.arbiter->SetConfidenceThresholds(
+            limits.minConfidence.cpuVariance,
+            limits.minConfidence.thermalVariance,
+            limits.minConfidence.latencyVariance
+        );
     } else {
         // Fallback: If no policy, assume Maintain is allowed (Safety Default)
         currentAllowed.insert((int)BrainAction::Maintain); 
@@ -1854,6 +1863,16 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                     // [FIX] Reload Policy and Sync Budget
                     if (PManContext::Get().subs.policy) {
                         PManContext::Get().subs.policy->Load(GetLogPath() / L"policy.json");
+                        
+                        // [SYNC] Push new thresholds to Arbiter immediately
+                        if (PManContext::Get().subs.arbiter) {
+                             auto& limits = PManContext::Get().subs.policy->GetLimits();
+                             PManContext::Get().subs.arbiter->SetConfidenceThresholds(
+                                limits.minConfidence.cpuVariance,
+                                limits.minConfidence.thermalVariance,
+                                limits.minConfidence.latencyVariance
+                             );
+                        }
                     }
                     
                     // [RECOVERY] Sync Budget Cap (But do NOT reset usage)

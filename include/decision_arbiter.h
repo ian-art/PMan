@@ -36,6 +36,9 @@ public:
     // Reset internal cooldown states (e.g., on configuration reload)
     void Reset();
 
+    // [FIX] Public Config Setter
+    void SetConfidenceThresholds(double cpuVar, double thermVar, double latVar);
+
 private:
     // Anti-oscillation state
     // Maps BrainAction -> Last Execution Timestamp (GetTickCount64)
@@ -51,10 +54,7 @@ private:
     // Constants
     static constexpr uint64_t ACTION_COOLDOWN_MS = 5000; // 5 seconds minimum between identical heavy actions
 
-    // Configuration
-    void SetConfidenceThresholds(double cpuVar, double thermVar, double latVar);
-
-private:
+    private:
     double m_maxCpuVariance = 25.0;
     double m_maxThermVariance = 5.0;
     double m_maxLatVariance = 50.0;
