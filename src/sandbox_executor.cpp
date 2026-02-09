@@ -198,7 +198,8 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         result.committed = false;
         result.reason = "SysCallFailed";
         
-        CloseHandle(m_hTarget);
+        // [FIX] Prevent C6387: Check handle validity before closing
+        if (m_hTarget) CloseHandle(m_hTarget);
         m_hTarget = nullptr;
         decision.isReversible = false;
     }
