@@ -125,7 +125,10 @@ void ExplorerBooster::OnTick() {
             // FIX: Offload snapshot to background thread safely
             s_isScanning = true;
             std::thread([this] {
-                ScanShellProcesses(); 
+                // [FIX] Ensure booster is active to prevent race with Shutdown()
+                if (m_active.load()) {
+                    ScanShellProcesses(); 
+                }
                 s_isScanning = false;
             }).detach();
             m_lastScanMs = now;
