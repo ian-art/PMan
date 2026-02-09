@@ -927,7 +927,7 @@ private:
 
 				// Append text
                 // Fix C4245: Cast -1 to WPARAM (UINT_PTR) explicitly
-                SendMessageW(hEdit, EM_SETSEL, (WPARAM)-1, (LPARAM)-1); // Move to end
+                SendMessageW(hEdit, EM_SETSEL, (WPARAM)(UINT_PTR)-1, (LPARAM)-1); // Move to end
                 SendMessageW(hEdit, EM_REPLACESEL, FALSE, (LPARAM)wBuffer.data());
                 lastPos += bytesRead;
             }
