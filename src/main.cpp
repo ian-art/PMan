@@ -221,6 +221,11 @@ static void RunAutonomousCycle() {
 
     // 1. SystemTelemetry (Capture State)
     SystemSignalSnapshot telemetry = CaptureSnapshot();
+    
+    // [FIX] Traffic Enforcer: Check for Reflex Signal
+    if (g_perfGuardian.ConsumeEmergencySignal()) {
+        telemetry.requiresPerformanceBoost = true;
+    }
 
     // auto& ctx = PManContext::Get(); // [FIX] Removed redefinition (declared at top of function)
     // Safety: Ensure subsystems are initialized
@@ -567,7 +572,11 @@ static void RunAutonomousCycle() {
                       " Intent:[" + (intentReset ? "Reset" : std::to_string((int)rawIntent)) + 
                       " (" + std::to_string(intentCount) + "/3)]" +
                       " Rsn:" + std::to_string((int)decision.reason);
-    Log(log);
+    
+    // [FIX] Log Silencer: Only log if we actually DID something or failed to do something intended
+    if (decision.selectedAction != BrainAction::Maintain || sbResult.executed) {
+        Log(log);
+    }
 
     // Update persistent state for next tick's Outcome Guard
     g_lastPredicted = shadowDelta;

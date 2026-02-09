@@ -892,41 +892,21 @@ void PerformanceGuardian::LogStutterData(const std::wstring& exeName, const Syst
 }
 
 void PerformanceGuardian::TriggerEmergencyBoost(DWORD pid) {
-    // This runs on the IOCP thread
-    Log("[PERF] >>> EMERGENCY BOOST ACTIVATED for PID " + std::to_string(pid) + " <<<");
-    
-    UniqueHandle hProc(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid));
-    if (hProc) {
-        // Fix: Use HIGH instead of REALTIME to prevent system lockup
-        SetPriorityClass(hProc.get(), HIGH_PRIORITY_CLASS);
-        
-        PROCESS_MEMORY_COUNTERS pmc;
-        if (GetProcessMemoryInfo(hProc.get(), &pmc, sizeof(pmc))) {
-            // [FIX] Memory Safety: Calculate safe buffer based on system RAM
-            MEMORYSTATUSEX ms = { sizeof(ms) };
-            GlobalMemoryStatusEx(&ms);
-
-            // Use 10% of total RAM or 500MB, whichever is SMALLER
-            SIZE_T buffer = (std::min)(static_cast<SIZE_T>(500 * 1024 * 1024), static_cast<SIZE_T>(ms.ullTotalPhys / 10));
-    
-            // Ensure we don't exceed available RAM
-            if (buffer > ms.ullAvailPhys) buffer = static_cast<SIZE_T>(ms.ullAvailPhys / 2);
-
-            SIZE_T target = pmc.WorkingSetSize + buffer;
-            SIZE_T minSize = (std::min)(static_cast<SIZE_T>(200 * 1024 * 1024), target / 2);
-
-            SetProcessWorkingSetSize(hProc.get(), minSize, target);
-            Log("[PERF] Emergency Boost: Added " + std::to_string(buffer/1024/1024) + "MB to working set.");
-        }
+    // [FIX] Traffic Enforcer: Do not act directly. Signal the Brain.
+    // Logging the PID resolves C4100 warning and aids diagnostics.
+    if (!m_emergencySignal.load()) {
+        m_emergencySignal.store(true);
+        Log("[PERF] Stutter detected in PID " + std::to_string(pid) + ". Signaling Brain for Emergency Boost.");
     }
-    
-    ::SuspendBackgroundServices();
-    SetTimerResolution(1);
 }
 
 bool PerformanceGuardian::HasActiveSessions() {
     std::lock_guard lock(m_mtx);
     return !m_sessions.empty();
+}
+
+bool PerformanceGuardian::ConsumeEmergencySignal() {
+    return m_emergencySignal.exchange(false); // Read and reset in one atomic op
 }
 
 bool PerformanceGuardian::IsOptimizationAllowed(const std::wstring& exeName, const std::string& feature) {

@@ -106,6 +106,14 @@ GovernorDecision PerformanceGovernor::Decide(const SystemSignalSnapshot& snapsho
     // 2. Identify Pressure
     decision.dominant = SelectDominant(sig);
 
+    // [FIX] Traffic Enforcer: If Old PMan screams, we override everything.
+    if (snapshot.requiresPerformanceBoost) {
+        decision.mode = SystemMode::Interactive;
+        decision.dominant = DominantPressure::Latency;
+        decision.allowedActions = AllowedActionClass::PerformanceBoost;
+        return decision; 
+    }
+
     // [DCM] Override Dominant Pressure if Security Signal is High
     // We treat Security Pressure as a "Super-Dominant" factor that overrides normal resource pressure
     // because fighting AV IO is futile; we must shield instead.

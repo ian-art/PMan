@@ -335,10 +335,12 @@ enum class AllowedActionClass : uint8_t {
     IoPrioritization,  // I/O priorities
     MemoryReclaim,     // Working set trimming
     ThermalSafety,     // Throttling only
-    SecurityMitigation // [DCM] Universal Foreground Shielding
+    SecurityMitigation, // [DCM] Universal Foreground Shielding
+    PerformanceBoost    // [FIX] Traffic Enforcer: Explicit permission for reflex boosts
 };
 
 struct SystemSignalSnapshot {
+    bool requiresPerformanceBoost; // [FIX] Signal from Old PMan (Reflex)
     double cpuLoad;            // 0.0 - 100.0
     double cpuSaturation;      // Processor Queue Length (Ready threads)
     uint32_t contextSwitches;  // Context Switches / sec

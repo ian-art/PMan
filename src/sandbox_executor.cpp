@@ -75,8 +75,10 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         return result;
     }
 
-    // 1. Strict Allowlist (Reversibility Check - Only Throttle_Mild and Shield_Foreground)
-    if (decision.selectedAction != BrainAction::Throttle_Mild && decision.selectedAction != BrainAction::Shield_Foreground) {
+    // 1. Strict Allowlist (Reversibility Check)
+    if (decision.selectedAction != BrainAction::Throttle_Mild && 
+        decision.selectedAction != BrainAction::Shield_Foreground &&
+        decision.selectedAction != BrainAction::Boost_Process) { // [FIX] Allow Boost
         result.executed = false;
         result.reversible = false; // Strictly forbidden
         result.committed = false;
@@ -163,6 +165,19 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     } 
     else if (decision.selectedAction == BrainAction::Shield_Foreground) {
         success = SetPriorityClass(m_hTarget, ABOVE_NORMAL_PRIORITY_CLASS);
+    }
+    else if (decision.selectedAction == BrainAction::Boost_Process) {
+        // [FIX] Active Enforcer: High Priority for Games/Browsers
+        // If target is self (default), switch to foreground window
+        if (targetPid == GetCurrentProcessId()) {
+             CloseHandle(m_hTarget);
+             GetWindowThreadProcessId(GetForegroundWindow(), &targetPid);
+             m_hTarget = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
+        }
+
+        if (m_hTarget) {
+            success = SetPriorityClass(m_hTarget, HIGH_PRIORITY_CLASS);
+        }
     }
     
     if (success) {

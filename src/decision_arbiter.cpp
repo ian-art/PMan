@@ -34,11 +34,17 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
     // 1. Identify Candidate
     BrainAction intentAction = MapIntentToAction(govDecision);
 
-    // [LOGIC] "Active Ready State" Promotion
-    // If the Governor wants to Maintain (Idle), but the user forbids Inaction,
-    // we promote the intent to "Boost_Process" to keep the system ready.
-    if (intentAction == BrainAction::Maintain && maintainForbidden) {
-        intentAction = BrainAction::Boost_Process;
+    // [FIX] Hysteresis (Sticky Boost)
+    // If we are currently "Maintaining" (Governor sees no pressure), but we successfully
+    // boosted recently (within 5s), we sustain the boost to prevent rapid toggling.
+    if (intentAction == BrainAction::Maintain) {
+        auto it = m_cooldowns.find(BrainAction::Boost_Process);
+        if (it != m_cooldowns.end()) {
+             // If we boosted less than 5 seconds ago
+             if ((decision.decisionTime - it->second) < 5000) {
+                 intentAction = BrainAction::Boost_Process;
+             }
+        }
     }
     
     // 2. Evaluate Constraints
@@ -195,6 +201,10 @@ bool DecisionArbiter::CheckHardRejection(const GovernorDecision& gov, const Cons
 }
 
 bool DecisionArbiter::CheckCooldown(BrainAction action, DecisionReason& outReason) {
+    // [FIX] Traffic Enforcer: Emergency Boosts bypass cooldowns.
+    // We want them to sustain continuously if the signal persists.
+    if (action == BrainAction::Boost_Process) return true;
+
     // Stateless except for bounded cooldown timers
     auto it = m_cooldowns.find(action);
     if (it != m_cooldowns.end()) {
@@ -241,6 +251,9 @@ BrainAction DecisionArbiter::MapIntentToAction(const GovernorDecision& gov) {
                 return BrainAction::Throttle_Mild; // Suppress contention
             }
             return BrainAction::Release_Pressure; // Boost foreground I/O
+
+        case AllowedActionClass::PerformanceBoost:
+            return BrainAction::Boost_Process;
 
         case AllowedActionClass::Scheduling:
             // CPU Contention logic

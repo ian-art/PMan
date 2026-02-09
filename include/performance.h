@@ -86,6 +86,7 @@ private:
     };
 
     std::mutex m_mtx;
+    std::atomic<bool> m_emergencySignal{false}; // [FIX] Thread-safe signal flag
     std::unordered_map<DWORD, GameSession> m_sessions;
     
     // PerformanceGuardian now owns the Static Profiles (Memory)
@@ -127,6 +128,9 @@ public:
 
     // Emergency response
     void TriggerEmergencyBoost(DWORD pid);
+    
+    // [FIX] Traffic Enforcer Signal
+    bool ConsumeEmergencySignal(); 
 
     // Is gaming boost active?
     bool HasActiveSessions();

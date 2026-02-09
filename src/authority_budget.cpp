@@ -64,8 +64,10 @@ int AuthorityBudget::GetCost(BrainAction action) const {
 
         case BrainAction::Release_Pressure:
         case BrainAction::Shield_Foreground:
-        case BrainAction::Boost_Process:
             return 20; // Boosting is a high-privilege action
+
+        case BrainAction::Boost_Process:
+            return 1; // [FIX] Nominal cost for "Traffic Enforcer" maintenance to prevent budget exhaustion
 
         case BrainAction::Suspend_Services:
             return 30; // Very high impact, drains budget quickly
