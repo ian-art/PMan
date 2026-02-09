@@ -132,14 +132,29 @@ InvestigationVerdict Investigator::Diagnose(const GovernorDecision& govState) {
     // 3. Analyze Process Responsiveness (Hung Window Check)
     // If we are about to Throttle a process, we must ensure it isn't actually Hung.
     // If it is Hung, we shouldn't throttle it (it needs restart/alert).
-    if (govState.targetPid > 0) {
-        DiagnosisType hangDiag = ProbeHungWindow(govState.targetPid);
+    
+    // [FIX] Fallback: Check Foreground Window if no target is specified.
+    // This catches scenarios where the user interface is frozen (Deadlock) but CPU usage is low.
+    DWORD checkPid = govState.targetPid;
+    if (checkPid == 0) {
+        HWND hFg = GetForegroundWindow();
+        if (hFg) GetWindowThreadProcessId(hFg, &checkPid);
+    }
+
+    if (checkPid > 0) {
+        DiagnosisType hangDiag = ProbeHungWindow(checkPid);
         
         if (hangDiag == DiagnosisType::Process_Deadlocked) {
             verdict.resolved = true;
             verdict.type = hangDiag;
             verdict.recommendVeto = true; // Don't throttle a dead app
             verdict.confidenceBoost = 1.0;
+
+            // [LOG] Explicitly log foreground hangs as they might not be the primary target
+            if (govState.targetPid == 0) {
+                Log("[INV] CRITICAL: Foreground Window (PID " + std::to_string(checkPid) + ") is Deadlocked/Hung.");
+            }
+
             return verdict;
         }
     }
