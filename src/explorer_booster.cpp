@@ -371,15 +371,19 @@ void ExplorerBooster::ApplyBoosts(DWORD pid, ExplorerBoostState state) {
         isDwm = true; // Fallback
     }
 
-    if (isDwm) {
-        if (m_config.boostDwm) {
-             // Safe: HIGH Priority (Not Realtime). No other tweaks allowed.
-             if (SetPriorityClass(hProc, HIGH_PRIORITY_CLASS)) {
-                 if (logSuccess) Log("[EXPLORER] DWM Boosted (Safe Mode: High Priority Only)");
-             }
+    // [FIX] Ensure we only boost DWM for the active console session
+    DWORD sessionID = 0;
+    if (ProcessIdToSessionId(pid, &sessionID) && sessionID == WTSGetActiveConsoleSessionId()) {
+        if (isDwm) {
+            if (m_config.boostDwm) {
+                 // Safe: HIGH Priority (Not Realtime). No other tweaks allowed.
+                 if (SetPriorityClass(hProc, HIGH_PRIORITY_CLASS)) {
+                     if (logSuccess) Log("[EXPLORER] DWM Boosted (Safe Mode: High Priority Only)");
+                 }
+            }
+            it->second.state = state;
+            return; // <--- CRITICAL: Return early to skip IO/Power/Memory hacks
         }
-        it->second.state = state;
-        return; // <--- CRITICAL: Return early to skip IO/Power/Memory hacks
     }
 
     // 1. Disable Power Throttling (EcoQoS)
