@@ -250,9 +250,18 @@ void IpcServer::ProcessRequest(const std::string& request, std::string& response
             resp["status"] = "denied";
             resp["message"] = "Requires Administrator";
         } else {
+            // [FIX] Extract payload from envelope
+            if (!req.contains("data")) {
+                resp["status"] = "error";
+                resp["message"] = "Protocol Error: Missing data field";
+                response = resp.dump();
+                return;
+            }
+            const auto& payload = req["data"];
+
             // Check for special subsystems first
-            if (req.contains("policy")) {
-                auto& pol = req["policy"];
+            if (payload.contains("policy")) {
+                const auto& pol = payload["policy"];
                 PolicyLimits limits;
                 if (pol.contains("max_authority_budget")) limits.maxAuthorityBudget = pol["max_authority_budget"];
                 if (pol.contains("min_confidence")) {
@@ -260,7 +269,7 @@ void IpcServer::ProcessRequest(const std::string& request, std::string& response
                     limits.minConfidence.latencyVariance = pol["min_confidence"].value("latency_variance", 0.02);
                 }
                 if (pol.contains("allowed_actions")) {
-                    for (auto& act : pol["allowed_actions"]) {
+                    for (const auto& act : pol["allowed_actions"]) {
                         limits.allowedActions.insert(act.get<int>());
                     }
                 }
@@ -275,8 +284,8 @@ void IpcServer::ProcessRequest(const std::string& request, std::string& response
                     resp["message"] = "Policy Engine not ready";
                 }
             }
-            else if (req.contains("verdict")) {
-                 auto& v = req["verdict"];
+            else if (payload.contains("verdict")) {
+                 const auto& v = payload["verdict"];
                  std::string status = v.value("status", "ALLOW");
                  int duration = v.value("duration_sec", 3600);
                  
@@ -288,8 +297,8 @@ void IpcServer::ProcessRequest(const std::string& request, std::string& response
                  resp["status"] = "ok";
                  Log("[IPC] External Verdict applied: " + status);
             }
-            else if (req.contains("debug") && req["debug"].contains("faults")) {
-                auto& f = req["debug"]["faults"];
+            else if (payload.contains("debug") && payload["debug"].contains("faults")) {
+                const auto& f = payload["debug"]["faults"];
                 auto& ctxFault = PManContext::Get().fault;
                 
                 ctxFault.ledgerWriteFail = f.value("ledger_write_fail", false);
@@ -302,8 +311,8 @@ void IpcServer::ProcessRequest(const std::string& request, std::string& response
                 Log("[IPC] Debug Faults injected.");
             }
             else {
-                // Standard Configuration
-                if (SecureConfigManager::ApplyConfig(req)) {
+                // Standard Configuration (Global, Explorer, Lists)
+                if (SecureConfigManager::ApplyConfig(payload)) {
                     resp["status"] = "ok";
                     g_reloadNow.store(true); // Trigger internal re-read if needed
                     Log("[IPC] Configuration updated securely.");
