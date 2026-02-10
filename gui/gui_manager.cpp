@@ -20,6 +20,8 @@
 #include "gui_manager.h"
 #include "static_tweaks.h"
 #include "config.h"
+#include "ipc_client.h" // [PATCH] IPC Client Integration
+#include "nlohmann/json.hpp" // [PATCH] JSON Support
 #include "logger.h"
 #include "utils.h" // For GetCurrentExeVersion
 #include "context.h"
@@ -32,6 +34,8 @@
 #include <dwmapi.h> // Required for transparency
 #include <tchar.h>
 #include <string>
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 
 #include "imgui.h"
@@ -71,6 +75,9 @@ namespace GuiManager {
 
     // Config Window State
     struct ConfigState {
+        // Rate Limiting
+        uint64_t lastSaveTime = 0; // [PATCH] Cool-down timer
+
         // Tab 1: Global
         bool ignoreNonInteractive = true;
         bool restoreOnExit = true;
@@ -115,6 +122,90 @@ namespace GuiManager {
         int durationHours = 24;
     };
     static ConfigState g_configState;
+
+// [PATCH] List Editor State
+    struct ListEditorState {
+        bool initialized = false;
+        int selectedCategory = 0;
+        char inputBuf[256] = "";
+        
+        // Local copies of the lists (UTF-8 for ImGui)
+        std::vector<std::string> games;
+        std::vector<std::string> browsers;
+        std::vector<std::string> videoPlayers;
+        std::vector<std::string> backgroundApps;
+        std::vector<std::string> ignored;
+        std::vector<std::string> launchers;
+        std::vector<std::string> oldGames;
+        std::vector<std::string> gameWindows;
+        std::vector<std::string> browserWindows;
+
+        void Load() {
+            if (initialized) return;
+            std::shared_lock lg(g_setMtx); // Lock while reading globals
+            
+            auto CopySet = [](const std::unordered_set<std::wstring>& src, std::vector<std::string>& dst) {
+                dst.clear();
+                for (const auto& item : src) dst.push_back(WideToUtf8(item.c_str()));
+                std::sort(dst.begin(), dst.end()); // Sort for display
+            };
+
+            CopySet(g_games, games);
+            CopySet(g_browsers, browsers);
+            CopySet(g_videoPlayers, videoPlayers);
+            CopySet(GetBackgroundAppsShadow(), backgroundApps); // [FIX] Use public accessor
+            CopySet(g_ignoredProcesses, ignored);
+            CopySet(g_customLaunchers, launchers);
+            CopySet(g_oldGames, oldGames);
+            CopySet(g_gameWindows, gameWindows);
+            CopySet(g_browserWindows, browserWindows);
+            
+            initialized = true;
+        }
+
+        void Reset() { initialized = false; }
+    };
+    static ListEditorState g_listState;
+
+    // Helper: Render a single list editor
+    static void RenderListEditor(const char* label, std::vector<std::string>& items, char* inputBuf, size_t bufSize) {
+        ImGui::Text("%s (%zu items)", label, items.size());
+        ImGui::Separator();
+        
+        // Add Item Section
+        ImGui::InputText("##add", inputBuf, bufSize);
+        ImGui::SameLine();
+        if (ImGui::Button("Add") && inputBuf[0] != '\0') {
+            std::string newItem = inputBuf;
+            // Simple validation: lowercase
+            for (auto& c : newItem) c = (char)tolower(c); // [FIX] Explicit cast to silence C4244
+            
+            // Avoid duplicates
+            if (std::find(items.begin(), items.end(), newItem) == items.end()) {
+                items.push_back(newItem);
+                std::sort(items.begin(), items.end());
+                inputBuf[0] = '\0'; // Clear input
+            }
+        }
+        ImGui::Spacing();
+
+        // List Section
+        ImGui::BeginChild("ListScroll", ImVec2(0, -40), true); // Leave room for Save button outside this helper if needed? 
+        // Actually, let's just make the list scrollable
+        
+        for (auto it = items.begin(); it != items.end(); ) {
+            ImGui::PushID(it->c_str());
+            if (ImGui::Button("X")) {
+                it = items.erase(it);
+            } else {
+                ImGui::SameLine();
+                ImGui::TextUnformatted(it->c_str());
+                ++it;
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+    }
 
     // Log Viewer State
     static std::string g_logBuffer;
@@ -564,39 +655,56 @@ namespace GuiManager {
                     ImGui::SameLine();
 
                     if (ImGui::Button("Save Settings", ImVec2(140, 32))) {
-                        // Apply to Global State
-                        g_ignoreNonInteractive.store(g_configState.ignoreNonInteractive);
-                        g_restoreOnExit.store(g_configState.restoreOnExit);
-                        g_lockPolicy.store(g_configState.lockPolicy);
-                        g_suspendUpdatesDuringGames.store(g_configState.suspendUpdates);
-                        g_idleRevertEnabled.store(g_configState.idleRevert);
-                        g_idleTimeoutMs.store(g_configState.idleTimeoutSec * 1000);
-                        g_responsivenessRecoveryEnabled.store(g_configState.recovery);
-                        g_recoveryPromptEnabled.store(g_configState.recoveryPrompt);
-                        
-                        {
-                            std::unique_lock lg(g_setMtx);
-                            g_iconTheme = Utf8ToWide(g_configState.iconTheme);
-                        }
+                        // [PATCH] Rate Limiting (Prevent Pipe Spam)
+                        uint64_t now = GetTickCount64();
+                        if (now - g_configState.lastSaveTime < 1000) {
+                            MessageBoxW(g_hwnd, L"Please wait before saving again.", L"Cool-down", MB_OK);
+                        } else {
+                            g_configState.lastSaveTime = now;
 
-                        // Save Explorer Config
-                        ExplorerConfig ec;
-                        ec.enabled = g_configState.expEnabled;
-                        ec.idleThresholdMs = g_configState.expIdleThresholdSec * 1000;
-                        ec.boostDwm = g_configState.boostDwm;
-                        ec.boostIoPriority = g_configState.boostIo;
-                        ec.disablePowerThrottling = g_configState.disableEco;
-                        ec.preventShellPaging = g_configState.preventPaging;
-                        ec.scanIntervalMs = g_configState.scanIntervalSec * 1000;
-                        ec.debugLogging = g_configState.debugLog;
-                        
-                        SetExplorerConfigShadow(ec);
-                        
-                        // Save to File
-                        SaveConfig();
-                        g_reloadNow.store(true);
-                        
-                        //MessageBoxW(g_hwnd, L"Configuration saved successfully.", L"PMan", MB_OK);
+                            // 1. Construct JSON Payload
+                            nlohmann::json root;
+                            
+                            // Section: Global
+                            root["global"]["ignore_non_interactive"] = g_configState.ignoreNonInteractive;
+                            root["global"]["restore_on_exit"] = g_configState.restoreOnExit;
+                            root["global"]["lock_policy"] = g_configState.lockPolicy;
+                            root["global"]["suspend_updates_during_games"] = g_configState.suspendUpdates;
+                            root["global"]["idle_revert_enabled"] = g_configState.idleRevert;
+                            root["global"]["idle_timeout"] = std::to_string(g_configState.idleTimeoutSec) + "s";
+                            root["global"]["responsiveness_recovery"] = g_configState.recovery;
+                            root["global"]["recovery_prompt"] = g_configState.recoveryPrompt;
+                            root["global"]["icon_theme"] = g_configState.iconTheme;
+
+                            // Section: Explorer
+                            root["explorer"]["enabled"] = g_configState.expEnabled;
+                            root["explorer"]["idle_threshold"] = std::to_string(g_configState.expIdleThresholdSec) + "s";
+                            root["explorer"]["boost_dwm"] = g_configState.boostDwm;
+                            root["explorer"]["boost_io_priority"] = g_configState.boostIo;
+                            root["explorer"]["disable_power_throttling"] = g_configState.disableEco;
+                            root["explorer"]["prevent_shell_paging"] = g_configState.preventPaging;
+                            root["explorer"]["scan_interval"] = std::to_string(g_configState.scanIntervalSec) + "s";
+                            root["explorer"]["debug_logging"] = g_configState.debugLog;
+
+                            // 2. Send via IPC
+                            IpcClient::Response resp = IpcClient::SendConfig(root);
+
+                            // 3. UI Feedback
+                            if (resp.success) {
+                                MessageBoxW(g_hwnd, L"Configuration saved to Service.", L"Success", MB_OK | MB_ICONINFORMATION);
+                                
+                                // Update local state for immediate feedback
+                                g_ignoreNonInteractive.store(g_configState.ignoreNonInteractive);
+                                g_restoreOnExit.store(g_configState.restoreOnExit);
+                                // ... (Other atomic updates can remain for immediate UI responsiveness, 
+                                // but true logic update happens when Service processes the config)
+                            } else {
+                                std::wstring errMsg = Utf8ToWide(resp.message.c_str());
+                                MessageBoxW(g_hwnd, errMsg.c_str(), 
+                                    resp.denied ? L"Access Denied" : L"Save Failed", 
+                                    MB_OK | MB_ICONERROR);
+                            }
+                        }
                     }
 
                     EndCard();
@@ -646,22 +754,45 @@ namespace GuiManager {
                     ImGui::SameLine();
 
                     if (ImGui::Button("Save Settings", ImVec2(140, 32))) {
-                        // Apply Explorer Config
-                        ExplorerConfig ec;
-                        ec.enabled = g_configState.expEnabled;
-                        ec.idleThresholdMs = g_configState.expIdleThresholdSec * 1000;
-                        ec.boostDwm = g_configState.boostDwm;
-                        ec.boostIoPriority = g_configState.boostIo;
-                        ec.disablePowerThrottling = g_configState.disableEco;
-                        ec.preventShellPaging = g_configState.preventPaging;
-                        ec.scanIntervalMs = g_configState.scanIntervalSec * 1000;
-                        ec.debugLogging = g_configState.debugLog;
+                        // [PATCH] Trigger the main save logic (reusing Global Tab logic for consistency)
+                        // In a real refactor, this should be a shared function.
+                        // For now, we replicate the JSON construction to ensure all fields are sent.
+                        
+                         uint64_t now = GetTickCount64();
+                        if (now - g_configState.lastSaveTime < 1000) {
+                            MessageBoxW(g_hwnd, L"Please wait before saving again.", L"Cool-down", MB_OK);
+                        } else {
+                            g_configState.lastSaveTime = now;
 
-                        SetExplorerConfigShadow(ec);
-                        SaveConfig();
-                        g_reloadNow.store(true);
+                            nlohmann::json root;
+                            // Section: Global (Must include to avoid overwriting with defaults if partial updates aren't supported)
+                            root["global"]["ignore_non_interactive"] = g_configState.ignoreNonInteractive;
+                            root["global"]["restore_on_exit"] = g_configState.restoreOnExit;
+                            root["global"]["lock_policy"] = g_configState.lockPolicy;
+                            root["global"]["suspend_updates_during_games"] = g_configState.suspendUpdates;
+                            root["global"]["idle_revert_enabled"] = g_configState.idleRevert;
+                            root["global"]["idle_timeout"] = std::to_string(g_configState.idleTimeoutSec) + "s";
+                            root["global"]["responsiveness_recovery"] = g_configState.recovery;
+                            root["global"]["recovery_prompt"] = g_configState.recoveryPrompt;
+                            root["global"]["icon_theme"] = g_configState.iconTheme;
 
-                        //MessageBoxW(g_hwnd, L"Explorer settings saved successfully.", L"PMan", MB_OK);
+                            // Section: Explorer (The focus of this tab)
+                            root["explorer"]["enabled"] = g_configState.expEnabled;
+                            root["explorer"]["idle_threshold"] = std::to_string(g_configState.expIdleThresholdSec) + "s";
+                            root["explorer"]["boost_dwm"] = g_configState.boostDwm;
+                            root["explorer"]["boost_io_priority"] = g_configState.boostIo;
+                            root["explorer"]["disable_power_throttling"] = g_configState.disableEco;
+                            root["explorer"]["prevent_shell_paging"] = g_configState.preventPaging;
+                            root["explorer"]["scan_interval"] = std::to_string(g_configState.scanIntervalSec) + "s";
+                            root["explorer"]["debug_logging"] = g_configState.debugLog;
+
+                            IpcClient::Response resp = IpcClient::SendConfig(root);
+                             if (resp.success) {
+                                MessageBoxW(g_hwnd, L"Explorer settings synced to Service.", L"Success", MB_OK | MB_ICONINFORMATION);
+                            } else {
+                                MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Error", MB_OK | MB_ICONERROR);
+                            }
+                        }
                     }
 
                     EndCard();
@@ -832,10 +963,25 @@ namespace GuiManager {
                             // Ensure Maintain is present if user checked it (redundant safety)
                             if (g_configState.allowMaintain) limits.allowedActions.insert((int)BrainAction::Maintain);
                             
-                            // Save Policy
-                            if (PManContext::Get().subs.policy) {
-                                PManContext::Get().subs.policy->Save(GetLogPath() / L"policy.json", limits);
-                                g_reloadNow.store(true); // Trigger hot-reload
+                            // [PATCH] Send Policy via IPC
+                            nlohmann::json root;
+                            root["policy"]["max_authority_budget"] = limits.maxAuthorityBudget;
+                            root["policy"]["min_confidence"]["cpu_variance"] = limits.minConfidence.cpuVariance;
+                            root["policy"]["min_confidence"]["latency_variance"] = limits.minConfidence.latencyVariance;
+                            
+                            // Serialize Allowed Actions Set
+                            root["policy"]["allowed_actions"] = nlohmann::json::array();
+                            for (int action : limits.allowedActions) {
+                                root["policy"]["allowed_actions"].push_back(action);
+                            }
+
+                            // Send
+                            IpcClient::Response resp = IpcClient::SendConfig(root);
+                            
+                            if (resp.success) {
+                                MessageBoxW(g_hwnd, L"Policy applied successfully.", L"PMan Governor", MB_OK | MB_ICONINFORMATION);
+                            } else {
+                                MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Policy Rejected", MB_OK | MB_ICONERROR);
                             }
                         }
                     }
@@ -862,18 +1008,34 @@ namespace GuiManager {
                     ImGui::Separator();
 
                     if (ImGui::Button("Revoke Authority Now", ImVec2(180, 32))) {
-                        ExternalVerdict::SaveVerdict(GetLogPath() / L"verdict.json", VerdictType::DENY, 3600);
+                        // [PATCH] IPC Panic Button
+                        nlohmann::json root;
+                        root["verdict"]["status"] = "DENY";
+                        root["verdict"]["duration_sec"] = 3600;
+                        
+                        IpcClient::SendConfig(root); // Fire and forget for panic button
+                        MessageBoxW(g_hwnd, L"Emergency Stop Signal Sent.", L"PMan", MB_OK | MB_ICONWARNING);
                     }
                     HelpMarker("PANIC BUTTON: Immediately stops the AI from doing anything for 1 hour.");
 
                     ImGui::SameLine();
                     
                     if (ImGui::Button("Grant Authority", ImVec2(180, 32))) {
-                        VerdictType type = VerdictType::ALLOW;
-                        if (g_configState.verdictIdx == 1) type = VerdictType::DENY;
-                        if (g_configState.verdictIdx == 2) type = VerdictType::CONSTRAIN;
+                        // [PATCH] IPC Verdict
+                        nlohmann::json root;
+                        std::string vStr = "ALLOW";
+                        if (g_configState.verdictIdx == 1) vStr = "DENY";
+                        if (g_configState.verdictIdx == 2) vStr = "CONSTRAIN";
                         
-                        ExternalVerdict::SaveVerdict(GetLogPath() / L"verdict.json", type, g_configState.durationHours * 3600);
+                        root["verdict"]["status"] = vStr;
+                        root["verdict"]["duration_sec"] = g_configState.durationHours * 3600;
+
+                        IpcClient::Response resp = IpcClient::SendConfig(root);
+                        if (resp.success) {
+                            MessageBoxW(g_hwnd, L"Verdict updated.", L"Success", MB_OK);
+                        } else {
+                            MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Error", MB_OK | MB_ICONERROR);
+                        }
                     }
                     HelpMarker("Applies the selected Status and Duration.");
 
@@ -882,20 +1044,82 @@ namespace GuiManager {
                 }
 
                 if (ImGui::BeginTabItem("Lists")) {
+                    // [PATCH] Real List Editor
+                    g_listState.Load(); // Ensure local copies are ready
+                    
                     BeginCard("lists", {0.14f, 0.14f, 0.16f, 1.0f});
 
-                    ImGui::TextDisabled("Manage Process Lists");
-                    HelpMarker("Here you can categorize your applications to ensure they get the correct optimization strategy:\n\n"
-                        "- Games: Assigned High Priority and fixed short quantum (0x28) for maximum frame stability.\n"
-                        "- Browsers: Assigned Above Normal priority and variable quantum (0x26) for responsiveness.\n"
-                        "- Video Players: Boosted to prevent playback stuttering.\n"
-                        "- Custom Launchers: Treated as background noise (Low Priority) to save CPU for the actual game.\n"
-                        "- Ignored Processes: System components that PMan should never touch or modify.");
-                    ImGui::Separator();
-                    ImGui::Spacing();
+                    // Layout: Left Sidebar (Categories), Right (Editor)
+                    ImGui::Columns(2, "ListCols", true);
+                    ImGui::SetColumnWidth(0, 160.0f);
 
-                    ImGui::TextDisabled("Editing is disabled in Phase 1 Secure Mode.");
-                    ImGui::TextDisabled("Please edit config.ini directly.");
+                    // Category Selector
+                    const char* categories[] = { 
+                        "Games (Modern)", "Browsers", "Video Players", 
+                        "Background Apps", "Launchers", "Ignored Processes",
+                        "Old Games (DX9/10)", "Game Windows", "Browser Windows"
+                    };
+                    
+                    for (int i = 0; i < IM_ARRAYSIZE(categories); i++) {
+                        if (ImGui::Selectable(categories[i], g_listState.selectedCategory == i)) {
+                            g_listState.selectedCategory = i;
+                        }
+                    }
+                    
+                    ImGui::NextColumn();
+
+                    // Editor Area
+                    std::vector<std::string>* currentList = nullptr;
+                    switch (g_listState.selectedCategory) {
+                        case 0: currentList = &g_listState.games; break;
+                        case 1: currentList = &g_listState.browsers; break;
+                        case 2: currentList = &g_listState.videoPlayers; break;
+                        case 3: currentList = &g_listState.backgroundApps; break;
+                        case 4: currentList = &g_listState.launchers; break;
+                        case 5: currentList = &g_listState.ignored; break;
+                        case 6: currentList = &g_listState.oldGames; break;
+                        case 7: currentList = &g_listState.gameWindows; break;
+                        case 8: currentList = &g_listState.browserWindows; break;
+                    }
+
+                    if (currentList) {
+                        RenderListEditor(categories[g_listState.selectedCategory], *currentList, g_listState.inputBuf, sizeof(g_listState.inputBuf));
+                    }
+                    
+                    ImGui::Columns(1);
+                    ImGui::Separator();
+
+                    // Save Button (Bottom Right)
+                    // We send ALL lists at once to ensure consistency
+                    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 160);
+                    if (ImGui::Button("Save Process Lists", ImVec2(140, 32))) {
+                        nlohmann::json root;
+                        
+                        auto Serialize = [&](const char* key, const std::vector<std::string>& list) {
+                            root[key] = nlohmann::json::array();
+                            for (const auto& item : list) root[key].push_back(item);
+                        };
+
+                        Serialize("games", g_listState.games);
+                        Serialize("browsers", g_listState.browsers);
+                        Serialize("video_players", g_listState.videoPlayers);
+                        Serialize("background_apps", g_listState.backgroundApps);
+                        Serialize("custom_launchers", g_listState.launchers);
+                        Serialize("ignored_processes", g_listState.ignored);
+                        Serialize("old_games", g_listState.oldGames);
+                        Serialize("game_windows", g_listState.gameWindows);
+                        Serialize("browser_windows", g_listState.browserWindows);
+
+                        // Send via IPC
+                        IpcClient::Response resp = IpcClient::SendConfig(root);
+                        
+                        if (resp.success) {
+                            MessageBoxW(g_hwnd, L"Process lists updated securely.", L"Success", MB_OK);
+                            g_listState.Reset(); // Force reload from source on next view
+                        } else {
+                            MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Save Failed", MB_OK | MB_ICONERROR);
+                        }
+                    }
 
                     EndCard();
                     ImGui::EndTabItem();
@@ -933,21 +1157,26 @@ namespace GuiManager {
                     ImGui::Separator();
 
                     if (ImGui::Button("Apply Debug Settings", ImVec2(180, 32))) {
-                        // Apply Faults
-                        auto& f = PManContext::Get().fault;
-                        f.ledgerWriteFail = g_configState.faultLedger;
-                        f.budgetCorruption = g_configState.faultBudget;
-                        f.sandboxError = g_configState.faultSandbox;
-                        f.intentInvalid = g_configState.faultIntent;
-                        f.confidenceInvalid = g_configState.faultConfidence;
-                        Log("[USER] Debug settings applied.");
+                        // [PATCH] IPC Debug
+                        nlohmann::json root;
+                        
+                        // Fault Injection
+                        root["debug"]["faults"]["ledger_write_fail"] = g_configState.faultLedger;
+                        root["debug"]["faults"]["budget_corruption"] = g_configState.faultBudget;
+                        root["debug"]["faults"]["sandbox_error"] = g_configState.faultSandbox;
+                        root["debug"]["faults"]["intent_invalid"] = g_configState.faultIntent;
+                        root["debug"]["faults"]["confidence_invalid"] = g_configState.faultConfidence;
+                        
+                        // Logging
+                        root["explorer"]["debug_logging"] = g_configState.debugLog;
 
-                        // Apply Debug Logging
-                        ExplorerConfig ec = GetExplorerConfigShadow();
-                        ec.debugLogging = g_configState.debugLog;
-                        SetExplorerConfigShadow(ec);
-                        SaveConfig();
-                        g_reloadNow.store(true);
+                        IpcClient::Response resp = IpcClient::SendConfig(root);
+                        if (resp.success) {
+                             Log("[USER] Debug settings sent to Service.");
+                             MessageBoxW(g_hwnd, L"Debug configuration synced.", L"PMan Debug", MB_OK);
+                        } else {
+                             MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Debug Error", MB_OK | MB_ICONERROR);
+                        }
                     }
 
                     EndCard();

@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <vector>
 #include <string>
+#include <unordered_set>
 #include "explorer_booster.h"
 #include "nlohmann/json.hpp" // Required for serialization
 
@@ -36,6 +37,9 @@ public:
     static bool LoadSecureConfig();
     static void SaveSecureConfig();
     static std::filesystem::path GetSecureConfigPath();
+    
+    // [PATCH] IPC Integration: Apply JSON config directly from Service
+    static bool ApplyConfig(const nlohmann::json& j);
 };
 
 void LoadConfig();
@@ -43,6 +47,7 @@ void LoadConfig();
 // Shadow Config Accessors (for GUI)
 void SetExplorerConfigShadow(const ExplorerConfig& cfg);
 ExplorerConfig GetExplorerConfigShadow();
+std::unordered_set<std::wstring> GetBackgroundAppsShadow(); // [FIX] Accessor for background apps
 void SaveConfig();
 bool CreateDefaultConfig(const std::filesystem::path& configPath);
 

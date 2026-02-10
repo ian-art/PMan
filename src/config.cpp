@@ -312,6 +312,110 @@ static bool InternalLoadFile(const std::filesystem::path& path, json& outJson) {
     }
 }
 
+// [PATCH] IPC Integration
+bool SecureConfigManager::ApplyConfig(const json& j) {
+    // 1. Validate Input (Reject malicious paths/names)
+    if (!ConfigValidator::Validate(j)) {
+        Log("[SECURE_CFG] ApplyConfig rejected by validator.");
+        return false;
+    }
+
+    // 2. Apply to Globals (Thread-Safe)
+    try {
+        std::unique_lock lg(g_setMtx);
+        
+        // Helper to update sets only if present in JSON
+        auto UpdateSet = [&](const char* key, std::unordered_set<std::wstring>& target) {
+            if (j.contains(key)) {
+                target.clear();
+                for (const auto& item : j[key]) target.insert(Utf8ToWide(item.get<std::string>().c_str()));
+            }
+        };
+
+        UpdateSet("games", g_games);
+        UpdateSet("browsers", g_browsers);
+        UpdateSet("video_players", g_videoPlayers);
+        UpdateSet("background_apps", g_shadowBackgroundApps);
+        UpdateSet("old_games", g_oldGames);
+        UpdateSet("game_windows", g_gameWindows);
+        UpdateSet("browser_windows", g_browserWindows);
+        UpdateSet("custom_launchers", g_customLaunchers);
+        UpdateSet("ignored_processes", g_ignoredProcesses);
+        
+        if (j.contains("global")) {
+            auto& g = j["global"];
+            if (g.contains("ignore_non_interactive")) g_ignoreNonInteractive.store(g["ignore_non_interactive"]);
+            if (g.contains("restore_on_exit")) g_restoreOnExit.store(g["restore_on_exit"]);
+            if (g.contains("lock_policy")) g_lockPolicy.store(g["lock_policy"]);
+            if (g.contains("suspend_updates_during_games")) g_suspendUpdatesDuringGames.store(g["suspend_updates_during_games"]);
+            if (g.contains("idle_revert_enabled")) g_idleRevertEnabled.store(g["idle_revert_enabled"]);
+            
+            if (g.contains("idle_timeout")) {
+                 std::string s = g["idle_timeout"];
+                 uint32_t ms = 300000;
+                 if (!s.empty()) {
+                     uint32_t mul = 1000;
+                     if (s.back() == 'm') mul = 60000;
+                     try { ms = std::stoi(s.substr(0, s.size()-1)) * mul; } catch(...) {}
+                 }
+                 g_idleTimeoutMs.store(ms);
+            }
+
+            if (g.contains("responsiveness_recovery")) g_responsivenessRecoveryEnabled.store(g["responsiveness_recovery"]);
+            if (g.contains("recovery_prompt")) g_recoveryPromptEnabled.store(g["recovery_prompt"]);
+            if (g.contains("icon_theme")) g_iconTheme = Utf8ToWide(g["icon_theme"].get<std::string>().c_str());
+        }
+
+        if (j.contains("explorer")) {
+            auto& e = j["explorer"];
+            ExplorerConfig cfg = g_lastExplorerConfig; // Start with current
+            
+            if (e.contains("enabled")) cfg.enabled = e["enabled"];
+            if (e.contains("boost_dwm")) cfg.boostDwm = e["boost_dwm"];
+            if (e.contains("boost_io_priority")) cfg.boostIoPriority = e["boost_io_priority"];
+            if (e.contains("disable_power_throttling")) cfg.disablePowerThrottling = e["disable_power_throttling"];
+            if (e.contains("prevent_shell_paging")) cfg.preventShellPaging = e["prevent_shell_paging"];
+            if (e.contains("debug_logging")) cfg.debugLogging = e["debug_logging"];
+
+            if (e.contains("idle_threshold")) {
+                 std::string s = e["idle_threshold"];
+                 uint32_t ms = 15000;
+                 if (!s.empty()) {
+                     uint32_t mul = 1000;
+                     if (s.back() == 'm') mul = 60000;
+                     try { ms = std::stoi(s.substr(0, s.size()-1)) * mul; } catch(...) {}
+                 }
+                 cfg.idleThresholdMs = ms;
+            }
+             if (e.contains("scan_interval")) {
+                 std::string s = e["scan_interval"];
+                 uint32_t ms = 5000;
+                 if (!s.empty()) {
+                     uint32_t mul = 1000;
+                     if (s.back() == 'm') mul = 60000;
+                     try { ms = std::stoi(s.substr(0, s.size()-1)) * mul; } catch(...) {}
+                 }
+                 cfg.scanIntervalMs = ms;
+            }
+
+            g_lastExplorerConfig = cfg;
+            g_explorerBooster.UpdateConfig(cfg);
+        }
+        
+        // Sync Subsystems
+        g_networkMonitor.SetBackgroundApps(g_shadowBackgroundApps);
+
+    } catch (const std::exception& e) {
+        Log("[SECURE_CFG] JSON Apply Error: " + std::string(e.what()));
+        return false;
+    }
+
+    // 3. Persist to Disk (Using the secure saver)
+    // Release lock before saving to avoid IO contention holding the mutex
+    SaveSecureConfig();
+    return true;
+}
+
 bool SecureConfigManager::LoadSecureConfig() {
     json j;
     bool loaded = InternalLoadFile(GetSecureConfigPath(), j);
@@ -1337,4 +1441,9 @@ void SetExplorerConfigShadow(const ExplorerConfig& cfg) {
 ExplorerConfig GetExplorerConfigShadow() {
     std::shared_lock lg(g_setMtx);
     return g_lastExplorerConfig;
+}
+
+std::unordered_set<std::wstring> GetBackgroundAppsShadow() {
+    std::shared_lock lg(g_setMtx);
+    return g_shadowBackgroundApps;
 }

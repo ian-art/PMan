@@ -20,6 +20,11 @@
 #include "ipc_server.h"
 #include "logger.h"
 #include "globals.h"
+#include "config.h"           // [PATCH] For SecureConfigManager
+#include "context.h"          // [PATCH] For Policy/Faults
+#include "policy.h"           // [FIX] Required for PolicyGuard class definition
+#include "policy_contract.h"  // [FIX] Required for PolicyLimits struct definition
+#include "external_verdict.h" // [PATCH] For Verdict
 #include <sddl.h>
 #include <aclapi.h>
 #include <vector>
@@ -237,6 +242,76 @@ void IpcServer::ProcessRequest(const std::string& request, std::string& response
             g_reloadNow.store(true);
             resp["status"] = "ok";
             Log("[IPC] Admin triggered Config Reload.");
+        }
+    }
+    // [PATCH] Handle Configuration Update
+    else if (cmd == "SET_CONFIG") {
+        if (!isAdmin) {
+            resp["status"] = "denied";
+            resp["message"] = "Requires Administrator";
+        } else {
+            // Check for special subsystems first
+            if (req.contains("policy")) {
+                auto& pol = req["policy"];
+                PolicyLimits limits;
+                if (pol.contains("max_authority_budget")) limits.maxAuthorityBudget = pol["max_authority_budget"];
+                if (pol.contains("min_confidence")) {
+                    limits.minConfidence.cpuVariance = pol["min_confidence"].value("cpu_variance", 0.01);
+                    limits.minConfidence.latencyVariance = pol["min_confidence"].value("latency_variance", 0.02);
+                }
+                if (pol.contains("allowed_actions")) {
+                    for (auto& act : pol["allowed_actions"]) {
+                        limits.allowedActions.insert(act.get<int>());
+                    }
+                }
+                
+                if (PManContext::Get().subs.policy) {
+                    PManContext::Get().subs.policy->Save(GetLogPath() / L"policy.json", limits);
+                    g_reloadNow.store(true);
+                    resp["status"] = "ok";
+                    Log("[IPC] Policy updated via Service.");
+                } else {
+                    resp["status"] = "error";
+                    resp["message"] = "Policy Engine not ready";
+                }
+            }
+            else if (req.contains("verdict")) {
+                 auto& v = req["verdict"];
+                 std::string status = v.value("status", "ALLOW");
+                 int duration = v.value("duration_sec", 3600);
+                 
+                 VerdictType type = VerdictType::ALLOW;
+                 if (status == "DENY") type = VerdictType::DENY;
+                 if (status == "CONSTRAIN") type = VerdictType::CONSTRAIN;
+
+                 ExternalVerdict::SaveVerdict(GetLogPath() / L"verdict.json", type, duration);
+                 resp["status"] = "ok";
+                 Log("[IPC] External Verdict applied: " + status);
+            }
+            else if (req.contains("debug") && req["debug"].contains("faults")) {
+                auto& f = req["debug"]["faults"];
+                auto& ctxFault = PManContext::Get().fault;
+                
+                ctxFault.ledgerWriteFail = f.value("ledger_write_fail", false);
+                ctxFault.budgetCorruption = f.value("budget_corruption", false);
+                ctxFault.sandboxError = f.value("sandbox_error", false);
+                ctxFault.intentInvalid = f.value("intent_invalid", false);
+                ctxFault.confidenceInvalid = f.value("confidence_invalid", false);
+                
+                resp["status"] = "ok";
+                Log("[IPC] Debug Faults injected.");
+            }
+            else {
+                // Standard Configuration
+                if (SecureConfigManager::ApplyConfig(req)) {
+                    resp["status"] = "ok";
+                    g_reloadNow.store(true); // Trigger internal re-read if needed
+                    Log("[IPC] Configuration updated securely.");
+                } else {
+                    resp["status"] = "error";
+                    resp["message"] = "Validation Failed";
+                }
+            }
         }
     }
     else {
