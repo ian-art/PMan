@@ -2,15 +2,15 @@
 
 ## Overview
 
-PMan v5 represents a paradigm shift from a **Rule-Based System** to an **Autonomous Agent**. Instead of static "If/Then" triggers, the system operates on a **Cognitive Control Loop** (Observation → Prediction → Arbitration → Execution → Learning).
+PMan v5 represents a shift from a **Rule-Based System** to an **Adaptive Control System**. Instead of static "If/Then" triggers, the system operates on a **Feedback Control Loop** (Observation → Prediction → Arbitration → Execution → Learning).
 
-The system is designed as a **Governor**, not a simple optimizer. It possesses a "budget" of authority and must "pay" for interventions using confidence credits. If its predictions fail to materialize in reality, it loses confidence and reduces its own authority.
+The system is designed as a **Governor**, not a simple optimizer. It possesses a "budget" of authority and must "pay" for interventions. If its predictions fail to materialize in reality (e.g., latency increases despite optimization), it updates its statistical model to reduce confidence in that action.
 
 ---
 
-## The Cognitive Pipeline (The "Brain")
+## The Control Pipeline (The "Brain")
 
-The core logic resides in `RunAutonomousCycle`, executing the following pipeline once per tick:
+The core logic resides in `RunAutonomousCycle` (in `main.cpp`), executing the following pipeline once per tick:
 ```mermaid
 graph TD
     Sensors[System Telemetry + SRAM] --> Governor
@@ -40,15 +40,15 @@ graph TD
 
 **SystemSignalSnapshot**: A normalized vector containing CPU load, saturation (Queue Length), memory pressure, disk I/O, and thermal status.
 
-**SRAM (System Responsiveness Awareness Module)**: A dedicated sidecar thread that measures actual human-perceptible lag.
-- **Technique**: Sends `WM_NULL` messages to the foreground window and measures round-trip time.
+**SRAM (System Responsiveness Awareness Module)**: A dedicated sidecar thread that measures actual application responsiveness.
+- **Technique**: Sends `SendMessageTimeout(WM_NULL)` to the foreground window and measures the round-trip time.
 - **Output**: `LagState` (Snappy, Pressure, Lagging, Critical).
 
-**Input Guardian**: Monitors raw HID (Mouse/Keyboard) interrupts to detect user intent vs. idle activity.
+**Input Guardian**: Monitors raw HID (Mouse/Keyboard) interrupts via `RegisterRawInputDevices` to detect user intent vs. idle activity.
 
 ---
 
-### 2. Decision Layer (The Brain)
+### 2. Decision Layer (The Logic)
 
 **Performance Governor** (`governor.cpp`):
 - **Role**: The Strategist.
@@ -71,19 +71,19 @@ graph TD
 **Sandbox Executor** (`sandbox_executor.cpp`):
 - **Role**: The Operator.
 - **Mechanism**: Leased Authority.
-- **Logic**: Actions are not "set and forgotten." They are "leased" for a specific duration (e.g., 5000ms). If the Brain does not explicitly renew the lease in the next tick, the Sandbox automatically reverts the changes. This ensures that a frozen or crashed agent cannot leave the system in a modified state.
+- **Logic**: Optimizations are applied as "leases" for a specific duration (default ~5000ms). If the main loop does not explicitly renew the lease in the next tick, the Sandbox automatically reverts the changes. This ensures that a frozen or crashed agent cannot leave the system in a modified state.
 
 ---
 
-### 4. Accountability Layer (The Conscience)
+### 4. Accountability Layer (The Audit)
 
 **Provenance Ledger** (`provenance_ledger.cpp`):
-- **Role**: The Black Box.
-- **Logic**: Cryptographically hashes and logs every decision tick. It provides an audit trail proving why the AI acted (or refused to act).
+- **Role**: The Audit Trail.
+- **Logic**: Logs every decision tick to a structured JSON stream. It records the active policy hash, the inputs, and the decision rationale.
 
 **Outcome Guard** (`outcome_guard.cpp`):
 - **Role**: The Fail-Safe.
-- **Logic**: Compares `PredictedStateDelta` (Shadow) vs. `ObservedStateDelta` (Reality). If Reality is significantly worse than Predicted (e.g., "We optimized, but Latency increased"), it triggers an immediate Emergency Rollback.
+- **Logic**: Compares `PredictedStateDelta` (Shadow) vs. `ObservedStateDelta` (Reality). If Reality is significantly worse than Predicted (e.g., "We optimized, but Latency increased"), it triggers an immediate Rollback.
 
 ---
 
@@ -93,12 +93,12 @@ graph TD
 
 SRAM is a detached diagnostic engine designed to detect "Ghosting" and "Micro-stutters" that standard CPU metrics miss.
 
-**Thread Isolation**: Runs on a separate thread with `ABOVE_NORMAL` priority to ensure it can observe the system even under load.
+**Thread Isolation**: Runs on a separate thread with `THREAD_PRIORITY_NORMAL` (to avoid preempting the UI it is measuring).
 
 **Metrics**:
-- **UI Latency**: `SendMessageTimeout(WM_NULL)`
-- **DWM Composition**: Frame drops in the Desktop Window Manager.
-- **Input Latency**: Delta between hardware interrupt and message queue processing.
+- **UI Latency**: `SendMessageTimeout` round-trip time.
+- **DWM Composition**: Frame drops via `DwmGetCompositionTimingInfo`.
+- **Input Latency**: Delta between hardware interrupt timestamp and message processing time.
 
 ---
 
@@ -106,8 +106,8 @@ SRAM is a detached diagnostic engine designed to detect "Ghosting" and "Micro-st
 
 To prevent "thrashing" (rapidly changing states), the AI has a finite budget of "Authority Points."
 
-- **Cost Model**: High-impact actions (e.g., Thread Boosting) cost more than low-impact ones (e.g., Memory Trimming).
-- **Regen**: Budget regenerates slowly over time.
+- **Cost Model**: High-impact actions (e.g., Service Suspension) cost more than low-impact ones (e.g., Thread Boosting).
+- **Regen**: Budget regenerates over time.
 - **Exhaustion**: If the budget hits zero, the Arbiter is forced to `BrainAction::Maintain` (Do Nothing) until it cools down.
 
 ---
@@ -125,9 +125,9 @@ A separate process (`pman.exe --guard`) monitors the main application.
 - **Heartbeat**: If the main process terminates unexpectedly (crash or Task Manager kill), the Guard detects the handle closure.
 - **Restoration**: It immediately reverts global Windows settings (Win32PrioritySeparation, Power Plans) to their defaults before exiting.
 
-### 3. Provenance Integrity
+### 3. Integrity Checks
 
-If the `ProvenanceLedger` fails to write (disk full, permission error), the `OutcomeGuard` revokes all authority. The system cannot act if it cannot record why.
+If the `ProvenanceLedger` fails to write (disk full, permission error), the system declares a **Fault State** and revokes authority. The agent is not allowed to act if it cannot be audited.
 
 ---
 
@@ -136,9 +136,9 @@ If the `ProvenanceLedger` fails to write (disk full, permission error), the `Out
 | Thread | Priority | Responsibility |
 |--------|----------|----------------|
 | **Main Thread** | NORMAL | Window Message Pump, Policy Orchestration, UI Rendering |
-| **SRAM Worker** | ABOVE_NORMAL | Active latency probing (UI/Input sensors) |
-| **Background Worker** | LOW | Heavy lifting: Service Control, Config Reloading, Profile Analysis |
+| **SRAM Worker** | NORMAL | Active latency probing (UI/Input sensors) |
+| **Background Worker** | LOWEST | Heavy lifting: Service Control, Config Reloading, Profile Analysis |
 | **ETW Consumer** | TIME_CRITICAL* | Consumes kernel events (context switches) in real-time |
-| **IOCP Watcher** | LOW | File system changes (Config hot-reload) |
+| **IOCP Watcher** | LOWEST | File system changes (Config hot-reload) |
 
 *ETW Consumer runs at high priority but performs minimal work, pushing events to a lock-free queue for the Background Worker.

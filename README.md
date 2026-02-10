@@ -2,7 +2,7 @@
 
 # ⚡ Priority Manager (PMan) v5
 
-### The Autonomous Neural Orchestrator for Windows
+### The Autonomous Adaptive Control System for Windows
 
 *"Tune once. Let the system adapt."*
 
@@ -10,44 +10,45 @@
 
 ---
 
-**Priority Manager (PMan)** is not just a priority toggler. It is a **closed-loop autonomous agent** that acts as a **Governor** for your Operating System. It observes system telemetry, predicts the consequences of optimization, executes changes in a sandbox, and measures the actual reality of those changes to learn over time.
+**Priority Manager (PMan)** is a **closed-loop autonomous agent** that acts as a **Governor** for your Operating System. Unlike static priority tools, PMan observes system telemetry, predicts the consequences of optimization using statistical models, executes changes in a sandbox, and measures the actual reality of those changes to learn over time.
 
 ---
 
-## 🧠 The Shift: From Heuristics to Agency
+## 🧠 The Core Logic: Cognitive Control Loop
 
-Traditional optimizers use **static rules** ("If Game, Then High Priority"). **PMan v5** uses a **Cognitive Control Loop**:
+PMan v5 moves beyond static "If/Then" heuristics to a **Feedback Control Loop**:
 
-1. **Observation**: Captures CPU variance, thermal throttling, and input latency (`SystemSignalSnapshot`).
-2. **Prediction**: The Shadow Executor simulates "what if" scenarios before touching the system.
-3. **Arbitration**: The Decision Arbiter weighs the cost of intervention against the Authority Budget.
-4. **Execution**: Changes are applied via the Sandbox Executor with an automatic rollback lease.
-5. **Reality Sampling**: The system measures if the tweak actually reduced lag. If not, it reverts and lowers its own confidence.
+1. **Observation**: Captures CPU variance, thermal throttling, and input latency via the **SRAM** engine.
+2. **Prediction**: The **Predictive Model** calculates the expected cost of intervention using historical variance data.
+3. **Arbitration**: The **Decision Arbiter** weighs the proposal against a finite **Authority Budget**.
+4. **Execution**: Changes are applied via the **Sandbox Executor** using time-bound "leases" (e.g., 5 seconds).
+5. **Reality Sampling**: The system measures if the tweak actually reduced lag. If not, the **Confidence Tracker** penalizes the model, reducing the likelihood of repeating the mistake.
 
 ---
 
-## 🛡️ Core Systems (The Neural Stack)
+## 🛡️ Safety Architecture
 
-PMan v5 is built on an advanced **safety-first architecture** designed to prevent "optimization" from becoming the bottleneck.
+PMan is built on a "Do No Harm" architecture designed to fail closed.
 
 ### 1. The Decision Engine
 
-- **Performance Governor**: Analyzes raw telemetry to propose interventions.
-- **Consequence Evaluator**: Calculates the "cost" of an action (e.g., will boosting a game starve audio?).
-- **Authority Budget**: The AI has a limited "allowance" of interventions. If it spends too much authority without results, it is locked out until it "cools down."
-- **Confidence Tracker**: Dynamically adjusts aggression based on prediction error. If the AI makes a mistake, it hesitates next time.
+- **Performance Governor**: Analyzes dominant pressure (CPU vs. Disk vs. Latency) to propose strategies.
+- **Consequence Evaluator**: Estimates the "cost" of action (e.g., "Throttling background apps may increase I/O wait").
+- **Authority Budget**: The agent has a limited "allowance" of interventions per minute. If budget is exhausted, it is locked out until it regenerates.
+- **Adaptive Confidence**: Uses a **Contextual Bandit** approach (Mean Error & Variance tracking) to adjust aggression. High prediction error leads to "hesitation" in future actions.
 
 ### 2. Safety & Provenance
 
-- **Provenance Ledger**: Every decision—even the decision to do nothing—is cryptographically hashed and logged. You get a receipt for why the AI acted.
-- **Outcome Guard**: A reactive layer that triggers an immediate rollback if the observed state diverges dangerously from the prediction.
-- **SRAM (System Responsiveness Awareness Module)**: Monitors the "feeling" of the OS. If the UI lags, PMan yields immediately.
-- **Registry Watchdog**: A crash-resilient guard process that restores default Windows settings if PMan acts erratically or crashes.
+- **Provenance Ledger**: A structured JSON audit log that records every decision, the active policy hash, and the reasons for rejecting alternatives.
+- **Outcome Guard**: A reactive layer that triggers an immediate **Rollback** if the observed state diverges dangerously from the prediction.
+- **SRAM (System Responsiveness Awareness Module)**: A detached sidecar thread that actively probes UI latency (`SendMessageTimeout`) to detect micro-stutters standard metrics miss.
+- **Registry Guard**: A crash-resilient watchdog process that restores default Windows settings if the main agent crashes or is terminated.
 
 ### 3. Hardware Integration
 
-- **Hybrid Topology Awareness**: Distinguishes between P-Cores and E-Cores (Intel/AMD) to pin background threads away from your game.
-- **Input Guardian**: Monitors HID devices to boost the foreground window the millisecond you move your mouse.
+- **Hybrid Topology Awareness**: Distinguishes between P-Cores and E-Cores (Intel/AMD) to pin background threads away from critical tasks.
+- **Input Guardian**: Monitors raw HID interrupts to bias the foreground window the millisecond user activity is detected.
+- **Network Intelligence**: Uses `qWave` QoS and standard ping probes to detect bufferbloat and deprioritize background transfer traffic.
 
 ---
 
@@ -55,11 +56,11 @@ PMan v5 is built on an advanced **safety-first architecture** designed to preven
 
 | Feature | Description |
 |---------|-------------|
-| **Neural Center** | Configure the "Brain" parameters via `policy.json`. Define how much authority the AI has. |
-| **Live Audit** | View the Provenance Ledger in real-time. See the AI reject actions due to "Low Confidence" or "Budget Exhausted." |
-| **Sandbox Execution** | Optimizations are "leased." If the system doesn't renew the lease (because performance dropped), Windows defaults are restored instantly. |
-| **Responsiveness Recovery** | Automatically detects hung applications (Window Ghosting) and applies soft thread boosts to recover them without killing. |
-| **Tray Animation** | Visual feedback on the system state (Snappy, Pressure, Lagging, Critical) via the tray icon. |
+| **Policy Control** | Configure the agent's behavior via `policy.json`. Define the **Authority Budget** and **Confidence Thresholds**. |
+| **Live Audit** | View the decision chain in real-time. See the Arbiter reject actions due to "Low Confidence" or "Budget Exhausted." |
+| **Sandbox Leasing** | Optimizations are temporary "leases." If the agent crashes, the lease expires, and Windows defaults are automatically restored. |
+| **Hang Recovery** | The `ResponsivenessManager` detects hung applications (Window Ghosting) and applies soft thread boosts to attempt recovery. |
+| **External Verdict** | Supports an enterprise override via `verdict.json` to strictly `ALLOW` or `DENY` actions based on external requirements. |
 
 ---
 
@@ -70,16 +71,17 @@ PMan v5 is controlled via **Policies** (`policy.json`).
 {
   "limits": {
     "maxAuthorityBudget": 1000,
-    "allowedActions": ["Maintain", "BoostForeground", "IsolateBackground"],
+    "allowedActions": ["Maintain", "Boost_Process", "Throttle_Mild"],
     "minConfidence": {
-      "cpuVariance": 0.85
+      "cpuVariance": 0.85,
+      "latencyVariance": 1.50
     }
   }
 }
 ```
 
-- **Authority Budget**: Defines how many "credits" the AI can spend on interventions per minute.
-- **Min Confidence**: The AI will refuse to act if its prediction confidence is below this threshold.
+- **maxAuthorityBudget**: The maximum "credits" the AI can spend per minute. Heavy actions (Service Suspension) cost more than light ones (Priority Bias).
+- **minConfidence**: The variance threshold. Lower values make the agent "paranoid" (reacting to small jitters), while higher values make it "tolerant."
 
 ---
 
@@ -87,9 +89,9 @@ PMan v5 is controlled via **Policies** (`policy.json`).
 
 | Category | Details |
 |----------|---------|
-| **Language** | C++20 (utilizing Concepts, Coroutines, and Atomics) |
-| **Concurrency** | Lock-free circular buffers, IOCP (I/O Completion Ports), and Thread Pool. |
-| **Persistence** | `brain.bin` (Learned weights), `provenance.log` (Audit trail). |
+| **Language** | C++20 (Concepts, Coroutines, Atomics) |
+| **Concurrency** | Lock-free telemetry, IOCP for file watching, and Thread Pool. |
+| **Persistence** | `brain.bin` (Statistical weights), `provenance.log` (JSON Audit trail). |
 | **Dependencies** | Native Win32 API only. No external runtime required. |
 
 ---
@@ -111,8 +113,7 @@ Source Code: [Available on GitHub]
 
 <div align="center">
 
-**Architect:** Ian Anthony R. Tancinco  
-**Engineers:** Gemini, GPT, Claude, Kimi, and others.
+**Architect:** Ian Anthony R. Tancinco
 
 *"The system is not sovereign. It is a licensed operator."*
 
