@@ -308,7 +308,8 @@ enum class ProcessCategory : uint8_t {
     Interactive_Game    = 0b00,
     Interactive_Desktop = 0b01,
     Background_Work     = 0b10,
-    System_Critical     = 0b11
+    System_Critical     = 0b11,
+    Suspicious          = 0b100 // [PHASE 3] Proxy Launch Detected
 };
 
 // Deterministic Governor Types
@@ -384,12 +385,13 @@ enum class BrainAction : uint8_t {
     Release_Pressure,
     Shield_Foreground, // [DCM] Universal Foreground Shielding (Boost FG + IO)
     Boost_Process, // [FIX] Restored core action to match policy.json
+    Probation, // [PHASE 3] Security Containment for Proxy Launches
     Count // Compile-time fixed size
 };
 
 // Compile-time check
 constexpr size_t ACTION_COUNT = static_cast<size_t>(BrainAction::Count);
-static_assert(ACTION_COUNT == 9, "BrainAction count");
+static_assert(ACTION_COUNT == 10, "BrainAction count");
 
 // Decision Arbiter Types
 enum class DecisionReason : uint8_t {

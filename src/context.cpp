@@ -42,6 +42,7 @@
 #include "policy_contract.h"
 #include "external_verdict.h"
 #include "investigator.h"
+#include "ipc_server.h"
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -70,6 +71,7 @@ PManContext::PManContext() {
     subs.policy     = std::make_unique<PolicyGuard>();
     subs.verdict    = std::make_unique<ExternalVerdict>();
     subs.investigator = std::make_unique<Investigator>();
+    subs.ipc        = std::make_unique<IpcServer>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)

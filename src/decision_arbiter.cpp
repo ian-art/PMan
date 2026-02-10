@@ -262,6 +262,11 @@ BrainAction DecisionArbiter::MapIntentToAction(const GovernorDecision& gov) {
         case AllowedActionClass::PerformanceBoost:
             return BrainAction::Boost_Process;
 
+        case AllowedActionClass::SecurityMitigation:
+            // [PHASE 3] The Watchtower: Probation
+            // This bypasses normal resource checks because it is a security mandate.
+            return BrainAction::Probation;
+
         case AllowedActionClass::None:
         default:
             return BrainAction::Maintain;

@@ -20,7 +20,23 @@
 #ifndef PMAN_CONFIG_H
 #define PMAN_CONFIG_H
 #include <filesystem>
+#include <vector>
+#include <string>
 #include "explorer_booster.h"
+#include "nlohmann/json.hpp" // Required for serialization
+
+// [PHASE 2] Secure Storage & Validation
+class ConfigValidator {
+public:
+    static bool Validate(const nlohmann::json& j);
+};
+
+class SecureConfigManager {
+public:
+    static bool LoadSecureConfig();
+    static void SaveSecureConfig();
+    static std::filesystem::path GetSecureConfigPath();
+};
 
 void LoadConfig();
 

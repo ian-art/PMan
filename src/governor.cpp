@@ -19,6 +19,7 @@
 
 #include "governor.h"
 #include "globals.h"
+#include "security_utils.h" // [PHASE 3]
 #include <algorithm>
 
 // 5.2 Normalized Signals
@@ -41,6 +42,15 @@ PerformanceGovernor::NormalizedSignals PerformanceGovernor::Normalize(const Syst
 // Policy Injection
 void PerformanceGovernor::UpdatePolicy(const PolicyParameters& params) {
     m_params = params;
+}
+
+// [PHASE 3] The Probation Officer
+AllowedActionClass PerformanceGovernor::ReviewSuspiciousActivity(DWORD pid) {
+    // 1. Check for Proxy Launch (Malware hiding behind WMI/Svchost)
+    if (SecurityUtils::IsProxyLaunch(pid)) {
+        return AllowedActionClass::SecurityMitigation; // Triggers "Probation" (Low Pri + Trim)
+    }
+    return AllowedActionClass::None;
 }
 
 // 5.4 Dominant Pressure Selector

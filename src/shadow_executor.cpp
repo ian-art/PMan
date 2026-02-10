@@ -60,6 +60,15 @@ PredictedStateDelta ShadowExecutor::Simulate(const ArbiterDecision& decision, co
             delta.latencyDelta = -10.0;
             break;
 
+        case BrainAction::Probation:
+            // [PHASE 3] Simulation: Probation clamps a suspicious process hard.
+            // CPU load drops significantly (due to Low Priority).
+            // Latency increases for the target, but system responsiveness improves.
+            delta.cpuLoadDelta = -(telemetry.cpuLoad * 0.30); // 30% reduction estimate
+            delta.latencyDelta = -5.0; // System latency improves (target suffers, but we don't care)
+            delta.thermalDelta = -1.0;
+            break;
+
         default:
             delta = {0, 0, 0};
             break;

@@ -25,6 +25,7 @@
 #include "services_watcher.h"
 #include "nt_wrapper.h"
 #include "tweaks.h" // For privilege separation calls
+#include "security_utils.h" // [PHASE 3] The Watchtower
 #include <psapi.h>
 #include <algorithm>
 #include <shellapi.h> // For SHQueryUserNotificationState
@@ -131,8 +132,13 @@ void ProcessScout::UpdateCache() {
         } else if (sessionId == 0) {
             snap.category = ProcessCategory::System_Critical; // Session 0 Service
         } else {
-            // Further refinement could check for "ProcessCategory" tweaks or known lists
-            snap.category = ProcessCategory::Background_Work;
+            // [PHASE 3] The Watchtower: Check for Proxy Launches
+            if (SecurityUtils::IsProxyLaunch(pid)) {
+                snap.category = ProcessCategory::Suspicious;
+                Log("[WATCHTOWER] Detected Proxy Launch on PID " + std::to_string(pid) + ". Tagging as SUSPICIOUS.");
+            } else {
+                snap.category = ProcessCategory::Background_Work;
+            }
         }
         
         newCache.push_back(snap);
@@ -233,6 +239,13 @@ std::optional<Executor::Receipt> Executor::Execute(const ActionIntent& intent) {
             EmergencyRevertAll();
             success = true;
             break;
+        case BrainAction::Probation:
+            // [PHASE 3] The Probation Officer
+            // Force: BELOW_NORMAL_PRIORITY_CLASS + Trim Memory
+            success = ApplyThrottle(targets, true); // Aggressive Throttle (Low/Idle Priority)
+            success &= ApplyMemoryTrim(targets, true); // Hard Trim
+            break;
+
         case BrainAction::Shield_Foreground:
             // [DCM] Universal Foreground Shielding
             // Triggered when "Universal AV Awareness" detects background pressure.
@@ -439,7 +452,7 @@ void Executor::EmergencyRevertAll() {
 
 bool Executor::Revert(const Receipt& receipt) {
     // Undo logic based on action type
-    if (receipt.action == BrainAction::Throttle_Mild || receipt.action == BrainAction::Throttle_Aggressive) {
+    if (receipt.action == BrainAction::Throttle_Mild || receipt.action == BrainAction::Throttle_Aggressive || receipt.action == BrainAction::Probation) {
         for (const auto& target : receipt.affectedTargets) {
             g_throttleManager.ApplyThrottle(target.pid, ThrottleManager::ThrottleLevel::None);
         }

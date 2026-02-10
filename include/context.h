@@ -64,6 +64,7 @@ class ProvenanceLedger;  // Decision Provenance
 class PolicyGuard;       // Policy Boundary Contract
 class ExternalVerdict;   // External Verdict Interface
 class Investigator;      // The System Detective
+class IpcServer;         // Secure IPC
 
 class PManContext {
 public:
@@ -259,6 +260,7 @@ public:
         std::unique_ptr<PolicyGuard>           policy;    // Policy Boundary Contract
         std::unique_ptr<ExternalVerdict>       verdict;   // External Verdict Interface
         std::unique_ptr<Investigator>          investigator; // The System Detective
+        std::unique_ptr<IpcServer>             ipc;          // Secure IPC Core
     } subs;
 
 private:

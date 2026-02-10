@@ -39,7 +39,6 @@
 #include "gui_manager.h"
 #include "dark_mode.h"
 #include "sram_engine.h"
-#include "editor_manager.h"
 #include "lifecycle.h"
 #include "executor.h" // [FIX] Required for Executor::Shutdown
 #include "policy_optimizer.h" // [FIX] Defines PolicyOptimizer
@@ -60,6 +59,7 @@
 #include "external_verdict.h"
 #include "context.h"
 #include "tray_animator.h"
+#include "ipc_server.h"
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -69,7 +69,6 @@
 #include <pdh.h>
 #include <shellapi.h> // Required for CommandLineToArgvW
 #include <commctrl.h> // For Edit Control in Live Log
-#include <fstream>    // Required for std::ofstream
 #include <deque>
 #include <mutex>
 #include <condition_variable>
@@ -102,7 +101,6 @@ static UINT g_wmTaskbarCreated = 0;
 
 #define ID_TRAY_EXPORT_LOG 5001 // Unique ID for Audit Export
 
-HWND g_hLogWindow = nullptr; // Handle for Live Log Window
 static std::atomic<bool> g_isCheckingUpdate{false};
 static GUID* g_pSleepScheme = nullptr;
 static UniqueHandle g_hGuardProcess; // Handle to the watchdog process
@@ -194,8 +192,6 @@ static SystemSignalSnapshot CaptureSnapshot() {
     return snap;
 }
 
-// [REMOVED] ExecuteDecision (Unused: Logic moved to RunAutonomousCycle/SandboxExecutor)
-
 // Persistent state for Outcome Guard (Previous Tick)
 static PredictedStateDelta g_lastPredicted = {0,0,0};
 static ObservedStateDelta g_lastObserved = {0,0,0};
@@ -227,7 +223,6 @@ static void RunAutonomousCycle() {
         telemetry.requiresPerformanceBoost = true;
     }
 
-    // auto& ctx = PManContext::Get(); // [FIX] Removed redefinition (declared at top of function)
     // Safety: Ensure subsystems are initialized
     if (!ctx.subs.governor || !ctx.subs.evaluator || !ctx.subs.arbiter) return;
 
@@ -425,33 +420,6 @@ static void RunAutonomousCycle() {
         }
     }
 
-    //  Decision Provenance Recording (The Receipt)
-    // "Capture point... Only if action passed all gates and reached Sandbox execution"
-    // "Do not log for Maintain"
-    if (ctx.subs.provenance && decision.selectedAction != BrainAction::Maintain && sbResult.executed) {
-        DecisionJustification justification;
-        justification.actionType = decision.selectedAction;
-        justification.timestamp = GetTickCount64();
-        
-        // Confidence Snapshot
-        justification.cpuVariance = currentConfidence.cpuVariance;
-        justification.thermalVariance = currentConfidence.thermalVariance;
-        justification.latencyVariance = currentConfidence.latencyVariance;
-        
-        // Context
-        justification.intentStabilityCount = intentCount;
-        justification.authorityBudgetBefore = budgetBefore;
-        justification.authorityCost = actionCost;
-        
-        // Outcomes
-        justification.sandboxResult = sbResult;
-        justification.rollbackGuardTriggered = false; // We reached execution, so guard was passive
-        justification.finalCommitted = sbResult.committed;
-        justification.policyHash = ctx.subs.policy ? ctx.subs.policy->GetHash() : "NONE";
-        
-        ctx.subs.provenance->Record(justification);
-    }
-
     // [NEW] Decision Provenance Recording (The Receipt)
     bool faultActive = ctx.fault.ledgerWriteFail || ctx.fault.budgetCorruption || 
                        ctx.fault.sandboxError || ctx.fault.intentInvalid || 
@@ -557,33 +525,32 @@ static void RunAutonomousCycle() {
         }
     }
 
-    // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Sandbox -> Reality -> Error -> Confidence"
-    std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
-                      " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
-                      budgetLog +
-                      " ArbAct:" + std::to_string((int)decision.selectedAction) + 
-                      " Shadow:[" + std::to_string(shadowDelta.cpuLoadDelta) + 
-                      "," + std::to_string(shadowDelta.thermalDelta) + 
-                      "," + std::to_string(shadowDelta.latencyDelta) + "]" +
-                      " Sandbox:[" + (sbResult.committed ? "Committed" : "RolledBack/Rejected") +
-                      "," + (sbResult.reversible ? "Rev" : "NonRev") +
-                      "," + (sbResult.reason) + "]" +
-                      (sbResult.cooldownRemaining > 0 ? " Cooldown:[Active (remaining=" + std::to_string(sbResult.cooldownRemaining) + "ms)]" : "") +
-                      " Observed:[" + std::to_string(observed.cpuLoadDelta) + 
-                      "," + std::to_string(observed.thermalDelta) + 
-                      "," + std::to_string(observed.latencyDelta) + "]" +
-                      " Error:[" + std::to_string(error.cpuError) + 
-                      "," + std::to_string(error.thermalError) + 
-                      "," + std::to_string(error.latencyError) + "]" +
-                      " ConfidenceVar:[" + std::to_string(confMetrics.cpuVariance) +
-                      "," + std::to_string(confMetrics.thermalVariance) +
-                      "," + std::to_string(confMetrics.latencyVariance) + "]" +
-                      " Intent:[" + (intentReset ? "Reset" : std::to_string((int)rawIntent)) + 
-                      " (" + std::to_string(intentCount) + "/3)]" +
-                      " Rsn:" + std::to_string((int)decision.reason);
-    
     // [FIX] Log Silencer: Only log if we actually DID something or failed to do something intended
     if (decision.selectedAction != BrainAction::Maintain || sbResult.executed) {
+        // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Sandbox -> Reality -> Error -> Confidence"
+        std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
+                          " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
+                          budgetLog +
+                          " ArbAct:" + std::to_string((int)decision.selectedAction) + 
+                          " Shadow:[" + std::to_string(shadowDelta.cpuLoadDelta) + 
+                          "," + std::to_string(shadowDelta.thermalDelta) + 
+                          "," + std::to_string(shadowDelta.latencyDelta) + "]" +
+                          " Sandbox:[" + (sbResult.committed ? "Committed" : "RolledBack/Rejected") +
+                          "," + (sbResult.reversible ? "Rev" : "NonRev") +
+                          "," + (sbResult.reason) + "]" +
+                          (sbResult.cooldownRemaining > 0 ? " Cooldown:[Active (remaining=" + std::to_string(sbResult.cooldownRemaining) + "ms)]" : "") +
+                          " Observed:[" + std::to_string(observed.cpuLoadDelta) + 
+                          "," + std::to_string(observed.thermalDelta) + 
+                          "," + std::to_string(observed.latencyDelta) + "]" +
+                          " Error:[" + std::to_string(error.cpuError) + 
+                          "," + std::to_string(error.thermalError) + 
+                          "," + std::to_string(error.latencyError) + "]" +
+                          " ConfidenceVar:[" + std::to_string(confMetrics.cpuVariance) +
+                          "," + std::to_string(confMetrics.thermalVariance) +
+                          "," + std::to_string(confMetrics.latencyVariance) + "]" +
+                          " Intent:[" + (intentReset ? "Reset" : std::to_string((int)rawIntent)) + 
+                          " (" + std::to_string(intentCount) + "/3)]" +
+                          " Rsn:" + std::to_string((int)decision.reason);
         Log(log);
     }
 
@@ -815,7 +782,12 @@ static ResponsivenessManager g_responsivenessManager;
 
 // --- Live Log Viewer Window Class ---
 class LogViewer {
+    static HWND s_hWnd;
 public:
+    static void ApplyTheme() {
+        if (s_hWnd) DarkMode::ApplyToWindow(s_hWnd);
+    }
+
     static void Register(HINSTANCE hInst) {
         WNDCLASSW wc = {};
         wc.lpfnWndProc = Proc;
@@ -827,19 +799,19 @@ public:
     }
 
     static void Show(HWND hOwner) {
-        if (g_hLogWindow) {
-            if (IsIconic(g_hLogWindow)) ShowWindow(g_hLogWindow, SW_RESTORE);
-            SetForegroundWindow(g_hLogWindow);
+        if (s_hWnd) {
+            if (IsIconic(s_hWnd)) ShowWindow(s_hWnd, SW_RESTORE);
+            SetForegroundWindow(s_hWnd);
             return;
         }
-        g_hLogWindow = CreateWindowW(L"PManLogViewer", L"Priority Manager - Live Log",
+        s_hWnd = CreateWindowW(L"PManLogViewer", L"Priority Manager - Live Log",
             WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
             hOwner, nullptr, g_hInst, nullptr);
 
         // Unified Dark Mode Application
-        DarkMode::ApplyToWindow(g_hLogWindow);
+        DarkMode::ApplyToWindow(s_hWnd);
 
-        ShowWindow(g_hLogWindow, SW_SHOW);
+        ShowWindow(s_hWnd, SW_SHOW);
 		// [FIX] Force flush buffered logs to disk immediately when Viewer opens.
         // This ensures the viewer has a file to read even if no new logs occur.
         FlushLogger();
@@ -884,7 +856,7 @@ private:
         case WM_DESTROY:
             KillTimer(hwnd, hTimer);
             DeleteObject(hFont);
-            g_hLogWindow = nullptr;
+            s_hWnd = nullptr;
 			lastPos = 0; 
             return 0;
         }
@@ -934,6 +906,8 @@ private:
         }
     }
 };
+
+HWND LogViewer::s_hWnd = nullptr;
 
 // Helper for initial reg read
 static DWORD ReadCurrentPrioritySeparation()
@@ -1059,7 +1033,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     case WM_SETTINGCHANGE:
         DarkMode::RefreshTheme();      // Flushes the Windows menu theme cache
         DarkMode::ApplyToWindow(hwnd);
-        if (g_hLogWindow) DarkMode::ApplyToWindow(g_hLogWindow); // Update log window if open
+        LogViewer::ApplyTheme();       // Update log window if open
         return 0;
 
     case WM_TRAYICON:
@@ -1095,9 +1069,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             // Ensure owner window state is current before menu creation
             DarkMode::ApplyToWindow(hwnd);
             
-            // Detect best available editor via EditorManager
-            std::wstring editorName = EditorManager::GetEditorName();
-
             HMENU hMenu = CreatePopupMenu();
 
             // Apply Dark Mode styles to the context menu
@@ -1275,21 +1246,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         }
 		else if (wmId == ID_TRAY_EDIT_CONFIG) {
             GuiManager::ShowConfigWindow();
-        }
-		else if (wmId == ID_TRAY_EDIT_GAMES) {
-            EditorManager::OpenConfigAtSection(L"[games]");
-        }
-        else if (wmId == ID_TRAY_EDIT_BROWSERS) {
-            EditorManager::OpenConfigAtSection(L"[browsers]");
-        }
-        else if (wmId == ID_TRAY_EDIT_VIDEO_PLAYERS) {
-            EditorManager::OpenConfigAtSection(L"[video_players]");
-        }
-		else if (wmId == ID_TRAY_EDIT_IGNORED) {
-            EditorManager::OpenFile(IGNORED_PROCESSES_FILENAME);
-        }
-		else if (wmId == ID_TRAY_EDIT_LAUNCHERS) {
-            EditorManager::OpenFile(CUSTOM_LAUNCHERS_FILENAME);
         }
 		// --- End New Handlers ---
 
@@ -1566,6 +1522,11 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 
     // Initialize Input Responsiveness Guard
     g_inputGuardian.Initialize();
+
+    // Initialize Secure IPC Core (Phase 1)
+    if (PManContext::Get().subs.ipc) {
+        PManContext::Get().subs.ipc->Initialize();
+    }
 
     // Initialize Policy Optimizer
     PManContext::Get().subs.optimizer = std::make_unique<PolicyOptimizer>();

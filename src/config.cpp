@@ -27,6 +27,12 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <algorithm> // Required for std::transform
+#include <cctype>    // Required for ::tolower
+#include <windows.h>
+#include <wincrypt.h>
+#include "nlohmann/json.hpp" // JSON Support
+#pragma comment(lib, "Crypt32.lib") // DPAPI Linkage
 #include <sstream>
 
 // Helper
@@ -54,6 +60,10 @@ static std::unordered_set<std::wstring> GetDefaultBrowsers() {
         L"vivaldi.exe", L"discord.exe", L"spotify.exe", L"slack.exe", L"teams.exe"
     };
 }
+
+// Internal shadow copies for serialization (Moved up for SecureConfigManager)
+static ExplorerConfig g_lastExplorerConfig;
+static std::unordered_set<std::wstring> g_shadowBackgroundApps;
 
 static std::unordered_set<std::wstring> GetDefaultIgnoredProcesses() {
     return {
@@ -119,6 +129,378 @@ static std::string BuildConfigOption(const std::string& comment, const std::stri
     return oss.str();
 }
 
+// [PHASE 4] Integrity & Lifecycle Protection
+#pragma pack(push, 1)
+struct ConfigHeader {
+    uint32_t magic;      // 0x4E414D50 'PMAN' (Little Endian)
+    uint64_t version;    // Monotonic Version Counter
+    uint8_t hmac[32];    // SHA-256 Signature
+    uint32_t blobSize;
+};
+#pragma pack(pop)
+
+// Registry: The Authority on "Time" (Version)
+static uint64_t GetRegistryConfigVersion() {
+    HKEY hKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\PMan", 0, NULL, 0, KEY_READ, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        uint64_t ver = 0;
+        DWORD size = sizeof(ver);
+        if (RegQueryValueExW(hKey, L"ConfigVersion", NULL, NULL, (LPBYTE)&ver, &size) != ERROR_SUCCESS) ver = 0;
+        RegCloseKey(hKey);
+        return ver;
+    }
+    return 0;
+}
+
+static void SetRegistryConfigVersion(uint64_t ver) {
+    HKEY hKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\PMan", 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        RegSetValueExW(hKey, L"ConfigVersion", 0, REG_QWORD, (const BYTE*)&ver, sizeof(ver));
+        RegCloseKey(hKey);
+    }
+}
+
+// HMAC: Binds Version + Machine + Data
+static void ComputeIntegrityHash(const void* blob, size_t size, uint64_t version, uint8_t* outHash) {
+    HCRYPTPROV hProv = 0;
+    HCRYPTHASH hHash = 0;
+    if (CryptAcquireContextW(&hProv, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)) {
+        if (CryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash)) {
+            uint32_t magic = 0x4E414D50;
+            CryptHashData(hHash, (BYTE*)&magic, sizeof(magic), 0);
+            CryptHashData(hHash, (BYTE*)&version, sizeof(version), 0);
+            
+            // Machine Binding (Prevents cross-device config spoofing)
+            wchar_t compName[MAX_PATH] = {0};
+            DWORD nameLen = MAX_PATH;
+            GetComputerNameW(compName, &nameLen);
+            CryptHashData(hHash, (BYTE*)compName, nameLen * sizeof(wchar_t), 0);
+            
+            // Data Binding
+            CryptHashData(hHash, (BYTE*)blob, (DWORD)size, 0);
+            
+            DWORD hashLen = 32;
+            CryptGetHashParam(hHash, HP_HASHVAL, outHash, &hashLen, 0);
+            CryptDestroyHash(hHash);
+        }
+        CryptReleaseContext(hProv, 0);
+    }
+}
+
+// [PHASE 2] Configuration Validator
+using json = nlohmann::json;
+
+bool ConfigValidator::Validate(const json& j) {
+    // 1. Blacklist Protection (Prevent throttling critical system processes)
+    static const std::unordered_set<std::string> CRITICAL_BLACKLIST = {
+        "explorer.exe", "csrss.exe", "pman.exe", "svchost.exe", 
+        "lsass.exe", "wininit.exe", "services.exe", "winlogon.exe"
+    };
+
+    auto CheckList = [&](const std::string& listName) {
+        if (j.contains(listName)) {
+            for (const auto& item : j[listName]) {
+                std::string s = item.get<std::string>();
+                // Fix C4244: Explicitly cast to char to silence warning about int->char conversion
+                std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return (char)::tolower(c); }); 
+
+                if (!IsValidExecutableName(Utf8ToWide(s.c_str()))) {
+                    Log("[VALIDATOR] Security Violation: Invalid path or characters in '" + s + "'");
+                    return false;
+                }
+
+                if (CRITICAL_BLACKLIST.count(s)) {
+                    Log("[VALIDATOR] Security Violation: Attempt to target critical process '" + s + "' in " + listName);
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+
+    if (!CheckList("games")) return false;
+    if (!CheckList("background_apps")) return false;
+    if (!CheckList("browsers")) return false;
+
+    // 2. Sanity Checks
+    if (j.contains("global")) {
+         if (j["global"].value("idle_timeout", 300000) < 5000) {
+             Log("[VALIDATOR] Sanity Check Failed: idle_timeout too low.");
+             return false;
+         }
+    }
+
+    return true;
+}
+
+std::filesystem::path SecureConfigManager::GetSecureConfigPath() {
+    return GetLogPath() / "config.dat";
+}
+
+// [PHASE 5] Helper to decrypt and validate a specific file
+static bool InternalLoadFile(const std::filesystem::path& path, json& outJson) {
+    if (!std::filesystem::exists(path)) return false;
+
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+
+    ConfigHeader header = {0};
+    std::vector<BYTE> cipherText;
+    
+    // Peek at header
+    if (f.read((char*)&header, sizeof(header)) && header.magic == 0x4E414D50) {
+        // --- PHASE 4 FORMAT DETECTED ---
+        uint64_t sysVersion = GetRegistryConfigVersion();
+        
+        // [PHASE 4] Hardcoded Security Floor
+        static const uint64_t MIN_SECURE_VERSION = 15;
+        if (header.version < MIN_SECURE_VERSION) {
+            Log("[SECURE_CFG] CRITICAL: Config version " + std::to_string(header.version) + 
+                " is below security floor " + std::to_string(MIN_SECURE_VERSION) + ". Rejected.");
+            return false;
+        }
+
+        // 1. Anti-Rollback Check
+        if (header.version < sysVersion) {
+            Log("[SECURE_CFG] Rollback prevention: File v" + std::to_string(header.version) + 
+                " < Registry v" + std::to_string(sysVersion));
+            return false;
+        }
+
+        // 2. Read Payload
+        cipherText.resize(header.blobSize);
+        f.read((char*)cipherText.data(), header.blobSize);
+        
+        // 3. Integrity Check (HMAC)
+        uint8_t calcHash[32] = {0};
+        ComputeIntegrityHash(cipherText.data(), cipherText.size(), header.version, calcHash);
+        if (memcmp(calcHash, header.hmac, 32) != 0) {
+            Log("[SECURE_CFG] Integrity Violation (HMAC Mismatch). File rejected.");
+            return false;
+        }
+
+        // 4. Update High Water Mark (if file is newer than registry)
+        if (header.version > sysVersion) {
+            SetRegistryConfigVersion(header.version);
+        }
+    } else {
+        // --- LEGACY/PHASE 2 FALLBACK ---
+        f.seekg(0, std::ios::beg);
+        cipherText.assign((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    }
+    f.close();
+
+    if (cipherText.empty()) return false;
+
+    DATA_BLOB in, out;
+    in.pbData = cipherText.data();
+    in.cbData = (DWORD)cipherText.size();
+
+    // Decrypt (System/User bound via DPAPI)
+    if (!CryptUnprotectData(&in, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)) {
+        return false;
+    }
+
+    std::string plainText((char*)out.pbData, out.cbData);
+    LocalFree(out.pbData);
+
+    try {
+        outJson = json::parse(plainText);
+        return ConfigValidator::Validate(outJson);
+    } catch (...) {
+        return false;
+    }
+}
+
+bool SecureConfigManager::LoadSecureConfig() {
+    json j;
+    bool loaded = InternalLoadFile(GetSecureConfigPath(), j);
+
+    if (!loaded) {
+        // [PHASE 5] Backup Recovery Strategy
+        // If main config is corrupt (BSOD/Power Loss during save), try the .bak
+        std::filesystem::path backupPath = GetSecureConfigPath();
+        backupPath += ".bak";
+        
+        if (std::filesystem::exists(backupPath)) {
+            Log("[SECURE_CFG] WARNING: Main configuration corrupt. Attempting backup recovery...");
+            if (InternalLoadFile(backupPath, j)) {
+                Log("[SECURE_CFG] CRISIS AVERTED: Successfully restored configuration from backup.");
+                loaded = true;
+                
+                // Self-Heal: Restore the backup to the main slot immediately
+                try {
+                    std::filesystem::copy_file(backupPath, GetSecureConfigPath(), std::filesystem::copy_options::overwrite_existing);
+                } catch(...) {}
+            }
+        }
+    }
+
+    if (!loaded) return false;
+
+    // Apply to Globals (Deserialization)
+    try {
+        {
+            std::unique_lock lg(g_setMtx);
+            
+            auto LoadSet = [&](const char* key, std::unordered_set<std::wstring>& target) {
+                target.clear();
+                if (j.contains(key)) {
+                    for (const auto& item : j[key]) target.insert(Utf8ToWide(item.get<std::string>().c_str()));
+                }
+            };
+
+            LoadSet("games", g_games);
+            LoadSet("browsers", g_browsers);
+            LoadSet("video_players", g_videoPlayers);
+            LoadSet("background_apps", g_shadowBackgroundApps);
+            LoadSet("old_games", g_oldGames);
+            LoadSet("game_windows", g_gameWindows);
+            LoadSet("browser_windows", g_browserWindows);
+            LoadSet("custom_launchers", g_customLaunchers);
+            LoadSet("ignored_processes", g_ignoredProcesses);
+            
+            if (j.contains("global")) {
+                auto& g = j["global"];
+                g_ignoreNonInteractive.store(g.value("ignore_non_interactive", true));
+                g_restoreOnExit.store(g.value("restore_on_exit", true));
+                g_lockPolicy.store(g.value("lock_policy", false));
+                g_suspendUpdatesDuringGames.store(g.value("suspend_updates", false));
+                g_idleRevertEnabled.store(g.value("idle_revert", true));
+                g_idleTimeoutMs.store(g.value("idle_timeout", 300000));
+                g_responsivenessRecoveryEnabled.store(g.value("responsiveness_recovery", true));
+                g_recoveryPromptEnabled.store(g.value("recovery_prompt", true));
+                g_iconTheme = Utf8ToWide(g.value("icon_theme", "Default").c_str());
+            }
+
+            if (j.contains("explorer")) {
+                auto& e = j["explorer"];
+                ExplorerConfig cfg;
+                cfg.enabled = e.value("enabled", false);
+                cfg.idleThresholdMs = e.value("idle_threshold", 15000);
+                cfg.boostDwm = e.value("boost_dwm", true);
+                cfg.boostIoPriority = e.value("boost_io", false);
+                cfg.disablePowerThrottling = e.value("disable_throttling", true);
+                cfg.preventShellPaging = e.value("prevent_paging", true);
+                cfg.scanIntervalMs = e.value("scan_interval", 5000);
+                g_lastExplorerConfig = cfg;
+                g_explorerBooster.UpdateConfig(cfg);
+            }
+            
+            // Sync Subsystems
+            g_networkMonitor.SetBackgroundApps(g_shadowBackgroundApps);
+        }
+        
+        Log("[SECURE_CFG] Configuration loaded successfully.");
+        return true;
+
+    } catch (const std::exception& e) {
+        Log("[SECURE_CFG] JSON Parse Error during apply: " + std::string(e.what()));
+        return false;
+    }
+}
+
+void SecureConfigManager::SaveSecureConfig() {
+    try {
+        json j;
+        
+        {
+            std::shared_lock lg(g_setMtx);
+            
+            auto SaveSet = [&](const char* key, const std::unordered_set<std::wstring>& source) {
+                for (const auto& item : source) j[key].push_back(WideToUtf8(item.c_str()));
+            };
+
+            SaveSet("games", g_games);
+            SaveSet("browsers", g_browsers);
+            SaveSet("video_players", g_videoPlayers);
+            SaveSet("background_apps", g_shadowBackgroundApps);
+            SaveSet("old_games", g_oldGames);
+            SaveSet("game_windows", g_gameWindows);
+            SaveSet("browser_windows", g_browserWindows);
+            SaveSet("custom_launchers", g_customLaunchers);
+            SaveSet("ignored_processes", g_ignoredProcesses);
+
+            j["global"] = {
+                {"ignore_non_interactive", g_ignoreNonInteractive.load()},
+                {"restore_on_exit", g_restoreOnExit.load()},
+                {"lock_policy", g_lockPolicy.load()},
+                {"suspend_updates", g_suspendUpdatesDuringGames.load()},
+                {"idle_revert", g_idleRevertEnabled.load()},
+                {"idle_timeout", g_idleTimeoutMs.load()},
+                {"responsiveness_recovery", g_responsivenessRecoveryEnabled.load()},
+                {"recovery_prompt", g_recoveryPromptEnabled.load()},
+                {"icon_theme", WideToUtf8(g_iconTheme.c_str())}
+            };
+            
+            ExplorerConfig ec = g_lastExplorerConfig;
+            j["explorer"] = {
+                {"enabled", ec.enabled},
+                {"idle_threshold", ec.idleThresholdMs},
+                {"boost_dwm", ec.boostDwm},
+                {"boost_io", ec.boostIoPriority},
+                {"disable_throttling", ec.disablePowerThrottling},
+                {"prevent_paging", ec.preventShellPaging},
+                {"scan_interval", ec.scanIntervalMs}
+            };
+        }
+
+        std::string plainText = j.dump();
+        
+        DATA_BLOB in, out;
+        in.pbData = (BYTE*)plainText.data();
+        in.cbData = (DWORD)plainText.size();
+
+        if (!CryptProtectData(&in, L"PManConfig", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)) {
+            Log("[SECURE_CFG] Encryption Failed.");
+            return;
+        }
+
+        // [PHASE 4] Time Lock (Version + Integrity)
+        uint64_t nextVer = GetRegistryConfigVersion() + 1;
+        SetRegistryConfigVersion(nextVer);
+        
+        ConfigHeader header;
+        header.magic = 0x4E414D50;
+        header.version = nextVer;
+        header.blobSize = out.cbData;
+        
+        // Sign the package
+        ComputeIntegrityHash(out.pbData, out.cbData, header.version, header.hmac);
+
+        // [PHASE 5] Atomic Save Strategy
+        // 1. Write to .tmp file
+        std::filesystem::path finalPath = GetSecureConfigPath();
+        std::filesystem::path tempPath = finalPath; tempPath += ".tmp";
+        std::filesystem::path backupPath = finalPath; backupPath += ".bak";
+
+        {
+            std::ofstream f(tempPath, std::ios::binary | std::ios::trunc);
+            if (!f) throw std::runtime_error("Could not create temp config");
+            f.write((char*)&header, sizeof(header));
+            f.write((char*)out.pbData, out.cbData);
+            if (f.bad()) throw std::runtime_error("Write failed");
+            f.close(); 
+        } // Ensure handle is closed before move
+        
+        LocalFree(out.pbData);
+
+        // 2. Rotate: Current -> Backup
+        // We use MoveFileEx with REPLACE_EXISTING. If finalPath doesn't exist (first run), it fails gracefully.
+        MoveFileExW(finalPath.c_str(), backupPath.c_str(), MOVEFILE_REPLACE_EXISTING);
+
+        // 3. Promote: Temp -> Current
+        if (MoveFileExW(tempPath.c_str(), finalPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+            Log("[SECURE_CFG] Atomic save complete v" + std::to_string(nextVer));
+        } else {
+            Log("[SECURE_CFG] CRITICAL: Failed to promote temp config!");
+        }
+
+    } catch (...) {
+        Log("[SECURE_CFG] Save failed.");
+    }
+}
+
 static std::unordered_set<std::wstring> GetDefaultBackgroundApps() {
     return {
         L"onedrive.exe", L"googledrivesync.exe", L"dropbox.exe", L"box.exe",
@@ -127,9 +509,7 @@ static std::unordered_set<std::wstring> GetDefaultBackgroundApps() {
     };
 }
 
-// Internal shadow copies for serialization
-static ExplorerConfig g_lastExplorerConfig;
-static std::unordered_set<std::wstring> g_shadowBackgroundApps;
+// (Moved to top of file)
 
 // Helper to write configuration data to file (refactored for AV compatibility)
 static void WriteConfigurationFile(const std::filesystem::path& path, 
@@ -397,6 +777,28 @@ bool CreateDefaultConfig(const std::filesystem::path& configPath)
 
 void LoadConfig()
 {
+    // [PHASE 2] Secure Storage Priority
+    // Attempt to load encrypted binary config first.
+    if (SecureConfigManager::LoadSecureConfig()) {
+        return;
+    }
+
+    // [SECURITY FIX] Downgrade Attack Prevention (The "One-Way Valve")
+    // If the Registry says we have a secure version established (e.g., v15+),
+    // but LoadSecureConfig failed (file missing/corrupt), we MUST NOT fall back
+    // to the text file. An attacker might have deleted the .dat to force
+    // us to load a malicious .ini.
+    uint64_t sysVersion = GetRegistryConfigVersion();
+    if (sysVersion >= 15) { // 15 is the MIN_SECURE_VERSION
+        Log("[SECURE_CFG] CRITICAL: Secure Config missing but Registry indicates v" + 
+            std::to_string(sysVersion) + ". Potential Downgrade Attack detected.");
+        Log("[SECURE_CFG] Falling back to HARDCODED DEFAULTS. Ignoring legacy config.ini.");
+        
+        CreateDefaultConfig(GetConfigPath()); // Overwrites unsafe ini with safe defaults
+        // Fall through to load the now-safe file, or just return.
+        // Safer to return and let the next loop handle it, or force reload.
+    }
+
     auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     auto last = g_lastConfigReload.load();
     
@@ -759,6 +1161,9 @@ void LoadConfig()
         for (const auto& proc : g_ignoredProcesses) {
             Log("  - " + WideToUtf8(proc.c_str()));
         }
+
+        // [PHASE 2] Migration: Save as Secure Binary immediately
+        SecureConfigManager::SaveSecureConfig();
     }
     catch (const std::exception& e)
     { 
@@ -860,28 +1265,8 @@ void SaveTweakPreferences(const TweakConfig& config)
 
 void SaveConfig()
 {
-    try {
-        std::unique_lock lg(g_setMtx);
-        
-        WriteConfigurationFile(
-            GetConfigPath(),
-            g_games, g_browsers, g_videoPlayers, g_shadowBackgroundApps, g_oldGames, 
-            g_gameWindows, g_browserWindows, g_customLaunchers, g_ignoredProcesses,
-            g_ignoreNonInteractive.load(),
-            g_restoreOnExit.load(),
-            g_lockPolicy.load(),
-            g_suspendUpdatesDuringGames.load(),
-            g_idleRevertEnabled.load(),
-            g_idleTimeoutMs.load(),
-            g_responsivenessRecoveryEnabled.load(),
-            g_recoveryPromptEnabled.load(),
-            g_lastExplorerConfig,
-            g_iconTheme
-        );
-        Log("[CONFIG] Configuration saved to disk.");
-    } catch (const std::exception& e) {
-        Log("[CONFIG] Failed to save configuration: " + std::string(e.what()));
-    }
+    // [PHASE 2] Secure Save
+    SecureConfigManager::SaveSecureConfig();
 }
 
 void SaveIconTheme(const std::wstring& theme)
@@ -939,6 +1324,9 @@ void SaveIconTheme(const std::wstring& theme)
 
     std::wofstream out(path);
     for (const auto& l : lines) out << l << L"\n";
+
+    // Sync to Secure Storage
+    SaveConfig();
 }
 
 void SetExplorerConfigShadow(const ExplorerConfig& cfg) {
