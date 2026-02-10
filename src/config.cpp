@@ -201,12 +201,31 @@ bool ConfigValidator::Validate(const json& j) {
     if (!CheckList("browsers")) return false;
 
     // 2. Sanity Checks
-    if (j.contains("global")) {
-         if (j["global"].value("idle_timeout", 300000) < 5000) {
-             Log("[VALIDATOR] Sanity Check Failed: idle_timeout too low.");
-             return false;
+	if (j.contains("global") && j["global"].contains("idle_timeout")) {
+     uint32_t val = 300000;
+     const auto& t = j["global"]["idle_timeout"];
+     
+     try {
+         if (t.is_number()) {
+             val = t.get<uint32_t>();
+         } else if (t.is_string()) {
+             std::string s = t.get<std::string>();
+             if (s.length() > 1) {
+                 uint32_t mul = 1000;
+                 if (s.back() == 'm') mul = 60000;
+                 // Robust parsing: "300s" -> 300
+                 size_t len = s.length();
+                 if (!isdigit((unsigned char)s.back())) len--;
+                 val = std::stoi(s.substr(0, len)) * mul;
+             }
          }
-    }
+     } catch (...) {}
+
+     if (val < 5000) {
+         Log("[VALIDATOR] Sanity Check Failed: idle_timeout too low.");
+         return false;
+     }
+}
 
     return true;
 }
@@ -292,15 +311,15 @@ static bool InternalLoadFile(const std::filesystem::path& path, json& outJson) {
 
 // [PATCH] IPC Integration
 bool SecureConfigManager::ApplyConfig(const json& j) {
-    // 1. Validate Input (Reject malicious paths/names)
+    // 2. Apply to Globals (Thread-Safe)
+	try {
+    // 1. Validate Input (Reject malicious paths/names) - Moved inside try-catch for safety
     if (!ConfigValidator::Validate(j)) {
         Log("[SECURE_CFG] ApplyConfig rejected by validator.");
         return false;
     }
 
-    // 2. Apply to Globals (Thread-Safe)
-    try {
-        std::unique_lock lg(g_setMtx);
+    std::unique_lock lg(g_setMtx);
         
         // Helper to update sets only if present in JSON
         auto UpdateSet = [&](const char* key, std::unordered_set<std::wstring>& target) {
@@ -329,15 +348,23 @@ bool SecureConfigManager::ApplyConfig(const json& j) {
             if (g.contains("idle_revert_enabled")) g_idleRevertEnabled.store(g["idle_revert_enabled"]);
             
             if (g.contains("idle_timeout")) {
-                 std::string s = g["idle_timeout"];
-                 uint32_t ms = 300000;
-                 if (!s.empty()) {
+             uint32_t ms = 300000;
+             const auto& t = g["idle_timeout"];
+             
+             if (t.is_number()) {
+                 ms = t.get<uint32_t>();
+             } else if (t.is_string()) {
+                 std::string s = t.get<std::string>();
+                 if (s.length() > 1) {
                      uint32_t mul = 1000;
                      if (s.back() == 'm') mul = 60000;
-                     try { ms = std::stoi(s.substr(0, s.size()-1)) * mul; } catch(...) {}
+                     size_t len = s.length();
+                     if (!isdigit((unsigned char)s.back())) len--;
+                     try { ms = std::stoi(s.substr(0, len)) * mul; } catch(...) {}
                  }
-                 g_idleTimeoutMs.store(ms);
-            }
+             }
+             g_idleTimeoutMs.store(ms);
+        }
 
             if (g.contains("responsiveness_recovery")) g_responsivenessRecoveryEnabled.store(g["responsiveness_recovery"]);
             if (g.contains("recovery_prompt")) g_recoveryPromptEnabled.store(g["recovery_prompt"]);
@@ -393,18 +420,19 @@ bool SecureConfigManager::ApplyConfig(const json& j) {
             g_tweakConfig.bloatware = t.value("bloatware", false);
         }
         
-        // Sync Subsystems
-        g_networkMonitor.SetBackgroundApps(g_shadowBackgroundApps);
+    // Sync Subsystems
+    g_networkMonitor.SetBackgroundApps(g_shadowBackgroundApps);
+    
+    lg.unlock(); // [PATCH] Explicitly unlock before saving to prevent deadlock
 
-    } catch (const std::exception& e) {
-        Log("[SECURE_CFG] JSON Apply Error: " + std::string(e.what()));
-        return false;
-    }
+	} catch (const std::exception& e) {
+    Log("[SECURE_CFG] JSON Apply Error: " + std::string(e.what()));
+    return false;
+	}
 
-    // 3. Persist to Disk (Using the secure saver)
-    // Release lock before saving to avoid IO contention holding the mutex
-    SaveSecureConfig();
-    return true;
+	// 3. Persist to Disk (Using the secure saver)
+	SaveSecureConfig();
+	return true;
 }
 
 bool SecureConfigManager::LoadSecureConfig() {
