@@ -113,7 +113,8 @@ Source Code: [Available on GitHub]
 
 <div align="center">
 
-**Architect:** Ian Anthony R. Tancinco
+**Architect:** Ian Anthony R. Tancinco 
+**Engineers:** Gemini, GPT, Claude, Kimi, and others.
 
 *"The system is not sovereign. It is a licensed operator."*
 
