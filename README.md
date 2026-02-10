@@ -98,15 +98,33 @@ Configuration is now managed exclusively via the **Neural Center GUI**, which co
 
 ## 📄 License
 
-**GNU General Public License v3.0 (GPL-3.0)**.
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 
-Source Code: [Available on GitHub]
+**What this means:** You can freely use, modify, and distribute this software, but any derivative work must also be released under GPL-3.0 with its source code available.
+
+See the `LICENSE` file for the full license text.
+
+---
+
+## Third-Party Components
+
+This project includes the following third-party software:
+
+**Dear ImGui**
+* Copyright (c) 2014–2026 Omar Cornut
+* License: MIT
+* https://github.com/ocornut/imgui
+
+**JSON for Modern C++**
+* Copyright (c) 2013-2026 Niels Lohmann
+* License: MIT
+* https://github.com/nlohmann/json
 
 ---
 
 <div align="center">
 
-**Architect:** Ian Anthony R. Tancinco 
+**Architect:** Ian Anthony R. Tancinco  
 **Engineers:** Gemini, GPT, Claude, Kimi, and others.
 
 *"The system is not sovereign. It is a licensed operator."*
