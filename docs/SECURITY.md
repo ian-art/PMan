@@ -26,10 +26,10 @@ PMan supports a file-based **External Verdict** protocol, allowing third-party s
 ## 3. Provenance & Accountability
 
 **Problem:** Autonomous systems are often "Black Boxes."
-**Solution:** **Structured Audit Log**.
-* **Forensic Trail:** Every decision is logged to `provenance.log` in a structured JSON format. This includes the input telemetry, the decision made, and the specific cost/benefit analysis.
-* **Counterfactuals:** The log records *why* an action was taken, and crucially, *why alternatives were rejected* (e.g., "Rejected Boost due to Budget Exhaustion").
-* **Write Assurance:** If the Log file is locked, read-only, or the disk is full, the `OutcomeGuard` disables the Executor. The agent is hard-coded to stop acting if it cannot create a record of its actions.
+**Solution:** **Active Provenance Ledger**.
+* **Forensic Trail:** Every decision is recorded in the **High-Speed Memory Ledger**. This ensures zero-latency auditing without disk I/O overhead. The ledger can be exported to a structured JSON file via the **Neural Center Tray** for forensic analysis.
+* **Counterfactuals:** The ledger records *why* an action was taken, and crucially, *why alternatives were rejected* (e.g., "Rejected Boost due to Budget Exhaustion").
+* **Audit Assurance:** If the internal Ledger fails an integrity check or cannot allocate memory, the `OutcomeGuard` disables the Executor. The agent is hard-coded to stop acting if it cannot maintain a secure record of its actions.
 
 ## 4. Sandbox Isolation (The Dead Man's Switch)
 
@@ -47,7 +47,7 @@ PMan requires Administrator privileges to:
 * Read ETW Kernel Traces (Context Switches).
 
 ### Data Privacy
-* **Local Only:** All learning data (`brain.bin`), logs (`provenance.log`), and profiles are stored locally in `%ProgramData%\PriorityMgr`.
+* **Local Only:** All learning data (`brain.bin`), logs, and profiles are stored locally in `%ProgramData%\PriorityMgr`.
 * **No Telemetry:** PMan v5 contains **Zero Telemetry**. It does not report decisions, hardware specs, or user habits to any server.
 * **Network:** The only network activity is:
     1.  ICMP Pings to `1.1.1.1` / `8.8.8.8` (Latency/Jitter checks).
