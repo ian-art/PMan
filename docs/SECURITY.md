@@ -58,3 +58,28 @@ PMan requires Administrator privileges to:
 * **No Kernel Driver:** PMan runs entirely in User Mode. It cannot cause a Blue Screen of Death (BSOD) directly.
 * **Input Sanitization:** The `Investigator` module sanitizes inputs (Process Names) before they enter the Decision Engine.
 * **Budgeting as Defense:** Even if the internal logic is tricked into "Spamming" optimizations, the `AuthorityBudget` will deplete instantly, locking the agent out of the system.
+
+## 7. The Secure Core (IPC & Access Control)
+
+**Goal:** Elimination of external editor spawning and privilege escalation risks.
+
+* **Named Pipe Hardening:** The `PManSecureInterface` pipe is secured with a DACL that allows `Everyone` to Read (connect), but forces the internal logic to verify the *Client Token* before processing actions.
+* **The Diamond Patch:** We do not rely solely on pipe permissions. Inside the `OnMessageReceived` callback, the server verifies `IsUserAdmin(hToken)`. This prevents malware running as a standard user from spoofing configuration changes.
+* **Rate Limiting:** The IPC server enforces a "Cooldown" to prevent "Pipe Spam" attacks (Resource Exhaustion) where an attacker floods the service with status requests.
+
+## 8. The Watchtower (Advanced Heuristics)
+
+**Goal:** Detection of "Proxy Launches" (Malware hiding behind System binaries).
+
+PMan v6 moves beyond simple process name matching. It now inspects the **Process Token** and **Parentage**.
+
+**The Heuristic:**
+If a process is:
+1.  Spawned by System Infrastructure (`WmiPrvSE.exe`, `svchost.exe`, `taskeng.exe`)...
+2.  BUT the User SID is **NOT** `SYSTEM`, `LOCAL SERVICE`, or `NETWORK SERVICE`...
+3.  **VERDICT:** It is a **Proxy Launch** (likely a user script executed via WMI/Task Scheduler to evade detection).
+
+**Action:**
+The Governor immediately applies **Probation Mode**:
+* Priority: `BELOW_NORMAL`
+* Memory: Trimmed (Working Set Hardening).

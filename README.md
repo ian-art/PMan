@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚡ Priority Manager (PMan) v5
+# ⚡ Priority Manager (PMan) v6
 
 ### The Autonomous Adaptive Control System for Windows
 
@@ -64,24 +64,17 @@ PMan is built on a "Do No Harm" architecture designed to fail closed.
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ Configuration (Titanium Architecture)
 
-PMan v5 is controlled via **Policies** (`policy.json`).
-```json
-{
-  "limits": {
-    "maxAuthorityBudget": 1000,
-    "allowedActions": ["Maintain", "Boost_Process", "Throttle_Mild"],
-    "minConfidence": {
-      "cpuVariance": 0.85,
-      "latencyVariance": 1.50
-    }
-  }
-}
-```
+**⚠️ Note:** PMan v6 no longer supports manual editing of configuration files.
+Attempting to edit `config.dat` manually will trigger a Tamper Detection event and force a Factory Reset.
 
-- **maxAuthorityBudget**: The maximum "credits" the AI can spend per minute. Heavy actions (Service Suspension) cost more than light ones (Priority Bias).
-- **minConfidence**: The variance threshold. Lower values make the agent "paranoid" (reacting to small jitters), while higher values make it "tolerant."
+Configuration is now managed exclusively via the **Neural Center GUI**, which communicates with the System Service via a secure, encrypted IPC channel.
+
+**Security Features:**
+* **RBAC Enforcement:** Only Administrators can write changes to the system policy.
+* **DPAPI Encryption:** Configuration is encrypted with `CRYPTPROTECT_SYSTEM`, ensuring only the localized System Service can read it.
+* **Input Validation:** The Service acts as a "Gatekeeper," rejecting invalid values before they touch the disk.
 
 ---
 

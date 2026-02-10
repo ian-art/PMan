@@ -5,6 +5,24 @@ All notable changes to **PMan** will be documented in this file.
 This project follows a **baseline-first documentation model**. No historical version data exists prior to the initial public baseline listed below.
 
 ---
+## [6.0.0] — 2026-02-11
+
+**The "Titanium" Update**
+A complete architectural rewrite focusing on security, integrity, and isolation. PMan has transitioned from a standalone utility to a **Secure System Service**.
+
+### 🔒 The Secure Core
+- **Client-Server Split:** Separated the GUI (Viewer) from the Service (Worker). Communication is now handled via secure Named Pipes (`\\.\pipe\PManSecureInterface`).
+- **RBAC Enforcement:** The Service now strictly enforces Role-Based Access Control. Only Administrators can alter the Neural Configuration; Standard Users are restricted to Read-Only access.
+- **Binary Configuration:** Deprecated `json/ini` text files in favor of `config.dat`—a binary format encrypted via **DPAPI (CRYPTPROTECT_SYSTEM)**.
+- **Tamper Protection:** Added HMAC-SHA256 signature verification and Monotonic Versioning to the config header to prevent "Rollback Attacks" and external tampering.
+
+### 👁️ Watchtower Heuristics
+- **Anti-Proxy Detection:** Implemented deep token analysis to detect malware hiding behind legitimate system parents like `WmiPrvSE.exe` or `Task Scheduler`. These "Proxy Launches" are now automatically jailed and throttled.
+- **No-Verify Cleanup:** Removed the legacy `WinVerifyTrust` loop, replacing slow signature checks with the new, faster Token Heuristics.
+
+### 🛠️ Technical Changes
+- **IPC Protocol:** Defined a strict JSON command protocol (`SET_CONFIG`, `GET_STATUS`) with server-side validation.
+- **Memory Hardening:** The Service now actively rejects path traversal (`..`) and invalid CPU targets in the configuration.
 
 ## [5.0.0] — 2026-02-10
 

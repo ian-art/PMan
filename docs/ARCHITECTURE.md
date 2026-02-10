@@ -1,4 +1,4 @@
-# System Architecture v5.0
+# System Architecture v6.0
 
 ## Overview
 
@@ -75,7 +75,28 @@ graph TD
 
 ---
 
-### 4. Accountability Layer (The Audit)
+### 4. The Titanium Flow (Client-Server Architecture)
+
+PMan v6 splits the application into two distinct entities to eliminate "Confused Deputy" vulnerabilities.
+
+### The Architecture
+1.  **The GUI (Dumb Terminal):**
+    * Acts strictly as a visualizer and command sender.
+    * Connects to `\\.\pipe\PManSecureInterface` using Asynchronous Named Pipes.
+    * Sends JSON commands (`SET_CONFIG`, `GET_STATUS`) but performs no logic itself.
+
+2.  **The Service (The Gatekeeper):**
+    * Runs as `SYSTEM`.
+    * **RBAC (Role-Based Access Control):** Upon receiving a connection, it impersonates the client to check the token. If a Standard User attempts a `WRITE` command, it is rejected immediately.
+    * **The Validator:** Acts as a firewall for data. It sanitizes all incoming JSON (checking ranges, types, and blacklists) before serialization.
+
+### The Storage Pipeline
+Instead of text files, the system uses a **Binary Fortress** approach:
+* **Write:** GUI -> Pipe -> Validator -> DPAPI Encrypt -> `config.dat`.
+* **Read:** `config.dat` -> DPAPI Decrypt -> Validator -> Engine.
+* **Integrity:** The file header contains a monotonic version number and an HMAC-SHA256 signature. Any version rollback or hash mismatch triggers an immediate "Emergency Reset".
+
+### 5. Accountability Layer (The Audit)
 
 **Provenance Ledger** (`provenance_ledger.cpp`):
 - **Role**: The Audit Trail.
