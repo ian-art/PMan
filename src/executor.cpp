@@ -19,6 +19,7 @@
 
 #include "executor.h"
 #include "context.h"
+#include "globals.h"
 #include "logger.h"
 #include "throttle_manager.h"
 #include "memory_optimizer.h"
@@ -333,7 +334,12 @@ TargetSet Executor::ResolveTargets(BrainAction action) {
 // Hard-coded safety rules to prevent system instability
 bool Executor::HardValidate(const ActionIntent& intent, const TargetSet& targets) {
     // Rule 1: External Governor (Game Mode) Check
-    // ... (Existing Game Mode check) ...
+	if (g_sessionLocked.load()) {
+		DWORD lockedPid = g_lockedGamePid.load();
+		for (const auto& target : targets.targets) {
+			if (target.pid == lockedPid) return false;
+		}
+	}
 
     // Rule 2: Critical Process & Session 0 Isolation
     HWND hFg = GetForegroundWindow();
