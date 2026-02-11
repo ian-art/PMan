@@ -16,7 +16,7 @@
 #include <string>
 
 namespace SecurityUtils {
-    // [PHASE 3] The Watchtower
+    // The Watchtower
     // Detects if a process is a "Proxy Launch" (User script hiding behind System parent)
     // Heuristic: Parent is Infrastructure (WMI, Svchost) BUT Child is User Land.
     bool IsProxyLaunch(DWORD pid);

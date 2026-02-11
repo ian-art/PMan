@@ -52,7 +52,7 @@ private:
     bool IsAdmin(HANDLE hToken);
     bool IsInteractive(HANDLE hToken);
 
-    // [PHASE 5] Rate Limiting (Token Bucket)
+    // Rate Limiting (Token Bucket)
     struct RateBucket {
         std::chrono::steady_clock::time_point lastRefill;
         int tokens;

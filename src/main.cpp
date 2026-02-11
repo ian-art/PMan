@@ -1523,7 +1523,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     // Initialize Input Responsiveness Guard
     g_inputGuardian.Initialize();
 
-    // Initialize Secure IPC Core (Phase 1)
+    // Initialize Secure IPC Core
     if (PManContext::Get().subs.ipc) {
         PManContext::Get().subs.ipc->Initialize();
     }

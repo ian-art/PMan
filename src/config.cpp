@@ -107,7 +107,7 @@ static bool IsValidExecutableName(const std::wstring& name)
     return true;
 }
 
-// [PHASE 4] Integrity & Lifecycle Protection
+// Integrity & Lifecycle Protection
 #pragma pack(push, 1)
 struct ConfigHeader {
     uint32_t magic;      // 0x4E414D50 'PMAN' (Little Endian)
@@ -165,7 +165,7 @@ static void ComputeIntegrityHash(const void* blob, size_t size, uint64_t version
     }
 }
 
-// [PHASE 2] Configuration Validator
+// Configuration Validator
 using json = nlohmann::json;
 
 bool ConfigValidator::Validate(const json& j) {
@@ -234,7 +234,7 @@ std::filesystem::path SecureConfigManager::GetSecureConfigPath() {
     return GetLogPath() / "config.dat";
 }
 
-// [PHASE 5] Helper to decrypt and validate a specific file
+// Helper to decrypt and validate a specific file
 static bool InternalLoadFile(const std::filesystem::path& path, json& outJson) {
     if (!std::filesystem::exists(path)) return false;
 
@@ -246,10 +246,10 @@ static bool InternalLoadFile(const std::filesystem::path& path, json& outJson) {
     
     // Peek at header
     if (f.read((char*)&header, sizeof(header)) && header.magic == 0x4E414D50) {
-        // --- PHASE 4 FORMAT DETECTED ---
+
         uint64_t sysVersion = GetRegistryConfigVersion();
         
-        // [PHASE 4] Hardcoded Security Floor
+        // Hardcoded Security Floor
         static const uint64_t MIN_SECURE_VERSION = 15;
         if (header.version < MIN_SECURE_VERSION) {
             Log("[SECURE_CFG] CRITICAL: Config version " + std::to_string(header.version) + 
@@ -281,7 +281,7 @@ static bool InternalLoadFile(const std::filesystem::path& path, json& outJson) {
             SetRegistryConfigVersion(header.version);
         }
     } else {
-        // --- LEGACY/PHASE 2 FALLBACK ---
+        // --- LEGACY FALLBACK ---
         f.seekg(0, std::ios::beg);
         cipherText.assign((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     }
@@ -440,7 +440,7 @@ bool SecureConfigManager::LoadSecureConfig() {
     bool loaded = InternalLoadFile(GetSecureConfigPath(), j);
 
     if (!loaded) {
-        // [PHASE 5] Backup Recovery Strategy
+        // Backup Recovery Strategy
         // If main config is corrupt (BSOD/Power Loss during save), try the .bak
         std::filesystem::path backupPath = GetSecureConfigPath();
         backupPath += ".bak";
@@ -602,7 +602,7 @@ void SecureConfigManager::SaveSecureConfig() {
             return;
         }
 
-        // [PHASE 4] Time Lock (Version + Integrity)
+        // Time Lock (Version + Integrity)
         uint64_t nextVer = GetRegistryConfigVersion() + 1;
         SetRegistryConfigVersion(nextVer);
         
@@ -614,7 +614,7 @@ void SecureConfigManager::SaveSecureConfig() {
         // Sign the package
         ComputeIntegrityHash(out.pbData, out.cbData, header.version, header.hmac);
 
-        // [PHASE 5] Atomic Save Strategy
+        // Atomic Save Strategy
         // 1. Write to .tmp file
         std::filesystem::path finalPath = GetSecureConfigPath();
         std::filesystem::path tempPath = finalPath; tempPath += ".tmp";
@@ -715,7 +715,7 @@ void LoadConfig()
 
 void SaveConfig()
 {
-    // [PHASE 2] Secure Save
+    // Secure Save
     SecureConfigManager::SaveSecureConfig();
 }
 

@@ -97,7 +97,7 @@ void IpcServer::WorkerThread() {
             timeouts.ReadTotalTimeoutMultiplier = 0;
             SetCommTimeouts(hPipe, &timeouts);
 
-            // [PHASE 5] Rate Limiter Defense
+            // Rate Limiter Defense
             // Prevent "Pipe Spam" DoS by dropping high-frequency callers immediately
             if (!CheckRateLimit(hPipe)) {
                 Log("[IPC] Rate Limit Exceeded. Dropping connection.");
@@ -232,7 +232,7 @@ void IpcServer::ProcessRequest(const std::string& request, std::string& response
 
     // 2. Authorize (RBAC)
     // Only Admin can write config or control service state
-    // Interactive users can only query status (read-only) for Phase 1
+    // Interactive users can only query status (read-only)
     
     if (cmd == "GET_STATUS") {
         // Safe for Interactive

@@ -26,7 +26,7 @@
 #include "explorer_booster.h"
 #include "nlohmann/json.hpp" // Required for serialization
 
-// [PHASE 2] Secure Storage & Validation
+// Secure Storage & Validation
 class ConfigValidator {
 public:
     static bool Validate(const nlohmann::json& j);

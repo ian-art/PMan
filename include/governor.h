@@ -31,7 +31,7 @@ public:
     // Updates internal thresholds based on feedback from the Policy Optimizer
     void UpdatePolicy(const PolicyParameters& params);
 
-    // [PHASE 3] The Probation Officer
+    // The Probation Officer
     // Checks if a specific process is a "Proxy Launch" and recommends immediate containment.
     // Returns: AllowedActionClass::SecurityMitigation if probation is required.
     AllowedActionClass ReviewSuspiciousActivity(DWORD pid);

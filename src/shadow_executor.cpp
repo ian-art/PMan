@@ -61,7 +61,7 @@ PredictedStateDelta ShadowExecutor::Simulate(const ArbiterDecision& decision, co
             break;
 
         case BrainAction::Probation:
-            // [PHASE 3] Simulation: Probation clamps a suspicious process hard.
+            // Simulation: Probation clamps a suspicious process hard.
             // CPU load drops significantly (due to Low Priority).
             // Latency increases for the target, but system responsiveness improves.
             delta.cpuLoadDelta = -(telemetry.cpuLoad * 0.30); // 30% reduction estimate
