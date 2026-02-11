@@ -20,6 +20,69 @@
 #include "sandbox_executor.h"
 #include "logger.h"
 #include "context.h"
+#include "utils.h" // For ExeFromPath
+
+// [SECURITY PATCH] Helper to maintain the Shared Ledger
+static void UpdateLeaseLedger(DWORD pid, DWORD prio, bool active) {
+    HANDLE hMap = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(LeaseLedger), L"Local\\PManSessionLedger");
+    if (!hMap) return;
+    
+    // We map only briefly to update state
+    LeaseLedger* ledger = (LeaseLedger*)MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(LeaseLedger));
+    if (ledger) {
+        if (active) {
+            // FIND FREE SLOT
+            for (int i = 0; i < LeaseLedger::MAX_LEASES; i++) {
+                if (!ledger->entries[i].isActive) {
+                    ledger->entries[i].pid = pid;
+                    ledger->entries[i].originalPriority = prio;
+                    ledger->entries[i].leaseStartTime = GetTickCount64();
+                    ledger->entries[i].isActive = true;
+                    break;
+                }
+            }
+        } else {
+            // REMOVE ENTRY
+            for (int i = 0; i < LeaseLedger::MAX_LEASES; i++) {
+                if (ledger->entries[i].isActive && ledger->entries[i].pid == pid) {
+                    ledger->entries[i].isActive = false;
+                    break;
+                }
+            }
+        }
+        UnmapViewOfFile(ledger);
+    }
+    // Handle is closed immediately; the Mapping object persists if other handles (Watchdog) are open,
+    // or destroys if count=0. We rely on Watchdog opening it when needed or keeping it open.
+    // Ideally, PManContext should hold the handle, but this stateless approach suffices for crash recovery.
+    CloseHandle(hMap); 
+}
+
+// [SECURITY PATCH] Immutable Core List ("Trusted Assassin" Mitigation)
+static bool IsImmutableSystemProcess(DWORD pid) {
+    UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (!hProc) return false;
+    
+    wchar_t path[MAX_PATH];
+    DWORD sz = MAX_PATH;
+    if (QueryFullProcessImageNameW(hProc.get(), 0, path, &sz)) {
+        std::wstring name = ExeFromPath(path);
+        // Normalize
+        for (auto& c : name) c = towlower(c);
+        
+        // The "Do Not Touch" List
+        if (name == L"msmpeng.exe" ||  // Windows Defender
+            name == L"csrss.exe" ||    // Client Server Runtime
+            name == L"smss.exe" ||     // Session Manager
+            name == L"services.exe" || // SCM
+            name == L"lsass.exe" ||    // Local Security Authority
+            name == L"wininit.exe" ||  // Windows Init
+            name == L"winlogon.exe") { // Logon
+            return true;
+        }
+    }
+    return false;
+}
 
 SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     SandboxResult result = { false, false, false, "None", 0 };
@@ -135,6 +198,18 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         }
     }
 
+    // [SECURITY PATCH] Immutable Core Check
+    // Prevent "Trusted Assassin" attack via IPC/Policy
+    if (IsImmutableSystemProcess(targetPid)) {
+        result.executed = false;
+        result.reversible = false;
+        result.committed = false;
+        result.reason = "SecurityInterlock";
+        decision.isReversible = false;
+        Log("[SECURITY] Denied action on Immutable Core Process: " + std::to_string(targetPid));
+        return result;
+    }
+
     m_hTarget = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
     if (!m_hTarget) {
         result.executed = false;
@@ -184,6 +259,11 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         m_actionApplied = true;
         m_leaseStart = GetTickCount64(); // Start the Lease Clock
         
+        // [SECURITY PATCH] Update Shared Ledger for Crash Recovery
+        if (m_originalPriorityClass != 0) {
+            UpdateLeaseLedger(targetPid, m_originalPriorityClass, true);
+        }
+
         // COMMIT: We do NOT rollback automatically.
         result.executed = true;
         result.reversible = true;
@@ -210,6 +290,10 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
 void SandboxExecutor::Rollback() {
     if (m_actionApplied && m_hTarget) {
         SetPriorityClass(m_hTarget, m_originalPriorityClass);
+        
+        // [SECURITY PATCH] Clear from Ledger
+        UpdateLeaseLedger(GetProcessId(m_hTarget), 0, false);
+
         m_actionApplied = false;
         
         // Cooldown Start: Mark the exact moment authority was revoked.
@@ -222,7 +306,13 @@ bool SandboxExecutor::IsLeaseActive() const {
 }
 
 SandboxExecutor::~SandboxExecutor() {
-    // Destructor ensures Handle hygiene, but DOES NOT revert priority if committed.
+    // [SECURITY PATCH] Emergency Rollback on Destruction
+    // If the object is dying, we must release the lease.
+    // (This covers standard shutdowns, but not hard crashes - handled by Watchdog/Ledger)
+    if (m_actionApplied && m_hTarget) {
+        Rollback(); 
+    }
+
     if (m_hTarget) {
         CloseHandle(m_hTarget);
         m_hTarget = nullptr;
