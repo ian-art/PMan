@@ -408,6 +408,31 @@ void RunRegistryGuard(DWORD targetPid, DWORD originalVal, const std::wstring& st
     // 3. Begin Restoration Transaction
     Sleep(1000); // Allow PMan's own cleanup to race first
 
+    // [SECURITY PATCH] Revert Stranded Leases ("Zombie Lease" Mitigation)
+    // Read the Shared Memory Ledger to find processes that were boosted but not reverted.
+    HANDLE hMap = OpenFileMappingW(FILE_MAP_READ, FALSE, L"Local\\PManSessionLedger");
+    if (hMap) {
+        LeaseLedger* ledger = (LeaseLedger*)MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, sizeof(LeaseLedger));
+        if (ledger) {
+            for (int i = 0; i < LeaseLedger::MAX_LEASES; i++) {
+                if (ledger->entries[i].isActive) {
+                    DWORD pid = ledger->entries[i].pid;
+                    DWORD prio = ledger->entries[i].originalPriority;
+                    
+                    // Attempt Revert
+                    HANDLE hVictim = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
+                    if (hVictim) {
+                        SetPriorityClass(hVictim, prio);
+                        CloseHandle(hVictim);
+                        Log("[GUARD] Reverted stranded lease for PID: " + std::to_string(pid));
+                    }
+                }
+            }
+            UnmapViewOfFile(ledger);
+        }
+        CloseHandle(hMap);
+    }
+
     RegistryBackupState state;
     std::filesystem::path backupPath = GetLogPath() / L"pman_restore.bin";
     std::ifstream file(backupPath, std::ios::binary); // <--- File opens here
