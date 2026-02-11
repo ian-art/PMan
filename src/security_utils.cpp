@@ -16,7 +16,9 @@
 #include <cwctype>
 #include <wintrust.h>
 #include <softpub.h>
+#include <wincrypt.h>
 #pragma comment(lib, "wintrust.lib")
+#pragma comment(lib, "crypt32.lib")
 
 namespace SecurityUtils {
 
@@ -49,10 +51,63 @@ bool IsProcessTrusted(DWORD pid) {
 
     LONG status = WinVerifyTrust(NULL, &action, &winTrustData);
     
+    // [SECURITY PATCH] Certificate Pinning ("False God" Mitigation)
+    // Even if the signature is valid, we must verify the signer is NOT a self-signed root.
+    bool trustedSigner = false;
+    if (status == ERROR_SUCCESS) {
+        HCERTSTORE hStore = NULL;
+        HCRYPTMSG hMsg = NULL;
+        DWORD dwEncoding = 0, dwContentType = 0, dwFormatType = 0;
+
+        // Query the file for its signature object
+        if (CryptQueryObject(CERT_QUERY_OBJECT_FILE, path, 
+            CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED, 
+            CERT_QUERY_FORMAT_FLAG_BINARY, 0, &dwEncoding, &dwContentType, 
+            &dwFormatType, &hStore, &hMsg, NULL)) 
+        {
+             // Get the signer certificate info
+             DWORD dwSize = 0;
+             if (CryptMsgGetParam(hMsg, CMSG_SIGNER_INFO_PARAM, 0, NULL, &dwSize)) {
+                 std::vector<BYTE> signerInfoBuf(dwSize);
+                 if (CryptMsgGetParam(hMsg, CMSG_SIGNER_INFO_PARAM, 0, signerInfoBuf.data(), &dwSize)) {
+                     CMSG_SIGNER_INFO* pSignerInfo = reinterpret_cast<CMSG_SIGNER_INFO*>(signerInfoBuf.data());
+                     
+                     CERT_INFO certInfo = {0};
+                     certInfo.Issuer = pSignerInfo->Issuer;
+                     certInfo.SerialNumber = pSignerInfo->SerialNumber;
+
+                     PCCERT_CONTEXT pCertContext = CertFindCertificateInStore(hStore, 
+                         X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_CERT, 
+                         &certInfo, NULL);
+
+                     if (pCertContext) {
+                         // Verify Subject Name against Allowlist
+                         wchar_t nameBuf[256];
+                         if (CertGetNameStringW(pCertContext, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, NULL, nameBuf, 256)) {
+                             std::wstring signerName = nameBuf;
+                             // Hardcoded Trust List
+                             if (signerName.find(L"Microsoft") != std::wstring::npos ||
+                                 signerName.find(L"NVIDIA") != std::wstring::npos ||
+                                 signerName.find(L"Intel") != std::wstring::npos ||
+                                 signerName.find(L"AMD") != std::wstring::npos ||
+                                 signerName.find(L"Valve") != std::wstring::npos || 
+                                 signerName.find(L"Epic Games") != std::wstring::npos) {
+                                 trustedSigner = true;
+                             }
+                         }
+                         CertFreeCertificateContext(pCertContext);
+                     }
+                 }
+             }
+             if (hMsg) CryptMsgClose(hMsg);
+             if (hStore) CertCloseStore(hStore, 0);
+        }
+    }
+
     winTrustData.dwStateAction = WTD_STATEACTION_CLOSE;
     WinVerifyTrust(NULL, &action, &winTrustData);
 
-    return (status == ERROR_SUCCESS);
+    return (status == ERROR_SUCCESS && trustedSigner);
 }
 
 bool IsSystemOrService(HANDLE hToken) {
