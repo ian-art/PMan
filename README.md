@@ -84,7 +84,7 @@ Configuration is now managed exclusively via the **Neural Center GUI**, which co
 |----------|---------|
 | **Language** | C++20 (Concepts, Coroutines, Atomics) |
 | **Concurrency** | Lock-free telemetry, IOCP for file watching, and Thread Pool. |
-| **Persistence** | `brain.bin` (Statistical weights), `provenance.log` (JSON Audit trail). |
+| **Persistence** | `brain.bin` (Statistical weights), `config.dat` (Encrypted Settings). |
 | **Dependencies** | Native Win32 API only. No external runtime required. |
 
 ---
