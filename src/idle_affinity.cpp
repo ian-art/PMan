@@ -196,24 +196,62 @@ void IdleAffinityManager::OnProcessStart(DWORD pid)
     }
     if (!IsSafeToPark()) return;
 
-    // Calculate Park Mask
-        DWORD_PTR parkMask = 0;
-        int reserved = m_reservedCores.load();
+    // [FIX] Verification: Never blindly park a new process. 
+    // It might be the user launching a game/app (breaking idle), or a critical task.
 
-        if (!g_eCoreSets.empty()) {
-            // Use available Efficiency cores (up to reserved count)
-            int count = min(reserved, (int)g_eCoreSets.size());
-            for (int i = 0; i < count; i++) {
-                parkMask |= (1ULL << g_eCoreSets[i]);
-            }
-        } 
-        else {
-            // Legacy/Fallback: Use last N cores
-            if (reserved >= static_cast<int>(g_physicalCoreCount)) reserved = g_physicalCoreCount - 1;
-            for (int i = 0; i < reserved; i++) {
-                parkMask |= (1ULL << (g_physicalCoreCount - 1 - i));
-            }
+    // 1. Foreground Check: Is this the window the user is interacting with?
+    HWND hFg = GetForegroundWindow();
+    DWORD fgPid = 0;
+    if (hFg) {
+        GetWindowThreadProcessId(hFg, &fgPid);
+        if (pid == fgPid) return; 
+    }
+
+    // 2. Classification Check: Identify the process
+    std::wstring exeName;
+    {
+        // RAII Handle for safety
+        UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+        if (!hProc) return; // If we can't identify it, we shouldn't touch it.
+
+        wchar_t buffer[MAX_PATH];
+        DWORD size = MAX_PATH;
+        if (QueryFullProcessImageNameW(hProc.get(), 0, buffer, &size)) {
+            exeName = ExeFromPath(buffer);
+            asciiLower(exeName);
+        } else {
+            return;
         }
+    }
+
+    ProcessNetClass type = ClassifyProcessActivity(pid, exeName);
+
+    // Filter out Critical types
+    if (type == ProcessNetClass::SystemCritical || 
+        type == ProcessNetClass::UserCritical || 
+        type == ProcessNetClass::LatencySensitive)
+    {
+        return;
+    }
+
+    // Calculate Park Mask
+    DWORD_PTR parkMask = 0;
+    int reserved = m_reservedCores.load();
+
+    if (!g_eCoreSets.empty()) {
+        // Use available Efficiency cores (up to reserved count)
+        int count = min(reserved, (int)g_eCoreSets.size());
+        for (int i = 0; i < count; i++) {
+            parkMask |= (1ULL << g_eCoreSets[i]);
+        }
+    } 
+    else {
+        // Legacy/Fallback: Use last N cores
+        if (reserved >= static_cast<int>(g_physicalCoreCount)) reserved = g_physicalCoreCount - 1;
+        for (int i = 0; i < reserved; i++) {
+            parkMask |= (1ULL << (g_physicalCoreCount - 1 - i));
+        }
+    }
     
     SetProcessIdleAffinity(pid, parkMask);
 }
