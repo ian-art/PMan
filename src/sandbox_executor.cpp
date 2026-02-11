@@ -59,21 +59,49 @@ static void UpdateLeaseLedger(DWORD pid, DWORD prio, bool active) {
 }
 
 // [SECURITY PATCH] Immutable Core List ("Trusted Assassin" Mitigation)
+// [IMPORT] Re-use the robust heuristic from services.cpp (Move to utils or duplicate here)
+static bool IsProtectedProcess_Local(DWORD pid) {
+    UniqueHandle hProcess(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (!hProcess) return (GetLastError() == ERROR_ACCESS_DENIED); // Access Denied = Likely Protected
+    
+    PROCESS_PROTECTION_LEVEL_INFORMATION ppl = {0};
+    if (GetProcessInformation(hProcess.get(), (PROCESS_INFORMATION_CLASS)11, &ppl, sizeof(ppl))) {
+        return (ppl.ProtectionLevel != 0);
+    }
+    return false;
+}
+
 static bool IsImmutableSystemProcess(DWORD pid) {
+    // [SECURITY FIX] Heuristic: Never touch PPL processes (AV/EDR/LSA)
+    if (IsProtectedProcess_Local(pid)) return true;
+
     UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!hProc) return false;
     
     wchar_t path[MAX_PATH];
     DWORD sz = MAX_PATH;
     if (QueryFullProcessImageNameW(hProc.get(), 0, path, &sz)) {
+        std::wstring fullPath = path;
         std::wstring name = ExeFromPath(path);
+        
         // Normalize
         for (auto& c : name) c = towlower(c);
-        
+        for (auto& c : fullPath) c = towlower(c);
+
+        // [SECURITY FIX] Path Validation
+        // Critical system processes MUST reside in C:\Windows\System32 (or equivalent)
+        // This prevents "C:\Temp\csrss.exe" masquerade attacks.
+        wchar_t sysDir[MAX_PATH];
+        GetSystemDirectoryW(sysDir, MAX_PATH);
+        std::wstring sysDirStr = sysDir;
+        for (auto& c : sysDirStr) c = towlower(c);
+
+        bool isSystemLoc = (fullPath.find(sysDirStr) != std::wstring::npos);
+
         // The "Do Not Touch" List
         if (name == L"msmpeng.exe" ||  // Windows Defender
-            name == L"csrss.exe" ||    // Client Server Runtime
-            name == L"smss.exe" ||     // Session Manager
+            (isSystemLoc && name == L"csrss.exe") ||    // Client Server Runtime (Strict Path)
+            (isSystemLoc && name == L"smss.exe") ||     // Session Manager (Strict Path)
             name == L"services.exe" || // SCM
             name == L"lsass.exe" ||    // Local Security Authority
             name == L"wininit.exe" ||  // Windows Init
