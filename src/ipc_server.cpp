@@ -136,6 +136,31 @@ void IpcServer::WorkerThread() {
 
 // The "Diamond Patch": Internal RBAC
 bool IpcServer::ValidateCaller(HANDLE hPipe, bool& isAdmin, bool& isInteractive) {
+    // [SECURITY FIX] Step 0: Validate Client Process Identity (Anti-Spoofing)
+    ULONG clientPid = 0;
+    if (GetNamedPipeClientProcessId(hPipe, &clientPid)) {
+        UniqueHandle hClient(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, clientPid));
+        if (hClient) {
+            wchar_t path[MAX_PATH];
+            DWORD sz = MAX_PATH;
+            if (QueryFullProcessImageNameW(hClient.get(), 0, path, &sz)) {
+                std::wstring sPath = path;
+                // Normalize
+                for (auto& c : sPath) c = towlower(c);
+                
+                // Allow only: Self (GUI), or trusted system paths
+                bool isTrusted = (sPath.find(L"pman") != std::wstring::npos) || 
+                                 (sPath.find(L"windows\\system32") != std::wstring::npos) ||
+                                 (sPath.find(L"program files") != std::wstring::npos);
+
+                if (!isTrusted) {
+                    Log("[IPC] Rejected connection from untrusted binary: " + WideToUtf8(path));
+                    return false;
+                }
+            }
+        }
+    }
+
     if (!ImpersonateNamedPipeClient(hPipe)) return false;
 
     HANDLE hToken;
