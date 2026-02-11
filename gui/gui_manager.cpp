@@ -167,10 +167,23 @@ namespace GuiManager {
     };
     static ListEditorState g_listState;
 
+    // [FIX] Moved HelpMarker up so RenderListEditor can see it
+    static void HelpMarker(const char* desc) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::BeginItemTooltip()) {
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+            ImGui::TextUnformatted(desc);
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
+    }
+
     // Helper: Render a single list editor
-    static void RenderListEditor(const char* label, std::vector<std::string>& items, char* inputBuf, size_t bufSize) {
+    static void RenderListEditor(const char* label, std::vector<std::string>& items, char* inputBuf, size_t bufSize, const char* desc) {
         ImGui::Text("%s (%zu items)", label, items.size());
-        ImGui::Separator();
+        if (desc) HelpMarker(desc);
+        //ImGui::Separator();
         
         // Add Item Section
         ImGui::InputText("##add", inputBuf, bufSize);
@@ -320,17 +333,6 @@ namespace GuiManager {
     // ============================================================================================
     // Helpers
     // ============================================================================================
-    static void HelpMarker(const char* desc) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(?)");
-        if (ImGui::BeginItemTooltip()) {
-            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
-            ImGui::TextUnformatted(desc);
-            ImGui::PopTextWrapPos();
-            ImGui::EndTooltip();
-        }
-    }
-
     void BeginCard(const char* id, ImVec4 color) {
         ImGui::PushStyleColor(ImGuiCol_ChildBg, color);
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 10.0f);
@@ -1059,6 +1061,18 @@ namespace GuiManager {
                         "Background Apps", "Launchers", "Ignored Processes",
                         "Old Games (DX9/10)", "Game Windows", "Browser Windows"
                     };
+
+                    const char* categoryDescs[] = {
+                        "Can add popular AAA games here.",
+                        "Add browser executables here.",
+                        "Add video players here to boost them. Useful if you play 4K and 8K videos.",
+                        "Apps to throttle when network contention is detected (FNRO Level 2).\nIncludes Cloud Sync, Game Launchers, and Torrent Clients.",
+                        "Custom Launchers Configuration.\nList game launchers here to prevent them from being mistaken for games.\nThese apps will be set to Low Priority to save CPU/GPU for your actual game.",
+                        "Priority Manager - Shell Process Exclusion List.\nThese system processes are part of the Desktop Experience.\nThey should NEVER be treated as Browsers or Games.",
+                        "DX9 and DX10 game lists here.",
+                        "============= WINDOW CLASS/TITLE DETECTION =============\nThese patterns help detect games BEFORE their process name appears.\nThe system checks both window titles AND window class names.\nMatches are case-insensitive and use partial matching (contains).\n\nThis is especially useful for:\n - Games that launch through launchers\n - Games with generic process names\n - Games that show splash screens first\n\nHOW TO FIND WINDOW CLASS NAMES:\n1. Download \"Spy++\" (comes with Visual Studio) or \"Window Detective\"\n2. Launch your game\n3. Use the finder tool to inspect the game window\n4. Copy the \"Class\" or \"ClassName\" value\n5. Add it here (one per line).",
+                        "============ BROWSER WINDOW CLASS DETECTION ============\nThese patterns detect browsers by their window class names.\nUseful when browser processes have generic names\nOr when embedded browsers appear in other applications."
+                    };
                     
                     for (int i = 0; i < IM_ARRAYSIZE(categories); i++) {
                         if (ImGui::Selectable(categories[i], g_listState.selectedCategory == i)) {
@@ -1083,7 +1097,7 @@ namespace GuiManager {
                     }
 
                     if (currentList) {
-                        RenderListEditor(categories[g_listState.selectedCategory], *currentList, g_listState.inputBuf, sizeof(g_listState.inputBuf));
+                        RenderListEditor(categories[g_listState.selectedCategory], *currentList, g_listState.inputBuf, sizeof(g_listState.inputBuf), categoryDescs[g_listState.selectedCategory]);
                     }
                     
                     ImGui::Columns(1);
