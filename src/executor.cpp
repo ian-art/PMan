@@ -66,6 +66,9 @@ static bool ApplyForegroundShield_Impl(DWORD pid) {
     // Safety: Never boost a Protected Process (AV) even if it steals focus
     if (IsProtectedProcess(pid)) return false;
 
+    // [PATCH] Trojan Defense: Verify signature before boosting
+    if (!SecurityUtils::IsProcessTrusted(pid)) return false;
+
     HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
     if (hProc) {
         // 1. Boost CPU Priority (Transient)
@@ -333,7 +336,16 @@ bool Executor::HardValidate(const ActionIntent& intent, const TargetSet& targets
     // ... (Existing Game Mode check) ...
 
     // Rule 2: Critical Process & Session 0 Isolation
+    HWND hFg = GetForegroundWindow();
+    DWORD fgPid = 0;
+    GetWindowThreadProcessId(hFg, &fgPid);
+
     for (const auto& target : targets.targets) {
+        // [PATCH] Friendly Fire: Never throttle the active foreground window
+        if (intent.action == BrainAction::Throttle_Aggressive && target.pid == fgPid) {
+             return false;
+        }
+
         if (target.pid <= 4) return false;
         if (target.pid == GetCurrentProcessId()) return false;
 
