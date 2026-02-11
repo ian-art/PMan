@@ -21,8 +21,8 @@
 #define VERSION_H
 
 #define PMAN_VERSION_MAJOR 6
-#define PMAN_VERSION_MINOR 0
-#define PMAN_VERSION_PATCH 1
+#define PMAN_VERSION_MINOR 2
+#define PMAN_VERSION_PATCH 0
 #define PMAN_VERSION_BUILD 2026
 
 // Helper macros to turn numbers into strings
