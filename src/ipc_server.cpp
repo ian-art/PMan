@@ -90,6 +90,13 @@ void IpcServer::WorkerThread() {
         }
 
         if (ConnectNamedPipe(hPipe, nullptr) || GetLastError() == ERROR_PIPE_CONNECTED) {
+            // [PATCH] Fix Pipe Clog DoS: Enforce timeouts
+            COMMTIMEOUTS timeouts = { 0 };
+            timeouts.ReadIntervalTimeout = 500;
+            timeouts.ReadTotalTimeoutConstant = 500;
+            timeouts.ReadTotalTimeoutMultiplier = 0;
+            SetCommTimeouts(hPipe, &timeouts);
+
             // [PHASE 5] Rate Limiter Defense
             // Prevent "Pipe Spam" DoS by dropping high-frequency callers immediately
             if (!CheckRateLimit(hPipe)) {
