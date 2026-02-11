@@ -59,14 +59,16 @@ void IpcServer::Shutdown() {
 }
 
 void IpcServer::WorkerThread() {
-    // 1. Create Security Descriptor (SYSTEM:Full, Admins:RW, Interactive:RW)
-    // D:(A;;GA;;;SY)(A;;GRGW;;;BA)(A;;GRGW;;;IU)
+    // 1. Create Security Descriptor (SYSTEM:Full, Admins:RW)
+    // [SECURITY FIX] Removed 'IU' (Interactive Users). 
+    // Only Administrators (BA) and SYSTEM (SY) may write to this pipe.
+    // This prevents unprivileged malware from flooding the pipe or attempting DoS.
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
     sa.bInheritHandle = FALSE;
     
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"D:(A;;GA;;;SY)(A;;GRGW;;;BA)(A;;GRGW;;;IU)", 
+            L"D:(A;;GA;;;SY)(A;;GRGW;;;BA)", 
             SDDL_REVISION_1, 
             &(sa.lpSecurityDescriptor), 
             nullptr)) {
