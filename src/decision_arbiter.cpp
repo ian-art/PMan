@@ -84,8 +84,10 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
                 } else {
                     // Recommendation: Proceed (True Pressure Confirmed)
                     investigationResolved = true;
-                    // Note: Ideally we update the ConfidenceTracker here via PManContext
-                    // PManContext::Get().subs.confidence->ForceConfidence(verdict.confidenceBoost);
+                    // [FIX] Feedback Loop: Immediate Confidence Update
+                    if (auto& conf = PManContext::Get().subs.confidence) {
+                        conf->ForceConfidence(verdict.confidenceBoost);
+                    }
                 }
             }
         }
