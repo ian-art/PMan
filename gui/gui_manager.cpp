@@ -146,7 +146,11 @@ namespace GuiManager {
             
             auto CopySet = [](const std::unordered_set<std::wstring>& src, std::vector<std::string>& dst) {
                 dst.clear();
-                for (const auto& item : src) dst.push_back(WideToUtf8(item.c_str()));
+                for (const auto& item : src) {
+                    std::string s = WideToUtf8(item.c_str());
+                    for (auto& c : s) c = (char)tolower(c);
+                    dst.push_back(s);
+                }
                 std::sort(dst.begin(), dst.end()); // Sort for display
             };
 
@@ -1111,7 +1115,11 @@ namespace GuiManager {
                         
                         auto Serialize = [&](const char* key, const std::vector<std::string>& list) {
                             root[key] = nlohmann::json::array();
-                            for (const auto& item : list) root[key].push_back(item);
+                            for (const auto& item : list) {
+                                std::string s = item;
+                                for (auto& c : s) c = (char)tolower(c);
+                                root[key].push_back(s);
+                            }
                         };
 
                         Serialize("games", g_listState.games);
