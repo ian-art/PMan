@@ -60,7 +60,7 @@ static void UpdateLeaseLedger(DWORD pid, DWORD prio, bool active) {
 
 // [SECURITY PATCH] Immutable Core List ("Trusted Assassin" Mitigation)
 // [IMPORT] Re-use the robust heuristic from services.cpp (Move to utils or duplicate here)
-static bool IsProtectedProcess_Local(DWORD pid) {
+[[maybe_unused]] static bool IsProtectedProcess_Local(DWORD pid) {
     UniqueHandle hProcess(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!hProcess) return (GetLastError() == ERROR_ACCESS_DENIED); // Access Denied = Likely Protected
     
@@ -71,16 +71,19 @@ static bool IsProtectedProcess_Local(DWORD pid) {
     return false;
 }
 
-static bool IsImmutableSystemProcess(DWORD pid) {
-    // [SECURITY FIX] Heuristic: Never touch PPL processes (AV/EDR/LSA)
-    if (IsProtectedProcess_Local(pid)) return true;
+static bool IsImmutableSystemProcess(HANDLE hProc) {
+    // [SECURITY FIX] Handle-Based Verification (Prevents TOCTOU)
+    if (!hProc) return true; // Fail safe
 
-    UniqueHandle hProc(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
-    if (!hProc) return false;
-    
+    // Check Protection Level on the ACTIVE handle
+    PROCESS_PROTECTION_LEVEL_INFORMATION ppl = {0};
+    if (GetProcessInformation(hProc, (PROCESS_INFORMATION_CLASS)11, &ppl, sizeof(ppl))) {
+        if (ppl.ProtectionLevel != 0) return true;
+    }
+
     wchar_t path[MAX_PATH];
     DWORD sz = MAX_PATH;
-    if (QueryFullProcessImageNameW(hProc.get(), 0, path, &sz)) {
+    if (QueryFullProcessImageNameW(hProc, 0, path, &sz)) {
         std::wstring fullPath = path;
         std::wstring name = ExeFromPath(path);
         
@@ -226,18 +229,7 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         }
     }
 
-    // [SECURITY PATCH] Immutable Core Check
-    // Prevent "Trusted Assassin" attack via IPC/Policy
-    if (IsImmutableSystemProcess(targetPid)) {
-        result.executed = false;
-        result.reversible = false;
-        result.committed = false;
-        result.reason = "SecurityInterlock";
-        decision.isReversible = false;
-        Log("[SECURITY] Denied action on Immutable Core Process: " + std::to_string(targetPid));
-        return result;
-    }
-
+    // [SECURITY FIX] TOCTOU Mitigation: Open Handle FIRST
     m_hTarget = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
     if (!m_hTarget) {
         result.executed = false;
@@ -247,6 +239,23 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         decision.isReversible = false;
         return result;
     }
+
+    // [SECURITY PATCH] Immutable Core Check (Handle-Based)
+    // Prevent "Trusted Assassin" attack via IPC/Policy using the LOCKED handle
+    if (IsImmutableSystemProcess(m_hTarget)) {
+        CloseHandle(m_hTarget);
+        m_hTarget = nullptr;
+        
+        result.executed = false;
+        result.reversible = false;
+        result.committed = false;
+        result.reason = "SecurityInterlock";
+        decision.isReversible = false;
+        Log("[SECURITY] Denied action on Immutable Core Process: " + std::to_string(targetPid));
+        return result;
+    }
+
+    // Handle is valid and safe; proceed.
 
     // 3. Capture State (For potential manual rollback, though we intend to commit)
     m_originalPriorityClass = GetPriorityClass(m_hTarget);
