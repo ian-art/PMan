@@ -555,4 +555,18 @@ struct PredictionLog {
     uint64_t timestamp;
 };
 
+// [SECURITY PATCH] Shared Memory Ledger for "Zombie Lease" Prevention
+// Fixed-size structure resident in "Local\PManSessionLedger"
+struct LeaseEntry {
+    DWORD pid;
+    DWORD originalPriority;
+    uint64_t leaseStartTime;
+    bool isActive;
+};
+
+struct LeaseLedger {
+    static constexpr size_t MAX_LEASES = 32;
+    LeaseEntry entries[MAX_LEASES];
+};
+
 #endif // PMAN_TYPES_H
