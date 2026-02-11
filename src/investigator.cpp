@@ -95,16 +95,16 @@ InvestigationVerdict Investigator::Diagnose(const GovernorDecision& govState) {
         else if (cpuDiag == DiagnosisType::TruePressure_Sustained) {
             // [REFINEMENT] Sustained pressure could be a spinlock/deadlock.
             // If the Governor has a target PID, we should probe it for deadlocks.
-            // Assuming govState tracks a primary target (placeholder for now until GovernorDecision is updated)
-            // DWORD targetPid = govState.targetPid; 
-            // if (targetPid > 0) {
-            //     DiagnosisType wctDiag = ProbeWaitChain(targetPid);
-            //     if (wctDiag == DiagnosisType::Process_Deadlocked) {
-            //         verdict.type = wctDiag;
-            //         verdict.recommendVeto = true; // Don't boost a deadlocked app
-            //         return verdict;
-            //     }
-            // }
+            if (govState.targetPid > 0) {
+                DiagnosisType wctDiag = ProbeWaitChain(govState.targetPid);
+                if (wctDiag == DiagnosisType::Process_Deadlocked) {
+                    verdict.resolved = true;
+                    verdict.type = wctDiag;
+                    verdict.recommendVeto = true; // Don't boost a deadlocked app
+                    verdict.confidenceBoost = 1.0;
+                    return verdict;
+                }
+            }
 
             verdict.resolved = true;
             verdict.type = cpuDiag;
@@ -360,7 +360,11 @@ DiagnosisType Investigator::ProbeWaitChain(DWORD pid) {
                 // Analyze nodes for frozen I/O
                 for (DWORD i = 0; i < nodeCount; ++i) {
                     if (nodes[i].ObjectStatus == WctStatusBlocked) {
-                         // Placeholder: future deep analysis of blocked items
+                         // [FIX] Deep Analysis: Log IPC/RPC Blockages
+                         if (nodes[i].ObjectType == WctAlpcType || nodes[i].ObjectType == WctComType) {
+                              Log("[INV] Thread " + std::to_string(te32.th32ThreadID) + 
+                                  " Blocked on IPC/RPC. Potential Deadlock.");
+                         }
                     }
                 }
             }
