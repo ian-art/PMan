@@ -228,6 +228,10 @@ bool WindowsServiceManager::IsHardExcluded(const std::wstring& serviceName, DWOR
 
     // Category-Based Hard Exclusions (LOWERCASE ONLY for safety)
     static const std::unordered_set<std::wstring> HARD_EXCLUSIONS = {
+        // [SECURITY] Critical AV & Defense Services (Anti-Tamper)
+        L"windefend", L"msmpeng", L"msmpsvc", L"securityhealthservice", 
+        L"sense", L"wdnissvc", L"sppsvc", L"winlo", L"mpssvc",
+        
         // RPC / DCOM / MMCSS
         L"rpcss", L"dcomlaunch", L"rpceptmapper", L"mmcss",
         // Audio
