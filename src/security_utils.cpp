@@ -14,8 +14,46 @@
 #include <vector>
 #include <sddl.h>
 #include <cwctype>
+#include <wintrust.h>
+#include <softpub.h>
+#pragma comment(lib, "wintrust.lib")
 
 namespace SecurityUtils {
+
+bool IsProcessTrusted(DWORD pid) {
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProcess) return false;
+
+    wchar_t path[MAX_PATH];
+    DWORD size = MAX_PATH;
+    if (!QueryFullProcessImageNameW(hProcess, 0, path, &size)) {
+        CloseHandle(hProcess);
+        return false;
+    }
+    CloseHandle(hProcess);
+
+    WINTRUST_FILE_INFO fileData = {0};
+    fileData.cbStruct = sizeof(fileData);
+    fileData.pcwszFilePath = path;
+
+    WINTRUST_DATA winTrustData = {0};
+    winTrustData.cbStruct = sizeof(winTrustData);
+    winTrustData.dwUIChoice = WTD_UI_NONE;
+    winTrustData.fdwRevocationChecks = WTD_REVOKE_NONE;
+    winTrustData.dwUnionChoice = WTD_CHOICE_FILE;
+    winTrustData.dwStateAction = WTD_STATEACTION_VERIFY;
+    winTrustData.pFile = &fileData;
+
+    // [FIX] Instantiate GUID to pass by address
+    GUID action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+
+    LONG status = WinVerifyTrust(NULL, &action, &winTrustData);
+    
+    winTrustData.dwStateAction = WTD_STATEACTION_CLOSE;
+    WinVerifyTrust(NULL, &action, &winTrustData);
+
+    return (status == ERROR_SUCCESS);
+}
 
 bool IsSystemOrService(HANDLE hToken) {
     DWORD len = 0;

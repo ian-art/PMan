@@ -23,6 +23,9 @@ namespace SecurityUtils {
     
     // Helper: Checks if a Token belongs to SYSTEM, LOCAL SERVICE, or NETWORK SERVICE
     bool IsSystemOrService(HANDLE hToken);
+
+    // [PATCH] Trojan Defense: Verify Authenticode Signature
+    bool IsProcessTrusted(DWORD pid);
 }
 
 #endif // PMAN_SECURITY_UTILS_H
