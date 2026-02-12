@@ -597,6 +597,7 @@ class ResponsivenessManager {
         bool prompted = false;
         DWORD originalPriority = NORMAL_PRIORITY_CLASS;
         int originalThreadPriority = THREAD_PRIORITY_NORMAL;
+        DWORD_PTR originalAffinity = 0;
     } m_state;
 
     std::mutex m_mtx;
@@ -727,10 +728,13 @@ private:
             // Temporary Affinity Expansion (Allow all cores)
             DWORD_PTR processAffinity, systemAffinity;
             if (GetProcessAffinityMask(hProc.get(), &processAffinity, &systemAffinity)) {
-                if (processAffinity != systemAffinity) {
-                    SetProcessAffinityMask(hProc.get(), systemAffinity);
-                }
+            if (processAffinity != systemAffinity) {
+                m_state.originalAffinity = processAffinity;
+                SetProcessAffinityMask(hProc.get(), systemAffinity);
+            } else {
+                m_state.originalAffinity = 0;
             }
+        }
         }
 
         // Boost UI Thread
@@ -751,6 +755,9 @@ private:
         UniqueHandle hProc(OpenProcess(PROCESS_SET_INFORMATION, FALSE, m_state.pid));
         if (hProc) {
             SetPriorityClass(hProc.get(), m_state.originalPriority);
+            if (m_state.originalAffinity != 0) {
+                SetProcessAffinityMask(hProc.get(), m_state.originalAffinity);
+            }
         }
 
         if (m_state.hwnd) {
