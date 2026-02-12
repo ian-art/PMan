@@ -349,19 +349,27 @@ void SetProcessIoPriority(DWORD pid, int mode)
         Log("[I/O] Advanced I/O Priority unavailable (access denied) - skipping expensive thread fallback");
         
         // Method 3: Process Priority Class
-        DWORD priorityClass = (mode == 1) ? HIGH_PRIORITY_CLASS : IDLE_PRIORITY_CLASS;
+        DWORD priorityClass;
+        if (mode == 1) priorityClass = HIGH_PRIORITY_CLASS;
+        else if (mode == 0) priorityClass = NORMAL_PRIORITY_CLASS; // [PATCH] Correctly restore Normal priority
+        else priorityClass = IDLE_PRIORITY_CLASS;
+
         if (SetPriorityClass(hProcess, priorityClass))
         {
             Log("[I/O] Process priority set: " + 
-                std::string(mode == 1 ? "HIGH (game)" : "IDLE (browser)") + " using SetPriorityClass");
+                std::string(mode == 1 ? "HIGH" : (mode == 0 ? "NORMAL" : "IDLE")) + " using SetPriorityClass");
         }
         else
         {
-            priorityClass = (mode == 1) ? ABOVE_NORMAL_PRIORITY_CLASS : BELOW_NORMAL_PRIORITY_CLASS;
+            // Fallback for fallback
+            if (mode == 1) priorityClass = ABOVE_NORMAL_PRIORITY_CLASS;
+            else if (mode == 0) priorityClass = NORMAL_PRIORITY_CLASS;
+            else priorityClass = BELOW_NORMAL_PRIORITY_CLASS;
+
             if (SetPriorityClass(hProcess, priorityClass))
             {
                 Log("[I/O] Fallback priority set: " + 
-                    std::string(mode == 1 ? "ABOVE_NORMAL (game)" : "BELOW_NORMAL (browser)") + " using SetPriorityClass");
+                    std::string(mode == 1 ? "ABOVE_NORMAL" : (mode == 0 ? "NORMAL" : "BELOW_NORMAL")) + " using SetPriorityClass");
             }
         }
     }
