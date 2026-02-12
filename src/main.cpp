@@ -273,10 +273,11 @@ static void RunAutonomousCycle() {
                 [](const CounterfactualRecord& r){ return r.action == BrainAction::Maintain; });
             decision.rejectedAlternatives.erase(it, decision.rejectedAlternatives.end());
 
+            BrainAction rejectedAction = decision.selectedAction;
             decision.selectedAction = BrainAction::Maintain;
             decision.reason = DecisionReason::HardRuleViolation;
             decision.isReversible = false;
-            Log("[POLICY_VIOLATION] Action rejected by contract.");
+            Log("[POLICY_VIOLATION] Action rejected by contract. ActionID: " + std::to_string((int)rejectedAction));
         }
     }
 
