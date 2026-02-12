@@ -104,6 +104,7 @@ void TrayAnimator::Initialize(HINSTANCE hInstance, HWND hwnd) {
     
     EnsureCustomFolder();
     m_initialized = true;
+    m_lastTick.store(GetTickCount64());
     Log("[TRAY] Animator initialized.");
 }
 
@@ -124,6 +125,7 @@ void TrayAnimator::LoadResources() {
 void TrayAnimator::OnTimer(WPARAM timerId) {
     if (!m_initialized || timerId != TIMER_ID) return;
 
+    m_lastTick.store(GetTickCount64());
     std::lock_guard<std::mutex> lock(m_mtx);
     UpdateIcon();
 }

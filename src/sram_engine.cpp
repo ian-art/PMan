@@ -20,6 +20,7 @@
 #include "sram_engine.h"
 #include "logger.h"
 #include "nt_wrapper.h"
+#include "tray_animator.h"
 #include <pdh.h>
 #include <dwmapi.h>
 
@@ -281,6 +282,8 @@ float SramEngine::NormalizeMetric(float value, float minThreshold, float maxThre
 }
 
 void SramEngine::EvaluateState() {
+    uint64_t now = GetTickCount64();
+
     // 1. Calculate Deltas
     uint32_t dwmDelta = 0;
     if (m_dwmFramesMissed >= m_lastDwmSnapshot) {
@@ -317,15 +320,23 @@ void SramEngine::EvaluateState() {
     // DPC Latency: >5% is noticeable, >10% is pressure, >20% is lagging.
     float n_dpc   = NormalizeMetric((float)m_maxDpcPercent, 5.0f, 20.0f);
 
+    // Self-Starvation (Tray Icon): If animation stops, main thread is starving.
+    // Timer is 150ms. >300ms is hiccup. >1000ms is heavy lag.
+    uint64_t lastAnim = TrayAnimator::Get().GetLastAnimationTime();
+    uint64_t animDelta = (now > lastAnim) ? (now - lastAnim) : 0;
+    float n_self = NormalizeMetric((float)animDelta, 300.0f, 1500.0f);
+
     // 3. Composite Scoring (Weighted Formula)
-    float c_ui    = n_ui * 0.30f;
-    float c_dwm   = n_dwm * 0.20f;
-    float c_input = n_input * 0.20f;
-    float c_cpu   = n_cpu * 0.15f;
-    float c_dpc   = n_dpc * 0.15f; // New 15% weight
-    
+    // Rebalanced to include Self-Starvation (25% weight)
+    float c_ui    = n_ui * 0.20f;     // Foreground App
+    float c_dwm   = n_dwm * 0.15f;    // Render Drops
+    float c_input = n_input * 0.15f;  // Input Lag
+    float c_cpu   = n_cpu * 0.15f;    // CPU Queue
+    float c_dpc   = n_dpc * 0.10f;    // Kernel Latency
+    float c_self  = n_self * 0.25f;   // Scheduler Starvation (New)
+
     // Normalize score to 0.0 - 1.0 range (Sum of weights is 1.0)
-    float score = (c_ui + c_dwm + c_input + c_cpu + c_dpc);
+    float score = (c_ui + c_dwm + c_input + c_cpu + c_dpc + c_self);
 
     // 4. Map to Raw State
     LagState rawState = LagState::SNAPPY;
@@ -334,7 +345,6 @@ void SramEngine::EvaluateState() {
     else if (score >= 0.15f) rawState = LagState::SLIGHT_PRESSURE;
 
     // 5. Hysteresis Controller (State Machine)
-    uint64_t now = GetTickCount64();
     bool stateChanged = false;
 
     if (rawState > m_currentLogicState) {
@@ -387,6 +397,7 @@ void SramEngine::EvaluateState() {
         if (c_cpu > maxVal) { maxVal = c_cpu; culprit = "CPU Queue (" + std::to_string(m_cpuQueueLength) + ")"; }
         if (c_input > maxVal) { maxVal = c_input; culprit = "Input Delay"; }
         if (c_dpc > maxVal) { maxVal = c_dpc; culprit = "DPC Latency (" + std::to_string(m_maxDpcPercent) + "%)"; }
+        if (c_self > maxVal) { maxVal = c_self; culprit = "Main Thread Starvation (" + std::to_string(animDelta) + "ms)"; }
 
         // Format score to 2 decimal places
         char scoreBuf[16];

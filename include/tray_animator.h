@@ -26,6 +26,7 @@
 #include <string>
 #include <mutex>
 #include <memory>
+#include <atomic>
 
 class TrayAnimator {
 public:
@@ -47,6 +48,7 @@ public:
     
     // Helpers
     std::vector<std::wstring> ScanThemes();
+    uint64_t GetLastAnimationTime() const { return m_lastTick.load(); }
 
 private:
     TrayAnimator();
@@ -74,6 +76,7 @@ private:
     bool m_initialized = false;
     std::wstring m_currentTheme = L"Default";
     std::mutex m_mtx; // Protect resource swapping
+    std::atomic<uint64_t> m_lastTick{0};
 
     // Constants
     static const UINT TIMER_ID = 9001; // Unique ID to avoid collision
