@@ -701,8 +701,8 @@ public:
                     ApplySoftBoost(pid, tid);
                 }
 
-                // User-Controlled Recovery (> 15 seconds)
-                if (duration > 15000 && !m_state.prompted && m_state.boosted) {
+                // User-Controlled Recovery (> 45 seconds)
+                if (duration > 45000 && !m_state.prompted && m_state.boosted) {
                     // One-time prompt per hang instance
                     m_state.prompted = true; 
                     
