@@ -49,7 +49,7 @@ public:
 
     static void SaveVerdict(const std::wstring& path, VerdictType type, uint64_t durationSeconds);
 
-private:
+    // [FIX] Moved to public for GUI access
     struct VerdictData {
         VerdictType type = VerdictType::NONE;
         std::unordered_set<int> allowedActions;
@@ -57,8 +57,12 @@ private:
         bool valid = false;
     };
 
-    VerdictData LoadVerdict(const std::wstring& path);
-    VerdictData ParseVerdict(const std::string& json);
+    // [FIX] Made static for GUI access
+    static VerdictData LoadVerdict(const std::wstring& path);
+
+private:
+    // [FIX] Made static helper
+    static VerdictData ParseVerdict(const std::string& json);
 };
 
 #endif // PMAN_EXTERNAL_VERDICT_H

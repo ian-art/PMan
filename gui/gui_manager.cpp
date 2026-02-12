@@ -490,6 +490,17 @@ namespace GuiManager {
         g_configState.faultIntent = f.intentInvalid;
         g_configState.faultConfidence = f.confidenceInvalid;
 
+        // [PATCH] Populate Verdict State from Disk
+        {
+            std::wstring vPath = GetLogPath() / L"verdict.json";
+            auto vData = ExternalVerdict::LoadVerdict(vPath);
+            if (vData.valid) {
+                if (vData.type == VerdictType::ALLOW) g_configState.verdictIdx = 0;
+                else if (vData.type == VerdictType::DENY) g_configState.verdictIdx = 1;
+                else if (vData.type == VerdictType::CONSTRAIN) g_configState.verdictIdx = 2;
+            }
+        }
+
         if (auto& pol = PManContext::Get().subs.policy) {
             const auto& lim = pol->GetLimits();
             g_configState.maxBudget = lim.maxAuthorityBudget;
@@ -1075,6 +1086,8 @@ namespace GuiManager {
                     HelpMarker("ALLOW: AI has full control.\nDENY: AI is completely disabled.\nCONSTRAIN: AI is restricted to specific safe actions only.");
                     
                     ImGui::InputInt("Duration", &g_configState.durationHours);
+                    if (g_configState.durationHours < 1) g_configState.durationHours = 1; // [PATCH] Min 1 hour
+                    if (g_configState.durationHours > 168) g_configState.durationHours = 168; // [PATCH] Max 1 week
                     HelpMarker("Time in hours on how long this override should last before returning to normal operation.");
 
                     ImGui::Separator();
@@ -1093,20 +1106,28 @@ namespace GuiManager {
                     ImGui::SameLine();
                     
                     if (ImGui::Button("Grant Authority", ImVec2(180, 32))) {
-                        // [PATCH] IPC Verdict
-                        nlohmann::json root;
-                        std::string vStr = "ALLOW";
-                        if (g_configState.verdictIdx == 1) vStr = "DENY";
-                        if (g_configState.verdictIdx == 2) vStr = "CONSTRAIN";
-                        
-                        root["verdict"]["status"] = vStr;
-                        root["verdict"]["duration_sec"] = g_configState.durationHours * 3600;
-
-                        IpcClient::Response resp = IpcClient::SendConfig(root);
-                        if (resp.success) {
-                            MessageBoxW(g_hwnd, L"Verdict updated.", L"Success", MB_OK);
+                         // [PATCH] Rate Limiting
+                        uint64_t now = GetTickCount64();
+                        if (now - g_configState.lastSaveTime < 1000) {
+                            MessageBoxW(g_hwnd, L"Please wait before applying again.", L"Cool-down", MB_OK);
                         } else {
-                            MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Error", MB_OK | MB_ICONERROR);
+                            g_configState.lastSaveTime = now;
+
+                            // [PATCH] IPC Verdict
+                            nlohmann::json root;
+                            std::string vStr = "ALLOW";
+                            if (g_configState.verdictIdx == 1) vStr = "DENY";
+                            if (g_configState.verdictIdx == 2) vStr = "CONSTRAIN";
+                            
+                            root["verdict"]["status"] = vStr;
+                            root["verdict"]["duration_sec"] = g_configState.durationHours * 3600;
+
+                            IpcClient::Response resp = IpcClient::SendConfig(root);
+                            if (resp.success) {
+                                MessageBoxW(g_hwnd, L"Verdict updated.", L"Success", MB_OK);
+                            } else {
+                                MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Error", MB_OK | MB_ICONERROR);
+                            }
                         }
                     }
                     HelpMarker("Applies the selected Status and Duration.");
