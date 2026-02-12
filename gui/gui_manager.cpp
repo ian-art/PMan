@@ -1301,8 +1301,15 @@ namespace GuiManager {
                     ImGui::Separator();
 
                     if (ImGui::Button("Apply Debug Settings", ImVec2(180, 32))) {
-                        // [PATCH] IPC Debug
-                        nlohmann::json root;
+                        // [PATCH] Rate Limiting
+                        uint64_t now = GetTickCount64();
+                        if (now - g_configState.lastSaveTime < 1000) {
+                            MessageBoxW(g_hwnd, L"Please wait before applying again.", L"Cool-down", MB_OK);
+                        } else {
+                            g_configState.lastSaveTime = now;
+
+                            // [PATCH] IPC Debug
+                            nlohmann::json root;
                         
                         // Fault Injection
                         root["debug"]["faults"]["ledger_write_fail"] = g_configState.faultLedger;
@@ -1315,11 +1322,12 @@ namespace GuiManager {
                         root["explorer"]["debug_logging"] = g_configState.debugLog;
 
                         IpcClient::Response resp = IpcClient::SendConfig(root);
-                        if (resp.success) {
-                             Log("[USER] Debug settings sent to Service.");
-                             MessageBoxW(g_hwnd, L"Debug configuration synced.", L"PMan Debug", MB_OK);
-                        } else {
-                             MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Debug Error", MB_OK | MB_ICONERROR);
+                            if (resp.success) {
+                                Log("[USER] Debug settings sent to Service.");
+                                MessageBoxW(g_hwnd, L"Debug configuration synced.", L"PMan Debug", MB_OK);
+                            } else {
+                                MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Debug Error", MB_OK | MB_ICONERROR);
+                            }
                         }
                     }
 
