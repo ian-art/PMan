@@ -641,7 +641,9 @@ namespace GuiManager {
                     ImGui::Checkbox("Hung App Recovery", &g_configState.recovery);
                     HelpMarker("Automatically detect and boost hung applications to restore responsiveness.");
 
+                    if (!g_configState.recovery) ImGui::BeginDisabled();
                     ImGui::Checkbox("Recovery Prompt", &g_configState.recoveryPrompt);
+                    if (!g_configState.recovery) ImGui::EndDisabled();
                     HelpMarker("Show a popup asking to restart the app if it stays hung for >15 seconds.");
 
                     ImGui::Separator();
@@ -804,6 +806,21 @@ namespace GuiManager {
 
                             IpcClient::Response resp = IpcClient::SendConfig(root);
                              if (resp.success) {
+                                // [PATCH] Synchronize Global Atomics to prevent state regression
+                                g_ignoreNonInteractive.store(g_configState.ignoreNonInteractive);
+                                g_restoreOnExit.store(g_configState.restoreOnExit);
+                                g_lockPolicy.store(g_configState.lockPolicy);
+                                g_suspendUpdatesDuringGames.store(g_configState.suspendUpdates);
+                                g_idleRevertEnabled.store(g_configState.idleRevert);
+                                g_idleTimeoutMs.store(g_configState.idleTimeoutSec * 1000);
+                                g_responsivenessRecoveryEnabled.store(g_configState.recovery);
+                                g_recoveryPromptEnabled.store(g_configState.recoveryPrompt);
+                                
+                                {
+                                    std::lock_guard<std::shared_mutex> lg(g_setMtx);
+                                    g_iconTheme = Utf8ToWide(g_configState.iconTheme);
+                                }
+
                                 MessageBoxW(g_hwnd, L"Explorer settings synced to Service.", L"Success", MB_OK | MB_ICONINFORMATION);
                             } else {
                                 MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Error", MB_OK | MB_ICONERROR);
