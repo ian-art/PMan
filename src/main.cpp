@@ -2050,6 +2050,18 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         Log("[GUARD] Watchdog process terminated gracefully.");
     }
 
+    // [FIX] Manual Restoration on Graceful Exit
+    if (g_restoreOnExit.load() && g_originalRegistryValue != 0xFFFFFFFF) {
+        HKEY hKey;
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\PriorityControl", 
+                         0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+            RegSetValueExW(hKey, L"Win32PrioritySeparation", 0, REG_DWORD, 
+                          reinterpret_cast<const BYTE*>(&g_originalRegistryValue), sizeof(DWORD));
+            RegCloseKey(hKey);
+            Log("[SHUTDOWN] Restored original Priority Separation: " + std::to_string(g_originalRegistryValue));
+        }
+    }
+
     Log("=== Priority Manager Stopped ===");
     
     // Flush logs to disk before exit
