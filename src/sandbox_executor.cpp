@@ -21,8 +21,9 @@
 #include "logger.h"
 #include "context.h"
 #include "utils.h" // For ExeFromPath
-#include "memory_optimizer.h" // [PATCH]
-#include "globals.h" // [PATCH]
+#include "memory_optimizer.h"
+#include "globals.h"
+#include "services.h" // Required for Service Suspension
 
 // [SECURITY PATCH] Helper to maintain the Shared Ledger
 static void UpdateLeaseLedger(DWORD pid, DWORD prio, DWORD_PTR affinity, bool active) {
@@ -177,7 +178,8 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         decision.selectedAction != BrainAction::Shield_Foreground &&
         decision.selectedAction != BrainAction::Boost_Process && // [FIX] Allow Boost
         decision.selectedAction != BrainAction::Optimize_Memory && // [PATCH] Allow Memory
-        decision.selectedAction != BrainAction::Optimize_Memory_Gentle) {
+        decision.selectedAction != BrainAction::Optimize_Memory_Gentle &&
+        decision.selectedAction != BrainAction::Suspend_Services) { // [PATCH] Allow Service Suspension
         result.executed = false;
         result.reversible = false; // Strictly forbidden
         result.committed = false;
@@ -292,6 +294,11 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         g_memoryOptimizer.SmartMitigate(fgPid);
         success = TRUE; // Dispatched to background thread
     }
+    else if (decision.selectedAction == BrainAction::Suspend_Services) {
+        // [PATCH] Trigger Service Suspension
+        SuspendBackgroundServices();
+        success = TRUE;
+    }
     else if (decision.selectedAction == BrainAction::Boost_Process) {
         // [FIX] Active Enforcer: High Priority for Games/Browsers
         // If target is self (default), switch to foreground window
@@ -339,6 +346,12 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
 }
 
 void SandboxExecutor::Rollback() {
+    // [PATCH] Global Service Restoration
+    // If the applied action was Suspend_Services, we must resume them.
+    // (Note: We detect this by checking if m_hTarget is null, as Suspend_Services doesn't use a target handle,
+    //  OR we could track the action type explicitly. For now, calling Resume is safe even if not suspended.)
+    ResumeBackgroundServices();
+
     if (m_actionApplied && m_hTarget) {
         SetPriorityClass(m_hTarget, m_originalPriorityClass);
         
