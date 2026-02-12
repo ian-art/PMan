@@ -526,7 +526,9 @@ void ExplorerBooster::RevertBoosts(DWORD pid) {
     }
 
     // 1. Re-enable Power Throttling (Default behavior)
-    if (m_config.disablePowerThrottling) {
+    // [PATCH] Always restore EcoQoS when reverting, regardless of current config.
+    // This fixes the bug where unchecking the option prevented the restoration of defaults.
+    if (true) {
         PROCESS_POWER_THROTTLING_STATE PowerThrottling;
         RtlZeroMemory(&PowerThrottling, sizeof(PowerThrottling));
         PowerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
