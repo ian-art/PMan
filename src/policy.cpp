@@ -670,6 +670,10 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
             Log("[BROWSER] Background Detected (PID " + std::to_string(lastPid) + ") -> Tree Efficiency Engaged");
         }
 
+        // [FIX] Enforce Lock Policy: Prevent mode switching if locked
+        // We use lastMode (snapshot) to determine if this is a state change.
+        if (g_lockPolicy.load() && mode != lastMode) return;
+
         // FIX: Check cooldown BEFORE modifying ExplorerBooster state to prevent desync
         // [FIX] Bypass cooldown for Browser Mode (2) to ensure instant responsiveness
         if (!forceOverride && mode != 2 && !IsPolicyChangeAllowed(mode)) return;
