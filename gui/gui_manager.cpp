@@ -755,6 +755,7 @@ namespace GuiManager {
 
                         // [FIX] Use InputInt for uniformity
                         ImGui::InputInt("Scan Interval", &g_configState.scanIntervalSec);
+                        if (g_configState.scanIntervalSec < 1) g_configState.scanIntervalSec = 1; // [PATCH] Safety Clamp (Min 1s)
                         HelpMarker("Time in seconds on how often to check for new Explorer windows.");
                     }
                     
