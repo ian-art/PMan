@@ -633,6 +633,7 @@ namespace GuiManager {
 
                     // [FIX] Use InputInt for uniformity with other tabs
                     ImGui::InputInt("Idle Timeout", &g_configState.idleTimeoutSec);
+                    if (g_configState.idleTimeoutSec < 10) g_configState.idleTimeoutSec = 10; // [PATCH] Enforce minimum 10s
                     HelpMarker("Time in seconds before idle mode activates.");
 
                     ImGui::Separator();
