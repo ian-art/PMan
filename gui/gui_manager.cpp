@@ -738,6 +738,7 @@ namespace GuiManager {
                     if (g_configState.expEnabled) {
                         // [FIX] Use InputInt for uniformity
                         ImGui::InputInt("Idle Threshold", &g_configState.expIdleThresholdSec);
+                        if (g_configState.expIdleThresholdSec < 1) g_configState.expIdleThresholdSec = 1; // [PATCH] Prevent integer overflow/zero
                         HelpMarker("Time in seconds with no user input and no foreground game before boost activates.");
 
                         ImGui::Checkbox("Boost DWM", &g_configState.boostDwm);
