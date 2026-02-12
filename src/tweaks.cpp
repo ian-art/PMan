@@ -268,7 +268,7 @@ static bool IsIoPriorityBlockedBySystem()
     return !anySuccess;
 }
 
-void SetProcessIoPriority(DWORD pid, int mode)
+BOOL SetProcessIoPriority(DWORD pid, int mode)
 {
     // Fix: Check cache to prevent expensive API/Snapshot loops
     {
@@ -287,12 +287,12 @@ void SetProcessIoPriority(DWORD pid, int mode)
 
         if (g_ioPriorityCache.find(pid) != g_ioPriorityCache.end() && g_ioPriorityCache[pid] == mode)
         {
-            return;
+            return TRUE;
         }
     }
 
     UniqueHandle hGuard(OpenProcessSafe(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, pid, "[I/O]"));
-    if (!hGuard) return;
+    if (!hGuard) return FALSE;
     HANDLE hProcess = hGuard.get();
     
     bool ioPrioritySet = false;
@@ -381,6 +381,7 @@ void SetProcessIoPriority(DWORD pid, int mode)
     }
     
     // Note: hProcess (via hGuard) is automatically closed by UniqueHandle destructor
+    return ioPrioritySet;
 }
 
 void SetNetworkQoS(int mode)

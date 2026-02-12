@@ -252,13 +252,16 @@ BrainAction DecisionArbiter::MapIntentToAction(const GovernorDecision& gov) {
             return BrainAction::Throttle_Mild;
 
         case AllowedActionClass::IoPrioritization:
-            // "Release Pressure" contextually handles I/O priority boosts in Executor
-            // or "Throttle_Mild" if we need to suppress background I/O.
-            // Assuming Governor wants to relieve disk pressure:
+            // [PATCH] Contextual I/O Strategy
+            // If User is Active (Interactive Mode), we BOOST the foreground app (Release Pressure).
+            // If User is Idle (Sustained/Background), we THROTTLE the hogs (Throttle Mild).
             if (gov.dominant == DominantPressure::Disk) {
-                return BrainAction::Throttle_Mild; // Suppress contention
+                if (gov.mode == SystemMode::Interactive) {
+                    return BrainAction::Release_Pressure; // Boost Foreground
+                }
+                return BrainAction::Throttle_Mild; // Suppress Background
             }
-            return BrainAction::Release_Pressure; // Boost foreground I/O
+            return BrainAction::Release_Pressure;
 
         case AllowedActionClass::Scheduling:
             // CPU Contention logic

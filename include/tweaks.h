@@ -27,7 +27,7 @@ void IntelligentRamClean();
 bool SetPrioritySeparation(DWORD val);
 void SetHybridCoreAffinity(DWORD pid, int mode);
 void SetAmd3DVCacheAffinity(DWORD pid, int mode);
-void SetProcessIoPriority(DWORD pid, int mode);
+BOOL SetProcessIoPriority(DWORD pid, int mode); // [FIX] Returns BOOL
 void SetNetworkQoS(int mode);
 void SetMemoryCompression(int mode);
 void SetGpuPriority(DWORD pid, int mode);

@@ -24,6 +24,7 @@
 #include "memory_optimizer.h"
 #include "globals.h"
 #include "services.h" // Required for Service Suspension
+#include "tweaks.h" // Required for SetProcessIoPriority
 
 // [SECURITY PATCH] Helper to maintain the Shared Ledger
 static void UpdateLeaseLedger(DWORD pid, DWORD prio, DWORD_PTR affinity, bool active) {
@@ -177,9 +178,10 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     if (decision.selectedAction != BrainAction::Throttle_Mild && 
         decision.selectedAction != BrainAction::Shield_Foreground &&
         decision.selectedAction != BrainAction::Boost_Process && // [FIX] Allow Boost
-        decision.selectedAction != BrainAction::Optimize_Memory && // [PATCH] Allow Memory
+        decision.selectedAction != BrainAction::Optimize_Memory && 
         decision.selectedAction != BrainAction::Optimize_Memory_Gentle &&
-        decision.selectedAction != BrainAction::Suspend_Services) { // [PATCH] Allow Service Suspension
+        decision.selectedAction != BrainAction::Suspend_Services && 
+        decision.selectedAction != BrainAction::Release_Pressure) {
         result.executed = false;
         result.reversible = false; // Strictly forbidden
         result.committed = false;
@@ -284,6 +286,25 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     } 
     else if (decision.selectedAction == BrainAction::Shield_Foreground) {
         success = SetPriorityClass(m_hTarget, ABOVE_NORMAL_PRIORITY_CLASS);
+    }
+    else if (decision.selectedAction == BrainAction::Suspend_Services) {
+        // [PATCH] Trigger Service Suspension
+        SuspendBackgroundServices();
+        success = TRUE;
+    }
+    else if (decision.selectedAction == BrainAction::Release_Pressure) {
+        // [PATCH] Apply I/O Boost (Pressure Relief)
+        if (m_hTarget) {
+            // Use our updated BOOL helper from tweaks.h
+            success = SetProcessIoPriority(GetProcessId(m_hTarget), 3); // 3 = High
+        } else {
+             // Fallback: Target foreground
+             DWORD fgPid = 0;
+             GetWindowThreadProcessId(GetForegroundWindow(), &fgPid);
+             if (fgPid > 4) {
+                 success = SetProcessIoPriority(fgPid, 3);
+             }
+        }
     }
     else if (decision.selectedAction == BrainAction::Optimize_Memory || 
              decision.selectedAction == BrainAction::Optimize_Memory_Gentle) {
