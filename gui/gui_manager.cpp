@@ -716,6 +716,20 @@ namespace GuiManager {
                                     std::lock_guard<std::shared_mutex> lg(g_setMtx);
                                     g_iconTheme = Utf8ToWide(g_configState.iconTheme);
                                 }
+
+                                // [PATCH] Sync Explorer Local State (Prevent UI Revert)
+                                ExplorerConfig ec;
+                                ec.enabled = g_configState.expEnabled;
+                                ec.idleThresholdMs = g_configState.expIdleThresholdSec * 1000;
+                                ec.boostDwm = g_configState.boostDwm;
+                                ec.boostIoPriority = g_configState.boostIo;
+                                ec.disablePowerThrottling = g_configState.disableEco;
+                                ec.preventShellPaging = g_configState.preventPaging;
+                                ec.scanIntervalMs = g_configState.scanIntervalSec * 1000;
+                                ec.debugLogging = g_configState.debugLog;
+                                
+                                SetExplorerConfigShadow(ec);
+                                g_explorerBooster.UpdateConfig(ec);
                             } else {
                                 std::wstring errMsg = Utf8ToWide(resp.message.c_str());
                                 MessageBoxW(g_hwnd, errMsg.c_str(), 
@@ -822,6 +836,20 @@ namespace GuiManager {
                                     std::lock_guard<std::shared_mutex> lg(g_setMtx);
                                     g_iconTheme = Utf8ToWide(g_configState.iconTheme);
                                 }
+
+                                // [PATCH] Sync Explorer Local State (Prevent UI Revert)
+                                ExplorerConfig ec;
+                                ec.enabled = g_configState.expEnabled;
+                                ec.idleThresholdMs = g_configState.expIdleThresholdSec * 1000;
+                                ec.boostDwm = g_configState.boostDwm;
+                                ec.boostIoPriority = g_configState.boostIo;
+                                ec.disablePowerThrottling = g_configState.disableEco;
+                                ec.preventShellPaging = g_configState.preventPaging;
+                                ec.scanIntervalMs = g_configState.scanIntervalSec * 1000;
+                                ec.debugLogging = g_configState.debugLog;
+                                
+                                SetExplorerConfigShadow(ec);
+                                g_explorerBooster.UpdateConfig(ec);
 
                                 MessageBoxW(g_hwnd, L"Explorer settings synced to Service.", L"Success", MB_OK | MB_ICONINFORMATION);
                             } else {
