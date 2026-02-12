@@ -21,6 +21,8 @@
 #include "logger.h"
 #include "context.h"
 #include "utils.h" // For ExeFromPath
+#include "memory_optimizer.h" // [PATCH]
+#include "globals.h" // [PATCH]
 
 // [SECURITY PATCH] Helper to maintain the Shared Ledger
 static void UpdateLeaseLedger(DWORD pid, DWORD prio, DWORD_PTR affinity, bool active) {
@@ -173,7 +175,9 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     // 1. Strict Allowlist (Reversibility Check)
     if (decision.selectedAction != BrainAction::Throttle_Mild && 
         decision.selectedAction != BrainAction::Shield_Foreground &&
-        decision.selectedAction != BrainAction::Boost_Process) { // [FIX] Allow Boost
+        decision.selectedAction != BrainAction::Boost_Process && // [FIX] Allow Boost
+        decision.selectedAction != BrainAction::Optimize_Memory && // [PATCH] Allow Memory
+        decision.selectedAction != BrainAction::Optimize_Memory_Gentle) {
         result.executed = false;
         result.reversible = false; // Strictly forbidden
         result.committed = false;
@@ -278,6 +282,15 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     } 
     else if (decision.selectedAction == BrainAction::Shield_Foreground) {
         success = SetPriorityClass(m_hTarget, ABOVE_NORMAL_PRIORITY_CLASS);
+    }
+    else if (decision.selectedAction == BrainAction::Optimize_Memory || 
+             decision.selectedAction == BrainAction::Optimize_Memory_Gentle) {
+        // [PATCH] Trigger Memory Optimizer
+        // We use the global instance to perform the smart trim
+        DWORD fgPid = 0;
+        GetWindowThreadProcessId(GetForegroundWindow(), &fgPid);
+        g_memoryOptimizer.SmartMitigate(fgPid);
+        success = TRUE; // Dispatched to background thread
     }
     else if (decision.selectedAction == BrainAction::Boost_Process) {
         // [FIX] Active Enforcer: High Priority for Games/Browsers

@@ -54,6 +54,9 @@ public:
     // during Alt-Tab or high memory pressure.
     void HardenProcess(DWORD pid);
 
+    // [PATCH] Exposed for SandboxExecutor
+    void SmartMitigate(DWORD foregroundPid);
+
 private:
     struct ProcessState {
         std::chrono::steady_clock::time_point lastTrimTime;
@@ -84,7 +87,7 @@ private:
     void EnablePrivileges();
     void InitializePageFaultCounter();
     MemorySnapshot CollectSnapshot();
-    void SmartMitigate(DWORD foregroundPid);
+    // void SmartMitigate(DWORD foregroundPid); // Moved to Public
     void FlushStandbyList();
     bool IsTargetProcess(const std::wstring& procName);
 };
