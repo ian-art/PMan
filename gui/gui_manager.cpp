@@ -702,8 +702,17 @@ namespace GuiManager {
                                 // Update local state for immediate feedback
                                 g_ignoreNonInteractive.store(g_configState.ignoreNonInteractive);
                                 g_restoreOnExit.store(g_configState.restoreOnExit);
-                                // ... (Other atomic updates can remain for immediate UI responsiveness, 
-                                // but true logic update happens when Service processes the config)
+                                g_lockPolicy.store(g_configState.lockPolicy);
+                                g_suspendUpdatesDuringGames.store(g_configState.suspendUpdates);
+                                g_idleRevertEnabled.store(g_configState.idleRevert);
+                                g_idleTimeoutMs.store(g_configState.idleTimeoutSec * 1000);
+                                g_responsivenessRecoveryEnabled.store(g_configState.recovery);
+                                g_recoveryPromptEnabled.store(g_configState.recoveryPrompt);
+                                
+                                {
+                                    std::lock_guard<std::shared_mutex> lg(g_setMtx);
+                                    g_iconTheme = Utf8ToWide(g_configState.iconTheme);
+                                }
                             } else {
                                 std::wstring errMsg = Utf8ToWide(resp.message.c_str());
                                 MessageBoxW(g_hwnd, errMsg.c_str(), 
