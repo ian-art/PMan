@@ -293,7 +293,10 @@ void IpcServer::ProcessRequest(const std::string& request, std::string& response
             }
             const auto& payload = req["data"];
 
-            // Check for special subsystems first
+            // [PATCH] Sequential Processing (Allow mixed payloads)
+            bool anySuccess = false;
+
+            // 1. Policy Subsystem
             if (payload.contains("policy")) {
                 const auto& pol = payload["policy"];
                 PolicyLimits limits;
@@ -311,14 +314,13 @@ void IpcServer::ProcessRequest(const std::string& request, std::string& response
                 if (PManContext::Get().subs.policy) {
                     PManContext::Get().subs.policy->Save(GetLogPath() / L"policy.json", limits);
                     g_reloadNow.store(true);
-                    resp["status"] = "ok";
+                    anySuccess = true;
                     Log("[IPC] Policy updated via Service.");
-                } else {
-                    resp["status"] = "error";
-                    resp["message"] = "Policy Engine not ready";
                 }
             }
-            else if (payload.contains("verdict")) {
+
+            // 2. Verdict Subsystem
+            if (payload.contains("verdict")) {
                  const auto& v = payload["verdict"];
                  std::string status = v.value("status", "ALLOW");
                  int duration = v.value("duration_sec", 3600);
@@ -328,10 +330,12 @@ void IpcServer::ProcessRequest(const std::string& request, std::string& response
                  if (status == "CONSTRAIN") type = VerdictType::CONSTRAIN;
 
                  ExternalVerdict::SaveVerdict(GetLogPath() / L"verdict.json", type, duration);
-                 resp["status"] = "ok";
+                 anySuccess = true;
                  Log("[IPC] External Verdict applied: " + status);
             }
-            else if (payload.contains("debug") && payload["debug"].contains("faults")) {
+
+            // 3. Debug/Faults Subsystem
+            if (payload.contains("debug") && payload["debug"].contains("faults")) {
                 const auto& f = payload["debug"]["faults"];
                 auto& ctxFault = PManContext::Get().fault;
                 
@@ -341,19 +345,23 @@ void IpcServer::ProcessRequest(const std::string& request, std::string& response
                 ctxFault.intentInvalid = f.value("intent_invalid", false);
                 ctxFault.confidenceInvalid = f.value("confidence_invalid", false);
                 
-                resp["status"] = "ok";
+                anySuccess = true;
                 Log("[IPC] Debug Faults injected.");
             }
-            else {
-                // Standard Configuration (Global, Explorer, Lists)
-                if (SecureConfigManager::ApplyConfig(payload)) {
-                    resp["status"] = "ok";
-                    g_reloadNow.store(true); // Trigger internal re-read if needed
-                    Log("[IPC] Configuration updated securely.");
-                } else {
-                    resp["status"] = "error";
-                    resp["message"] = "Validation Failed";
-                }
+
+            // 4. Standard Configuration (Global, Explorer, Lists)
+            // Always attempt to apply standard config if present (SecureConfigManager handles internal validation)
+            if (SecureConfigManager::ApplyConfig(payload)) {
+                anySuccess = true;
+                g_reloadNow.store(true);
+                Log("[IPC] Configuration updated securely.");
+            }
+
+            if (anySuccess) {
+                resp["status"] = "ok";
+            } else {
+                resp["status"] = "error";
+                resp["message"] = "No valid configuration found or validation failed";
             }
         }
     }
