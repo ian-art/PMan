@@ -184,7 +184,7 @@ namespace GuiManager {
     }
 
     // Helper: Render a single list editor
-    static void RenderListEditor(const char* label, std::vector<std::string>& items, char* inputBuf, size_t bufSize, const char* desc) {
+    static void RenderListEditor(const char* label, std::vector<std::string>& items, char* inputBuf, size_t bufSize, const char* desc, bool requireExe) {
         ImGui::Text("%s (%zu items)", label, items.size());
         if (desc) HelpMarker(desc);
         //ImGui::Separator();
@@ -197,8 +197,17 @@ namespace GuiManager {
             // Simple validation: lowercase
             for (auto& c : newItem) c = (char)tolower(c); // [FIX] Explicit cast to silence C4244
             
+            // [PATCH] Validation: Require .exe extension if requested
+            bool isValid = true;
+            if (requireExe) {
+                if (newItem.length() < 5 || newItem.substr(newItem.length() - 4) != ".exe") {
+                    MessageBoxW(GetActiveWindow(), L"This list requires process names ending in .exe", L"Invalid Input", MB_OK | MB_ICONWARNING);
+                    isValid = false;
+                }
+            }
+
             // Avoid duplicates
-            if (std::find(items.begin(), items.end(), newItem) == items.end()) {
+            if (isValid && std::find(items.begin(), items.end(), newItem) == items.end()) {
                 items.push_back(newItem);
                 std::sort(items.begin(), items.end());
                 inputBuf[0] = '\0'; // Clear input
@@ -1204,7 +1213,9 @@ namespace GuiManager {
                     }
 
                     if (currentList) {
-                        RenderListEditor(categories[g_listState.selectedCategory], *currentList, g_listState.inputBuf, sizeof(g_listState.inputBuf), categoryDescs[g_listState.selectedCategory]);
+                        // Categories 0-6 are Process Lists (require .exe). 7-8 are Window Patterns (do not).
+                        bool needsExe = (g_listState.selectedCategory <= 6);
+                        RenderListEditor(categories[g_listState.selectedCategory], *currentList, g_listState.inputBuf, sizeof(g_listState.inputBuf), categoryDescs[g_listState.selectedCategory], needsExe);
                     }
                     
                     ImGui::Columns(1);
@@ -1214,9 +1225,16 @@ namespace GuiManager {
                     // We send ALL lists at once to ensure consistency
                     ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 160);
                     if (ImGui::Button("Save Process Lists", ImVec2(140, 32))) {
-                        nlohmann::json root;
-                        
-                        auto Serialize = [&](const char* key, const std::vector<std::string>& list) {
+                         // [PATCH] Rate Limiting
+                        uint64_t now = GetTickCount64();
+                        if (now - g_configState.lastSaveTime < 1000) {
+                            MessageBoxW(g_hwnd, L"Please wait before saving again.", L"Cool-down", MB_OK);
+                        } else {
+                            g_configState.lastSaveTime = now;
+
+                            nlohmann::json root;
+                            
+                            auto Serialize = [&](const char* key, const std::vector<std::string>& list) {
                             root[key] = nlohmann::json::array();
                             for (const auto& item : list) {
                                 std::string s = item;
@@ -1239,10 +1257,11 @@ namespace GuiManager {
                         IpcClient::Response resp = IpcClient::SendConfig(root);
                         
                         if (resp.success) {
-                            MessageBoxW(g_hwnd, L"Process lists updated securely.", L"Success", MB_OK);
-                            g_listState.Reset(); // Force reload from source on next view
-                        } else {
-                            MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Save Failed", MB_OK | MB_ICONERROR);
+                                MessageBoxW(g_hwnd, L"Process lists updated securely.", L"Success", MB_OK);
+                                g_listState.Reset(); // Force reload from source on next view
+                            } else {
+                                MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"Save Failed", MB_OK | MB_ICONERROR);
+                            }
                         }
                     }
 
