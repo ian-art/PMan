@@ -1093,13 +1093,29 @@ namespace GuiManager {
                     ImGui::Separator();
 
                     if (ImGui::Button("Revoke Authority Now", ImVec2(180, 32))) {
-                        // [PATCH] IPC Panic Button
-                        nlohmann::json root;
-                        root["verdict"]["status"] = "DENY";
-                        root["verdict"]["duration_sec"] = 3600;
-                        
-                        IpcClient::SendConfig(root); // Fire and forget for panic button
-                        MessageBoxW(g_hwnd, L"Emergency Stop Signal Sent.", L"PMan", MB_OK | MB_ICONWARNING);
+                        // [PATCH] Rate Limiting
+                        uint64_t now = GetTickCount64();
+                        if (now - g_configState.lastSaveTime < 1000) {
+                            MessageBoxW(g_hwnd, L"Please wait...", L"Cool-down", MB_OK);
+                        } else {
+                            g_configState.lastSaveTime = now;
+
+                            // [PATCH] IPC Panic Button (Verified)
+                            nlohmann::json root;
+                            root["verdict"]["status"] = "DENY";
+                            root["verdict"]["duration_sec"] = 3600;
+                            
+                            // Check response instead of fire-and-forget
+                            IpcClient::Response resp = IpcClient::SendConfig(root);
+                            
+                            if (resp.success) {
+                                MessageBoxW(g_hwnd, L"Emergency Stop Signal Confirmed.\nAI Authority Revoked for 1 Hour.", L"PMan Panic", MB_OK | MB_ICONWARNING);
+                                // [PATCH] Auto-update local UI to reflect reality
+                                g_configState.verdictIdx = 1; // Set to DENY
+                            } else {
+                                MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"PANIC FAILED", MB_OK | MB_ICONERROR);
+                            }
+                        }
                     }
                     HelpMarker("PANIC BUTTON: Immediately stops the AI from doing anything for 1 hour.");
 
