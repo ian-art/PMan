@@ -23,7 +23,7 @@
 #include "utils.h" // For ExeFromPath
 
 // [SECURITY PATCH] Helper to maintain the Shared Ledger
-static void UpdateLeaseLedger(DWORD pid, DWORD prio, bool active) {
+static void UpdateLeaseLedger(DWORD pid, DWORD prio, DWORD_PTR affinity, bool active) {
     HANDLE hMap = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(LeaseLedger), L"Local\\PManSessionLedger");
     if (!hMap) return;
     
@@ -36,6 +36,7 @@ static void UpdateLeaseLedger(DWORD pid, DWORD prio, bool active) {
                 if (!ledger->entries[i].isActive) {
                     ledger->entries[i].pid = pid;
                     ledger->entries[i].originalPriority = prio;
+                    ledger->entries[i].originalAffinity = affinity;
                     ledger->entries[i].leaseStartTime = GetTickCount64();
                     ledger->entries[i].isActive = true;
                     break;
@@ -298,7 +299,7 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         
         // [SECURITY PATCH] Update Shared Ledger for Crash Recovery
         if (m_originalPriorityClass != 0) {
-            UpdateLeaseLedger(targetPid, m_originalPriorityClass, true);
+            UpdateLeaseLedger(targetPid, m_originalPriorityClass, 0, true);
         }
 
         // COMMIT: We do NOT rollback automatically.
@@ -329,7 +330,7 @@ void SandboxExecutor::Rollback() {
         SetPriorityClass(m_hTarget, m_originalPriorityClass);
         
         // [SECURITY PATCH] Clear from Ledger
-        UpdateLeaseLedger(GetProcessId(m_hTarget), 0, false);
+        UpdateLeaseLedger(GetProcessId(m_hTarget), 0, 0, false);
 
         m_actionApplied = false;
         

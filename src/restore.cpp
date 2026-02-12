@@ -418,11 +418,13 @@ void RunRegistryGuard(DWORD targetPid, DWORD originalVal, const std::wstring& st
                 if (ledger->entries[i].isActive) {
                     DWORD pid = ledger->entries[i].pid;
                     DWORD prio = ledger->entries[i].originalPriority;
+                    DWORD_PTR affinity = ledger->entries[i].originalAffinity;
                     
                     // Attempt Revert
                     HANDLE hVictim = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
                     if (hVictim) {
-                        SetPriorityClass(hVictim, prio);
+                        if (prio != 0) SetPriorityClass(hVictim, prio);
+                        if (affinity != 0) SetProcessAffinityMask(hVictim, affinity);
                         CloseHandle(hVictim);
                         Log("[GUARD] Reverted stranded lease for PID: " + std::to_string(pid));
                     }

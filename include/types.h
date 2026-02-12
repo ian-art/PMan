@@ -560,6 +560,7 @@ struct PredictionLog {
 struct LeaseEntry {
     DWORD pid;
     DWORD originalPriority;
+    DWORD_PTR originalAffinity; // [PATCH] Track Affinity for crash recovery
     uint64_t leaseStartTime;
     bool isActive;
 };

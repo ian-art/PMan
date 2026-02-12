@@ -602,6 +602,36 @@ class ResponsivenessManager {
 
     std::mutex m_mtx;
 
+    // Helper to write to Crash Recovery Ledger
+    void UpdateLedger(DWORD pid, DWORD prio, DWORD_PTR affinity, bool active) {
+        HANDLE hMap = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(LeaseLedger), L"Local\\PManSessionLedger");
+        if (!hMap) return;
+        LeaseLedger* ledger = (LeaseLedger*)MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(LeaseLedger));
+        if (ledger) {
+            if (active) {
+                for (int i = 0; i < LeaseLedger::MAX_LEASES; i++) {
+                    if (!ledger->entries[i].isActive) {
+                        ledger->entries[i].pid = pid;
+                        ledger->entries[i].originalPriority = prio;
+                        ledger->entries[i].originalAffinity = affinity;
+                        ledger->entries[i].leaseStartTime = GetTickCount64();
+                        ledger->entries[i].isActive = true;
+                        break;
+                    }
+                }
+            } else {
+                for (int i = 0; i < LeaseLedger::MAX_LEASES; i++) {
+                    if (ledger->entries[i].isActive && ledger->entries[i].pid == pid) {
+                        ledger->entries[i].isActive = false;
+                        break;
+                    }
+                }
+            }
+            UnmapViewOfFile(ledger);
+        }
+        CloseHandle(hMap);
+    }
+
 public:
     void Update() {
         std::lock_guard<std::mutex> lock(m_mtx);
@@ -733,9 +763,12 @@ private:
                 SetProcessAffinityMask(hProc.get(), systemAffinity);
             } else {
                 m_state.originalAffinity = 0;
+                }
             }
         }
-        }
+
+        // Record to Ledger for Crash Recovery
+        UpdateLedger(pid, m_state.originalPriority, m_state.originalAffinity, true);
 
         // Boost UI Thread
         UniqueHandle hThread(OpenThread(THREAD_SET_INFORMATION | THREAD_QUERY_INFORMATION, FALSE, tid));
@@ -759,6 +792,9 @@ private:
                 SetProcessAffinityMask(hProc.get(), m_state.originalAffinity);
             }
         }
+
+        // Remove from Crash Ledger
+        UpdateLedger(m_state.pid, 0, 0, false);
 
         if (m_state.hwnd) {
             DWORD tid = GetWindowThreadProcessId(m_state.hwnd, nullptr);
