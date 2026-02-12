@@ -985,9 +985,18 @@ namespace GuiManager {
                     if (ImGui::Button("Apply Policy", ImVec2(140, 32))) {
                         bool proceed = true;
 
+                        // [PATCH] Rate Limiting (Prevent Pipe Spam)
+                        uint64_t now = GetTickCount64();
+                        if (now - g_configState.lastSaveTime < 1000) {
+                            MessageBoxW(g_hwnd, L"Please wait before saving again.", L"Cool-down", MB_OK);
+                            proceed = false;
+                        } else {
+                            g_configState.lastSaveTime = now;
+                        }
+
                         // [PATCH] Safety Warning for High Variance
                         // Warn if user sets variance >= 1.0 (Chaos Mode), but allow it.
-                        if (g_configState.cpuVar >= 1.0f || g_configState.latVar >= 1.0f) {
+                        if (proceed && (g_configState.cpuVar >= 1.0f || g_configState.latVar >= 1.0f)) {
                             if (MessageBoxW(g_hwnd, 
                                 L"DANGER: You are setting extremely high Variance (>= 1.0).\n\n"
                                 L"This effectively DISABLES the stability governor. "
