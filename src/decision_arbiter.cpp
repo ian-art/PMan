@@ -34,6 +34,12 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
     // 1. Identify Candidate
     BrainAction intentAction = MapIntentToAction(govDecision);
 
+    // [PATCH] Policy Enforcement: Force Active Mode
+    // If Maintain is forbidden (User unchecked "Stability"), override Idle with Boost.
+    if (intentAction == BrainAction::Maintain && maintainForbidden) {
+        intentAction = BrainAction::Boost_Process;
+    }
+
     // [FIX] Hysteresis (Sticky Boost)
     // If we are currently "Maintaining" (Governor sees no pressure), but we successfully
     // boosted recently (within 5s), we sustain the boost to prevent rapid toggling.
