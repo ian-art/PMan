@@ -515,6 +515,11 @@ void ExplorerBooster::RevertBoosts(DWORD pid) {
         wchar_t* name = wcsrchr(pName, L'\\');
         if (name) name++; else name = pName;
         if (_wcsicmp(name, L"dwm.exe") == 0) {
+            // [PATCH] Only revert priority if the feature was explicitly disabled by the user.
+            // Otherwise, we keep it High to prevent screen flickering during idle/active transitions.
+            if (!m_config.boostDwm) {
+                SetPriorityClass(hProc, NORMAL_PRIORITY_CLASS);
+            }
             it->second.state = ExplorerBoostState::Default;
             return;
         }
