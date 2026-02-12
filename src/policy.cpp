@@ -447,6 +447,9 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
         // Re-verify flags inside thread
         if (!g_running || g_userPaused.load()) return;
 
+        // Fix Validate window handle before use if provided
+        if (hwnd && !IsWindow(hwnd)) hwnd = nullptr;
+
         // Session-scoped filtering
         if (!hwnd && g_ignoreNonInteractive.load() && !g_sessionLocked.load())
         {
@@ -455,9 +458,6 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                 return;
             }
         }
-        
-        // Fix Validate window handle before use if provided
-        if (hwnd && !IsWindow(hwnd)) hwnd = nullptr;
 
         CheckAndReleaseSessionLock();
         
