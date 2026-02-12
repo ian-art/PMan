@@ -91,6 +91,15 @@ static bool ApplyForegroundShield_Impl(DWORD pid) {
 // --------------------------------------------------------------------------
 
 void ProcessScout::UpdateCache() {
+    // [PERF] Cache Coalescing: Check staleness to prevent EnumProcesses spam (100ms window)
+    {
+        std::shared_lock<std::shared_mutex> lock(m_cacheMtx);
+        if (!m_cache.empty()) {
+            // If cache is fresh (<100ms), skip expensive enumeration
+            if (GetTickCount64() - m_cache[0].timestamp < 100) return;
+        }
+    }
+
     // [FIX] Dynamic Process Enumeration: Loop and resize to handle >4096 processes
     std::vector<DWORD> pids(4096);
     DWORD bytesReturned = 0;
