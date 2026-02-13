@@ -22,37 +22,45 @@
 #include <tlhelp32.h>
 #include <filesystem>
 #include <vector>
+#include <thread> // [PATCH] Required for Async Termination
 #include "utils.h" // Assumed to contain UniqueHandle
 #include "logger.h"
 
 namespace Lifecycle {
 
     void TerminateExistingInstances() {
-        wchar_t self[MAX_PATH] = {};
-        GetModuleFileNameW(nullptr, self, MAX_PATH);
-        std::wstring selfName = std::filesystem::path(self).filename().wstring();
+        // [PATCH] Async Termination
+        // Run termination in a detached thread to prevent blocking the main UI/Startup.
+        std::thread([]() {
+            wchar_t self[MAX_PATH] = {};
+            GetModuleFileNameW(nullptr, self, MAX_PATH);
+            std::wstring selfName = std::filesystem::path(self).filename().wstring();
 
-        // RAII for Snapshot handle
-        UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
-        if (hSnap.get() == INVALID_HANDLE_VALUE) return;
+            // RAII for Snapshot handle
+            UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+            if (hSnap.get() == INVALID_HANDLE_VALUE) return;
 
-        PROCESSENTRY32W pe{};
-        pe.dwSize = sizeof(pe);
+            PROCESSENTRY32W pe{};
+            pe.dwSize = sizeof(pe);
 
-        if (Process32FirstW(hSnap.get(), &pe)) {
-            do {
-                if (_wcsicmp(pe.szExeFile, selfName.c_str()) == 0) {
-                    // Don't kill ourselves
-                    if (pe.th32ProcessID != GetCurrentProcessId()) {
-                        UniqueHandle hProc(OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID));
-                        if (hProc) {
-                            TerminateProcess(hProc.get(), 0);
-                            WaitForSingleObject(hProc.get(), 3000);
+            if (Process32FirstW(hSnap.get(), &pe)) {
+                do {
+                    // Check strict match
+                    if (_wcsicmp(pe.szExeFile, selfName.c_str()) == 0) {
+                        // Don't kill ourselves
+                        if (pe.th32ProcessID != GetCurrentProcessId()) {
+                            // [PATCH] Open with SYNCHRONIZE to ensure WaitForSingleObject works correctly
+                            UniqueHandle hProc(OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pe.th32ProcessID));
+                            if (hProc) {
+                                TerminateProcess(hProc.get(), 0);
+                                // Wait up to 3s (Blocks this worker thread only)
+                                WaitForSingleObject(hProc.get(), 3000);
+                            }
                         }
                     }
-                }
-            } while (Process32NextW(hSnap.get(), &pe));
-        }
+                } while (Process32NextW(hSnap.get(), &pe));
+            }
+        }).detach();
     }
 
     bool IsTaskInstalled(const std::wstring& taskName) {
