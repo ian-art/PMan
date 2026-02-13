@@ -51,7 +51,7 @@ private:
     // Internal State for Rollback
     bool m_actionApplied = false;
     DWORD m_originalPriorityClass = 0;
-    HANDLE m_hTarget = nullptr;
+    UniqueHandle m_hTarget;
 
     // Time-Bound Authority Lease
     uint64_t m_leaseStart = 0;

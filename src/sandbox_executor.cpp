@@ -28,11 +28,11 @@
 
 // [SECURITY PATCH] Helper to maintain the Shared Ledger
 static void UpdateLeaseLedger(DWORD pid, DWORD prio, DWORD_PTR affinity, bool active) {
-    HANDLE hMap = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(LeaseLedger), L"Local\\PManSessionLedger");
+    UniqueHandle hMap(CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(LeaseLedger), L"Local\\PManSessionLedger"));
     if (!hMap) return;
     
     // We map only briefly to update state
-    LeaseLedger* ledger = (LeaseLedger*)MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(LeaseLedger));
+    LeaseLedger* ledger = (LeaseLedger*)MapViewOfFile(hMap.get(), FILE_MAP_ALL_ACCESS, 0, 0, sizeof(LeaseLedger));
     if (ledger) {
         if (active) {
             // FIND FREE SLOT
@@ -60,7 +60,7 @@ static void UpdateLeaseLedger(DWORD pid, DWORD prio, DWORD_PTR affinity, bool ac
     // Handle is closed immediately; the Mapping object persists if other handles (Watchdog) are open,
     // or destroys if count=0. We rely on Watchdog opening it when needed or keeping it open.
     // Ideally, PManContext should hold the handle, but this stateless approach suffices for crash recovery.
-    CloseHandle(hMap); 
+    // hMap.reset(); // Auto-closed by UniqueHandle
 }
 
 // [SECURITY PATCH] Immutable Core List ("Trusted Assassin" Mitigation)
@@ -239,7 +239,7 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     }
 
     // [SECURITY FIX] TOCTOU Mitigation: Open Handle FIRST
-    m_hTarget = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
+    m_hTarget.reset(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid));
     if (!m_hTarget) {
         result.executed = false;
         result.reversible = true;
@@ -251,9 +251,8 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
 
     // [SECURITY PATCH] Immutable Core Check (Handle-Based)
     // Prevent "Trusted Assassin" attack via IPC/Policy using the LOCKED handle
-    if (IsImmutableSystemProcess(m_hTarget)) {
-        CloseHandle(m_hTarget);
-        m_hTarget = nullptr;
+    if (IsImmutableSystemProcess(m_hTarget.get())) {
+        m_hTarget.reset();
         
         result.executed = false;
         result.reversible = false;
@@ -267,10 +266,9 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     // Handle is valid and safe; proceed.
 
     // 3. Capture State (For potential manual rollback, though we intend to commit)
-    m_originalPriorityClass = GetPriorityClass(m_hTarget);
+    m_originalPriorityClass = GetPriorityClass(m_hTarget.get());
     if (m_originalPriorityClass == 0) {
-        CloseHandle(m_hTarget);
-        m_hTarget = nullptr;
+        m_hTarget.reset();
         result.executed = false;
         result.reversible = true;
         result.committed = false;
@@ -282,10 +280,10 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     // 4. Execute Action (Step 3: One Action Type Only)
     BOOL success = FALSE;
     if (decision.selectedAction == BrainAction::Throttle_Mild) {
-        success = SetPriorityClass(m_hTarget, BELOW_NORMAL_PRIORITY_CLASS);
+        success = SetPriorityClass(m_hTarget.get(), BELOW_NORMAL_PRIORITY_CLASS);
     } 
     else if (decision.selectedAction == BrainAction::Shield_Foreground) {
-        success = SetPriorityClass(m_hTarget, ABOVE_NORMAL_PRIORITY_CLASS);
+        success = SetPriorityClass(m_hTarget.get(), ABOVE_NORMAL_PRIORITY_CLASS);
     }
     else if (decision.selectedAction == BrainAction::Suspend_Services) {
         // [PATCH] Trigger Service Suspension
@@ -296,7 +294,7 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         // [PATCH] Apply I/O Boost (Pressure Relief)
         if (m_hTarget) {
             // Use our updated BOOL helper from tweaks.h
-            success = SetProcessIoPriority(GetProcessId(m_hTarget), 3); // 3 = High
+            success = SetProcessIoPriority(GetProcessId(m_hTarget.get()), 3); // 3 = High
         } else {
              // Fallback: Target foreground
              DWORD fgPid = 0;
@@ -324,13 +322,13 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         // [FIX] Active Enforcer: High Priority for Games/Browsers
         // If target is self (default), switch to foreground window
         if (targetPid == GetCurrentProcessId()) {
-             CloseHandle(m_hTarget);
+             m_hTarget.reset(); // Auto-closes current
              GetWindowThreadProcessId(GetForegroundWindow(), &targetPid);
-             m_hTarget = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
+             m_hTarget.reset(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid));
         }
 
         if (m_hTarget) {
-            success = SetPriorityClass(m_hTarget, HIGH_PRIORITY_CLASS);
+            success = SetPriorityClass(m_hTarget.get(), HIGH_PRIORITY_CLASS);
         }
     }
     
@@ -358,8 +356,7 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         result.reason = "SysCallFailed";
         
         // [FIX] Prevent C6387: Check handle validity before closing
-        if (m_hTarget) CloseHandle(m_hTarget);
-        m_hTarget = nullptr;
+        m_hTarget.reset();
         decision.isReversible = false;
     }
 
@@ -374,10 +371,10 @@ void SandboxExecutor::Rollback() {
     ResumeBackgroundServices();
 
     if (m_actionApplied && m_hTarget) {
-        SetPriorityClass(m_hTarget, m_originalPriorityClass);
+        SetPriorityClass(m_hTarget.get(), m_originalPriorityClass);
         
         // [SECURITY PATCH] Clear from Ledger
-        UpdateLeaseLedger(GetProcessId(m_hTarget), 0, 0, false);
+        UpdateLeaseLedger(GetProcessId(m_hTarget.get()), 0, 0, false);
 
         m_actionApplied = false;
         
@@ -398,10 +395,7 @@ SandboxExecutor::~SandboxExecutor() {
         Rollback(); 
     }
 
-    if (m_hTarget) {
-        CloseHandle(m_hTarget);
-        m_hTarget = nullptr;
-    }
+    // m_hTarget auto-closes via UniqueHandle
 }
 
 bool SandboxExecutor::IsReversible(BrainAction action) const {
