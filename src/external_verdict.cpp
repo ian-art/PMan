@@ -27,6 +27,9 @@
 #include "utils.h"
 #include <fstream>
 #include <sstream>
+#include <thread>
+#include <mutex>
+#include <atomic>
 #include <algorithm>
 #include <ctime>
 
@@ -149,6 +152,25 @@ ExternalVerdict::VerdictData ExternalVerdict::LoadVerdict(const std::wstring& pa
     return ParseVerdict(buffer.str());
 }
 
+// [OPTIMIZATION] Static cache to prevent main-thread I/O stalls
+static ExternalVerdict::VerdictData g_verdictCache;
+static std::mutex g_verdictCacheMtx;
+static std::atomic<bool> g_cacheInitialized{false};
+static std::atomic<bool> g_cacheUpdating{false};
+static std::atomic<uint64_t> g_lastCacheTime{0};
+
+// Background worker to load file
+static void UpdateCacheAsync(std::wstring path) {
+    ExternalVerdict::VerdictData v = ExternalVerdict::LoadVerdict(path);
+    {
+        std::lock_guard<std::mutex> lock(g_verdictCacheMtx);
+        g_verdictCache = v;
+        g_cacheInitialized = true;
+        g_lastCacheTime = (uint64_t)std::time(nullptr);
+    }
+    g_cacheUpdating = false;
+}
+
 VerdictResult ExternalVerdict::Check(BrainAction action) {
     // Hard Rule: Maintain is always allowed unless explicitly DENIED by system failure,
     // but here we check strictly against the verdict.
@@ -156,7 +178,30 @@ VerdictResult ExternalVerdict::Check(BrainAction action) {
     // but the check itself asks "Is this action permitted?".
 
     std::wstring path = GetLogPath() / L"verdict.json";
-    VerdictData v = LoadVerdict(path);
+    
+    // [OPTIMIZATION] Async Update Trigger (Stale > 5s)
+    uint64_t now = (uint64_t)std::time(nullptr);
+    if (!g_cacheInitialized || (now - g_lastCacheTime > 5)) {
+        bool expected = false;
+        if (g_cacheUpdating.compare_exchange_strong(expected, true)) {
+            // Detach is safe here as globals persist until exit
+            std::thread([path](){ UpdateCacheAsync(path); }).detach();
+        }
+    }
+
+    // Read from Cache
+    VerdictData v;
+    {
+        std::lock_guard<std::mutex> lock(g_verdictCacheMtx);
+        if (g_cacheInitialized) {
+            v = g_verdictCache;
+        } else {
+            // Fail-safe for first run: ALLOW temporarily
+            v.type = VerdictType::ALLOW;
+            v.valid = true;
+            v.expiresAt = now + 60;
+        }
+    }
 
     VerdictResult result;
     result.allowed = false;
@@ -183,7 +228,7 @@ VerdictResult ExternalVerdict::Check(BrainAction action) {
         return result;
     }
 
-    uint64_t now = (uint64_t)std::time(nullptr);
+    // Reuse 'now' from function entry
     if (now > v.expiresAt) {
         result.reason = "Verdict Expired";
         return result;
