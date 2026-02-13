@@ -574,8 +574,7 @@ bool ApplyStaticTweaks(const TweakConfig& config)
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\LanmanServer\\parameters", L"AutoShareWks", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"AutoShareServer", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Ndu", L"Start", 4);
-    ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\LanmanServer\\Parameters", L"IRPStackSize", 30);
-    }
+	}
 
     // ============================================================================
     // GRAPHICS & DWM
