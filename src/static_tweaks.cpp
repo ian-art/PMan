@@ -384,9 +384,6 @@ bool ApplyStaticTweaks(const TweakConfig& config)
         // ============================================================================
         Log("[TWEAK] Applying Kernel & Memory settings...");
         
-        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"LargeSystemCache", 0);
-        ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"DisablePagingExecutive", 1);
-        
         // [FIX] Stop background I/O starvation (IoPriority=2 Normal)
         ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Session Manager\\Memory Management", L"IoPriority", 2);
         
@@ -611,7 +608,7 @@ bool ApplyStaticTweaks(const TweakConfig& config)
     Log("[TWEAK] Applying Security Policies...");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\SecurityProviders\\WDigest", L"Negotiate", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\SecurityProviders\\WDigest", L"UseLogonCredential", 0);
-    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows NT\\MitigationOptions", L"MitigationOptions_FontBocking", L"1000000000000");
+    ConfigureRegistryString(HKEY_LOCAL_MACHINE, L"Software\\Policies\\Microsoft\\Windows NT\\MitigationOptions", L"MitigationOptions_FontBlocking", L"1000000000000");
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"PromptOnSecureDesktop", 0);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"EnableLUA", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"ConsentPromptBehaviorAdmin", 5);
