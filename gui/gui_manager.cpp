@@ -237,7 +237,7 @@ namespace GuiManager {
     static std::string g_logBuffer;
     static bool g_logAutoScroll = true;
     static uint64_t g_lastLogCheck = 0;
-    static std::streampos g_logLastPos = 0;
+    // static std::streampos g_logLastPos = 0; // [REMOVED] No longer reading from file
 	static size_t g_logPrevSize = 0;
     static float g_logMaxWidth = 0.0f;
     static int g_logLineCount = 0;
@@ -247,42 +247,8 @@ namespace GuiManager {
         if (now - g_lastLogCheck < 500) return; // Check every 500ms
         g_lastLogCheck = now;
 
-        std::filesystem::path logPath = GetLogPath() / L"log.txt";
-        HANDLE hFile = CreateFileW(logPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
-            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        
-        if (hFile == INVALID_HANDLE_VALUE) return;
-
-        LARGE_INTEGER size;
-        GetFileSizeEx(hFile, &size);
-
-        if (size.QuadPart < g_logLastPos) {
-            g_logLastPos = 0; // File was truncated/reset
-            g_logBuffer.clear();
-            g_logMaxWidth = 0.0f;
-        }
-
-        if (size.QuadPart > g_logLastPos) {
-            DWORD bytesToRead = (DWORD)(size.QuadPart - g_logLastPos);
-            // Limit read to last 64KB if opened for the first time
-            if (bytesToRead > 65536 && g_logLastPos == 0) {
-                g_logLastPos = size.QuadPart - 65536;
-                bytesToRead = 65536;
-            }
-
-            std::vector<char> buffer(bytesToRead + 1);
-            LARGE_INTEGER move; move.QuadPart = g_logLastPos;
-            SetFilePointerEx(hFile, move, nullptr, FILE_BEGIN);
-            
-            DWORD bytesRead = 0;
-            if (ReadFile(hFile, buffer.data(), bytesToRead, &bytesRead, nullptr) && bytesRead > 0) {
-                buffer[bytesRead] = '\0';
-                g_logBuffer.append(buffer.data());
-                g_logLastPos += bytesRead;
-
-                }
-        }
-        CloseHandle(hFile);
+        // [PATCH] Direct memory access (Zero-Copy logic handled in Logger)
+        GetLogSnapshot(g_logBuffer);
     }
 
     static WNDCLASSEXW g_wc = {
@@ -450,10 +416,12 @@ namespace GuiManager {
         if (!g_isInitialized) Init();
         g_activeMode = GuiMode::LogViewer;
         g_isOpen = true;
-        // [FIX] Force write buffered logs to disk so the viewer can read them
-        FlushLogger();
+        
+        // [OPTIMIZATION] Direct memory read does not require disk flush
+        // FlushLogger(); 
+        
         // Reset state on open
-        g_logLastPos = 0; 
+        // g_logLastPos = 0; 
         g_logBuffer.clear();
         UpdateLogContent(); // Immediate read
         ShowWindow(g_hwnd, SW_SHOW);

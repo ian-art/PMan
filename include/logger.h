@@ -34,4 +34,7 @@ void InitLogger();     // Initialize buffer and directory
 void ShutdownLogger(); // Flush buffer to disk and close
 void FlushLogger();    // Force write buffer to disk (used by Viewer)
 
+// [PATCH] Accessor for in-memory log retrieval (Avoids disk I/O)
+void GetLogSnapshot(std::string& outBuf);
+
 #endif // PMAN_LOGGER_H

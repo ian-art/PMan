@@ -183,6 +183,21 @@ void ShutdownLogger()
        }
    }
 
+void GetLogSnapshot(std::string& outBuf)
+{
+    std::lock_guard lg(g_logMtx);
+    outBuf.clear();
+    // Pre-calculate approximate size
+    size_t total = 0;
+    for (const auto& line : g_logBuffer) total += line.size() + 2;
+    outBuf.reserve(total);
+    
+    for (const auto& line : g_logBuffer) {
+        outBuf.append(line);
+        outBuf.push_back('\n');
+    }
+}
+
 void Log(const std::string& msg)
 {
     // Format timestamp
