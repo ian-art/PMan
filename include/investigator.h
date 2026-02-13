@@ -22,6 +22,7 @@
 
 #include "types.h"
 #include <vector>
+#include <future> // [PATCH] Async Support
 
 enum class DiagnosisType {
     None,
@@ -47,6 +48,10 @@ public:
     // Main Entry Point
     // Called by DecisionArbiter when confidence is low or consequences are unsafe.
     InvestigationVerdict Diagnose(const GovernorDecision& govState);
+
+    // [PATCH] Async Diagnosis (Non-blocking)
+    // Launches diagnosis in a background thread to prevent stalling the Decision Loop.
+    std::future<InvestigationVerdict> DiagnoseAsync(const GovernorDecision& govState);
 
 private:
     // Signal De-Noiser
