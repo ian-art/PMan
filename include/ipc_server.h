@@ -62,7 +62,7 @@ private:
 
     std::atomic<bool> m_running{false};
     std::thread m_worker;
-    HANDLE m_hPipeEvent = nullptr;
+    HANDLE m_hShutdownEvent = nullptr; // [PATCH] Event for clean shutdown
     
     // Hardcoded Pipe Name
     const std::wstring PIPE_NAME = L"\\\\.\\pipe\\PManSecureInterface";

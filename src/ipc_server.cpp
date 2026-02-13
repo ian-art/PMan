@@ -40,6 +40,9 @@ IpcServer::~IpcServer() {
 void IpcServer::Initialize() {
     if (m_running.load()) return;
 
+    // [PATCH] Async Shutdown Event
+    m_hShutdownEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr); // Manual reset
+
     m_running.store(true);
     m_worker = std::thread(&IpcServer::WorkerThread, this);
     Log("[IPC] Secure Server Initialized (Pipe: PManSecureInterface)");
@@ -50,11 +53,15 @@ void IpcServer::Shutdown() {
     
     m_running.store(false);
     
-    // Connect to self to unblock ConnectNamedPipe if it's waiting
-    HANDLE hPipe = CreateFileW(PIPE_NAME.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-    if (hPipe != INVALID_HANDLE_VALUE) CloseHandle(hPipe);
+    // [PATCH] Signal shutdown event to unblock WorkerThread
+    if (m_hShutdownEvent) SetEvent(m_hShutdownEvent);
 
     if (m_worker.joinable()) m_worker.join();
+    
+    if (m_hShutdownEvent) {
+        CloseHandle(m_hShutdownEvent);
+        m_hShutdownEvent = nullptr;
+    }
     Log("[IPC] Server Shutdown.");
 }
 
@@ -76,54 +83,101 @@ void IpcServer::WorkerThread() {
         return;
     }
 
+    // [PATCH] Async IO Wrappers
+    auto AsyncRead = [](HANDLE h, void* buf, DWORD sz, DWORD& read) -> bool {
+        OVERLAPPED ov = {0};
+        ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!ReadFile(h, buf, sz, &read, &ov) && GetLastError() != ERROR_IO_PENDING) {
+            CloseHandle(ov.hEvent); return false;
+        }
+        bool res = GetOverlappedResult(h, &ov, &read, TRUE); // Wait
+        CloseHandle(ov.hEvent);
+        return res;
+    };
+
+    auto AsyncWrite = [](HANDLE h, const void* buf, DWORD sz, DWORD& written) -> bool {
+        OVERLAPPED ov = {0};
+        ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!WriteFile(h, buf, sz, &written, &ov) && GetLastError() != ERROR_IO_PENDING) {
+            CloseHandle(ov.hEvent); return false;
+        }
+        bool res = GetOverlappedResult(h, &ov, &written, TRUE); // Wait
+        CloseHandle(ov.hEvent);
+        return res;
+    };
+
     while (m_running.load()) {
+        // Create Pipe with FILE_FLAG_OVERLAPPED
         HANDLE hPipe = CreateNamedPipeW(
             PIPE_NAME.c_str(),
-            PIPE_ACCESS_DUPLEX,
+            PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
             PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
             PIPE_UNLIMITED_INSTANCES,
             4096, 4096, 0, &sa
         );
 
         if (hPipe == INVALID_HANDLE_VALUE) {
-            Log("[IPC] Failed to create pipe instance. Retrying in 1s...");
+            Log("[IPC] Failed to create pipe. Retrying...");
             Sleep(1000);
             continue;
         }
 
-        if (ConnectNamedPipe(hPipe, nullptr) || GetLastError() == ERROR_PIPE_CONNECTED) {
-            // [PATCH] Fix Pipe Clog DoS: Enforce timeouts
-            COMMTIMEOUTS timeouts = { 0 };
-            timeouts.ReadIntervalTimeout = 500;
-            timeouts.ReadTotalTimeoutConstant = 500;
-            timeouts.ReadTotalTimeoutMultiplier = 0;
-            SetCommTimeouts(hPipe, &timeouts);
+        // Async Connect
+        OVERLAPPED oConnect = {0};
+        oConnect.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        
+        bool pending = false;
+        if (ConnectNamedPipe(hPipe, &oConnect)) {
+             // Connected immediately
+        } else {
+             DWORD err = GetLastError();
+             if (err == ERROR_IO_PENDING) pending = true;
+             else if (err == ERROR_PIPE_CONNECTED) {} // Already connected
+             else {
+                 CloseHandle(oConnect.hEvent);
+                 CloseHandle(hPipe);
+                 continue;
+             }
+        }
 
-            // Rate Limiter Defense
-            // Prevent "Pipe Spam" DoS by dropping high-frequency callers immediately
-            if (!CheckRateLimit(hPipe)) {
-                Log("[IPC] Rate Limit Exceeded. Dropping connection.");
-                FlushFileBuffers(hPipe);
-                DisconnectNamedPipe(hPipe);
+        if (pending) {
+            // Wait for Connection OR Shutdown
+            HANDLE waits[] = { m_hShutdownEvent, oConnect.hEvent };
+            DWORD dwWait = WaitForMultipleObjects(2, waits, FALSE, INFINITE);
+            
+            if (dwWait == WAIT_OBJECT_0) { // Shutdown Event
+                CancelIo(hPipe);
+                CloseHandle(oConnect.hEvent);
                 CloseHandle(hPipe);
-                continue;
+                break;
             }
+        }
+        CloseHandle(oConnect.hEvent);
 
-            // Handle Connection
-            char buffer[4096];
-            DWORD bytesRead;
-            std::string requestData;
+        // --- Connection Established ---
 
-            if (ReadFile(hPipe, buffer, sizeof(buffer) - 1, &bytesRead, nullptr)) {
-                buffer[bytesRead] = '\0';
-                requestData = buffer;
-                
-                std::string responseData;
-                ProcessRequest(requestData, responseData, hPipe);
-                
-                DWORD bytesWritten;
-                WriteFile(hPipe, responseData.c_str(), (DWORD)responseData.length(), &bytesWritten, nullptr);
-            }
+        // Rate Limiter
+        if (!CheckRateLimit(hPipe)) {
+             FlushFileBuffers(hPipe);
+             DisconnectNamedPipe(hPipe);
+             CloseHandle(hPipe);
+             continue;
+        }
+
+        // Process Transaction (using Async wrappers)
+        char buffer[4096];
+        DWORD bytesRead;
+        std::string requestData;
+
+        if (AsyncRead(hPipe, buffer, sizeof(buffer) - 1, bytesRead)) {
+            buffer[bytesRead] = '\0';
+            requestData = buffer;
+            
+            std::string responseData;
+            ProcessRequest(requestData, responseData, hPipe);
+            
+            DWORD bytesWritten;
+            AsyncWrite(hPipe, responseData.c_str(), (DWORD)responseData.length(), bytesWritten);
         }
 
         FlushFileBuffers(hPipe);

@@ -49,14 +49,14 @@ IpcClient::Response IpcClient::SendConfig(const json& configData) {
     }
 
     // Connect to the pipe
-    // SECURITY: FILE_FLAG_OVERLAPPED is not used here for simplicity in this synchronous call
+    // [PATCH] Use OVERLAPPED for robust async I/O
     UniqueHandle hPipe(CreateFileW(
         pipeName.c_str(),
         GENERIC_READ | GENERIC_WRITE,
-        0,              // No sharing
-        nullptr,        // Default security attributes
+        0,
+        nullptr,
         OPEN_EXISTING,
-        0,              // Default attributes
+        FILE_FLAG_OVERLAPPED, // Enabled async mode
         nullptr
     ));
 
@@ -64,17 +64,46 @@ IpcClient::Response IpcClient::SendConfig(const json& configData) {
         return { false, "Connection Failed: Could not open secure pipe.", false };
     }
 
+    // Helper: Async Operation with Timeout
+    auto PerformAsync = [&](auto func, void* buffer, DWORD size, DWORD& transferred) -> bool {
+        OVERLAPPED ov = {0};
+        ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!ov.hEvent) return false;
+        
+        UniqueHandle hEvent(ov.hEvent); // RAII cleanup
+
+        if (!func(hPipe.get(), buffer, size, &transferred, &ov)) {
+            if (GetLastError() != ERROR_IO_PENDING) return false;
+            
+            // Wait up to 2000ms
+            if (WaitForSingleObject(ov.hEvent, 2000) != WAIT_OBJECT_0) {
+                CancelIo(hPipe.get()); // Timeout!
+                return false;
+            }
+            return GetOverlappedResult(hPipe.get(), &ov, &transferred, FALSE) != 0;
+        }
+        return true; // Completed immediately
+    };
+
     // 4. Transmission Logic
     DWORD bytesWritten = 0;
-    if (!WriteFile(hPipe.get(), payload.c_str(), static_cast<DWORD>(payload.size()), &bytesWritten, nullptr)) {
-        return { false, "Transmission Error: Failed to send data to service.", false };
+    // Adapt WriteFile signature for helper
+    auto WriteOp = [](HANDLE h, void* b, DWORD s, DWORD* t, LPOVERLAPPED o) {
+        return WriteFile(h, b, s, t, o);
+    };
+    
+    // Cast away constness safely for the API
+    if (!PerformAsync(WriteOp, (void*)payload.c_str(), (DWORD)payload.size(), bytesWritten)) {
+        return { false, "Transmission Error: Send timeout or failure.", false };
     }
 
     // 5. Read Verdict
     char buffer[4096];
     DWORD bytesRead = 0;
-    if (!ReadFile(hPipe.get(), buffer, sizeof(buffer) - 1, &bytesRead, nullptr)) {
-        return { false, "Protocol Error: Service did not acknowledge request.", false };
+    auto ReadOp = ReadFile; // Direct signature match
+
+    if (!PerformAsync(ReadOp, buffer, sizeof(buffer) - 1, bytesRead)) {
+        return { false, "Protocol Error: Receive timeout.", false };
     }
 
     buffer[bytesRead] = '\0'; // Null-terminate
