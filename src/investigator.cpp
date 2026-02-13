@@ -275,6 +275,14 @@ DiagnosisType Investigator::ProbeHungWindow(DWORD pid) {
     return DiagnosisType::None; // Window is responsive
 }
 
+// [PATCH] Async Implementation
+std::future<InvestigationVerdict> Investigator::DiagnoseAsync(const GovernorDecision& govState) {
+    // Capture govState by value to ensure thread safety when running in background
+    return std::async(std::launch::async, [this, govState]() {
+        return this->Diagnose(govState);
+    });
+}
+
 DiagnosisType Investigator::ProbeWorkloadChange(DWORD pid, DWORD baselineThreadCount) {
     if (pid == 0 || pid == 4) return DiagnosisType::None;
 
@@ -319,8 +327,8 @@ DiagnosisType Investigator::ProbeWaitChain(DWORD pid) {
 
     // [RAII] Snapshot of threads
     UniqueHandle hThreadSnap(CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0));
-    // Check if valid using standard pointer bool operator
-    if (!hThreadSnap) {
+    // [FIX] Check for INVALID_HANDLE_VALUE specifically
+    if (hThreadSnap.get() == INVALID_HANDLE_VALUE) {
         return DiagnosisType::None;
     }
 
