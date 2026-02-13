@@ -70,17 +70,16 @@ static bool ApplyForegroundShield_Impl(DWORD pid) {
     // [PATCH] Trojan Defense: Verify signature before boosting
     if (!SecurityUtils::IsProcessTrusted(pid)) return false;
 
-    HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
+    UniqueHandle hProc(OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid));
     if (hProc) {
         // 1. Boost CPU Priority (Transient)
-        SetPriorityClass(hProc, ABOVE_NORMAL_PRIORITY_CLASS);
+        SetPriorityClass(hProc.get(), ABOVE_NORMAL_PRIORITY_CLASS);
         
         // 2. Boost IO Priority (Critical for contending with AV Scans)
         // FIX: Explicit cast required for strict C++ enum conversion
         IO_PRIORITY_HINT ioPri = (IO_PRIORITY_HINT)IoPriorityHigh;
-        NtWrapper::SetInformationProcess(hProc, ProcessIoPriority, &ioPri, sizeof(ioPri));
+        NtWrapper::SetInformationProcess(hProc.get(), ProcessIoPriority, &ioPri, sizeof(ioPri));
         
-        CloseHandle(hProc);
         return true;
     }
     return false;
@@ -379,19 +378,17 @@ bool Executor::HardValidate(const ActionIntent& intent, const TargetSet& targets
 
         // [FIX] Validates process state to avoid touching zombies or locked threads
         // Prevent touching processes with invalid or locked affinity states
-        HANDLE hCheck = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, target.pid);
+        UniqueHandle hCheck(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, target.pid));
         if (hCheck) {
             DWORD_PTR procMask = 0;
             DWORD_PTR sysMask = 0;
-            if (GetProcessAffinityMask(hCheck, &procMask, &sysMask)) {
+            if (GetProcessAffinityMask(hCheck.get(), &procMask, &sysMask)) {
                 // If mask is 0, the process is in a zombie/invalid state.
                 // We must NOT attempt to manage it.
                 if (procMask == 0) {
-                    CloseHandle(hCheck);
                     return false; 
                 }
             }
-            CloseHandle(hCheck);
         }
     }
 
@@ -491,14 +488,13 @@ bool Executor::Revert(const Receipt& receipt) {
     else if (receipt.action == BrainAction::Shield_Foreground) {
         // [DCM] Revert Foreground Shielding (Restore Normal Priority)
         for (const auto& target : receipt.affectedTargets) {
-            HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION, FALSE, target.pid);
+            UniqueHandle hProc(OpenProcess(PROCESS_SET_INFORMATION, FALSE, target.pid));
             if (hProc) {
-                SetPriorityClass(hProc, NORMAL_PRIORITY_CLASS);
+                SetPriorityClass(hProc.get(), NORMAL_PRIORITY_CLASS);
                 
                 // FIX: Explicit cast required for strict C++ enum conversion
                 IO_PRIORITY_HINT ioPri = (IO_PRIORITY_HINT)IoPriorityNormal;
-                NtWrapper::SetInformationProcess(hProc, ProcessIoPriority, &ioPri, sizeof(ioPri));
-                CloseHandle(hProc);
+                NtWrapper::SetInformationProcess(hProc.get(), ProcessIoPriority, &ioPri, sizeof(ioPri));
             }
         }
     }
