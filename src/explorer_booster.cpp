@@ -22,6 +22,7 @@
 #include "globals.h" // For g_idleRevertEnabled etc.
 #include "tweaks.h" // For SetProcessIoPriority
 #include "constants.h" // [FIX] Required for VAL_BACKGROUND
+#include "security_utils.h" // For IsAntiCheatProtected
 #include <tlhelp32.h>
 #include <psapi.h>
 
@@ -29,7 +30,7 @@
 
 void ExplorerBooster::Initialize() {
     // If anti-cheat is running, auto-disable risky features
-    if (IsAntiCheatProtected(GetCurrentProcessId())) {
+    if (SecurityUtils::IsAntiCheatProtected(GetCurrentProcessId())) {
         Log("[EXPLORER] Anti-cheat detected - disabling I/O priority boosts");
         m_config.boostIoPriority = false;
     }
@@ -359,16 +360,28 @@ void ExplorerBooster::ApplyBoosts(DWORD pid, ExplorerBoostState state) {
     HANDLE hProc = it->second.handle.get();
     bool logSuccess = m_config.debugLogging; // Only detailed logs if debug is on
 
-    // [FIX] DWM Safety: Verify identity via Name to prevent ID collisions
+// [FIX] DWM Safety: Verify identity via Name to prevent ID collisions
     wchar_t pName[MAX_PATH];
     DWORD pSize = MAX_PATH;
     bool isDwm = false;
     if (QueryFullProcessImageNameW(hProc, 0, pName, &pSize)) {
-        wchar_t* name = wcsrchr(pName, L'\\');
-        if (name) name++; else name = pName;
-        if (_wcsicmp(name, L"dwm.exe") == 0) isDwm = true;
+        std::wstring name = ExeFromPath(pName);
+        if (_wcsicmp(name.c_str(), L"dwm.exe") == 0) {
+            // [SECURITY] Extra verification: DWM must be in System32
+            wchar_t sysDir[MAX_PATH];
+            GetSystemDirectoryW(sysDir, MAX_PATH);
+            std::wstring sysPath = sysDir;
+            std::wstring fullPath = pName;
+            
+            // Simple case-insensitive containment check for System32
+            // (Real implementation should be more robust, but this prevents running from Desktop)
+            if (ContainsIgnoreCase(fullPath, sysPath)) {
+                isDwm = true;
+            }
+        }
     } else if (pid == GetDwmProcessId()) {
-        isDwm = true; // Fallback
+        // Fallback only if we trust GetDwmProcessId's internal checks
+        isDwm = true; 
     }
 
     // [FIX] Ensure we only boost DWM for the active console session

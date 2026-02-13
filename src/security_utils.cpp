@@ -172,4 +172,28 @@ bool IsProxyLaunch(DWORD pid) {
     return !isSafeIdentity;
 }
 
+// Local compat struct in case of older SDK
+typedef struct _PROCESS_PROTECTION_LEVEL_INFORMATION_COMPAT {
+    DWORD ProtectionLevel;
+} PROCESS_PROTECTION_LEVEL_INFORMATION_COMPAT;
+
+bool IsAntiCheatProtected(DWORD pid) {
+    // heuristic: if we can't open the process or it has a protection level, 
+    // it's likely guarded by an AV or Anti-Cheat.
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProcess) {
+        return (GetLastError() == ERROR_ACCESS_DENIED);
+    }
+
+    PROCESS_PROTECTION_LEVEL_INFORMATION_COMPAT ppl = {0};
+    // ProcessProtectionLevelInfo = 11
+    if (GetProcessInformation(hProcess, (PROCESS_INFORMATION_CLASS)11, &ppl, sizeof(ppl))) {
+        if (ppl.ProtectionLevel != 0) {
+            CloseHandle(hProcess);
+            return true;
+        }
+    }
+    CloseHandle(hProcess);
+    return false;
+	}
 }

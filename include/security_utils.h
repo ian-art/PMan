@@ -26,6 +26,9 @@ namespace SecurityUtils {
 
     // [PATCH] Trojan Defense: Verify Authenticode Signature
     bool IsProcessTrusted(DWORD pid);
+
+    // [ANTI-CHEAT] Heuristic detection for active AC protection
+    bool IsAntiCheatProtected(DWORD pid);
 }
 
 #endif // PMAN_SECURITY_UTILS_H
