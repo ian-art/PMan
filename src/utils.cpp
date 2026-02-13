@@ -21,7 +21,9 @@
 #include "constants.h"
 #include "logger.h"
 #include "nt_wrapper.h"
+#include <wrl/client.h> // [FIX] RAII for COM
 #include <vector>
+#include <type_traits> // Required for std::remove_pointer
 #include <algorithm>
 #include <cctype>
 #include <cwctype>
@@ -540,51 +542,40 @@ bool DisableScheduledTask(const std::wstring& taskPath)
     // Ensure COM is initialized for this thread
     HRESULT hrInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     
-    ITaskService* pService = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_TaskScheduler, nullptr, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&pService);
-    if (FAILED(hr)) {
-        if (SUCCEEDED(hrInit)) CoUninitialize();
-        return false;
-    }
-
-    // Connect to local service
-    hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
-    if (FAILED(hr)) {
-        pService->Release();
-        if (SUCCEEDED(hrInit)) CoUninitialize();
-        return false;
-    }
-
-    ITaskFolder* pRootFolder = nullptr;
-    hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
-    if (FAILED(hr)) {
-        pService->Release();
-        if (SUCCEEDED(hrInit)) CoUninitialize();
-        return false;
-    }
-
-    // Attempt to locate and disable the task
-    IRegisteredTask* pTask = nullptr;
-    hr = pRootFolder->GetTask(_bstr_t(taskPath.c_str()), &pTask);
-    
+    // [FIX] RAII: Use WRL::ComPtr to ensure Release() is always called
+    using Microsoft::WRL::ComPtr;
     bool result = false;
-    if (SUCCEEDED(hr)) {
-        // Disable the task
-        hr = pTask->put_Enabled(VARIANT_FALSE);
-        if (SUCCEEDED(hr)) {
-            result = true;
-            Log("[TASK] Disabled telemetry task: " + WideToUtf8(taskPath.c_str()));
-        } else {
-            Log("[TASK] Failed to disable task: " + WideToUtf8(taskPath.c_str()) + " HR=" + std::to_string(hr));
-        }
-        pTask->Release();
-    } else {
-        // Task likely doesn't exist on this version of Windows
-        // Silent fail or debug log
-    }
 
-    pRootFolder->Release();
-    pService->Release();
+    {
+        ComPtr<ITaskService> pService;
+        HRESULT hr = CoCreateInstance(CLSID_TaskScheduler, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pService));
+        
+        if (SUCCEEDED(hr)) {
+            // Connect to local service
+            hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+            if (SUCCEEDED(hr)) {
+                ComPtr<ITaskFolder> pRootFolder;
+                hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
+                
+                if (SUCCEEDED(hr)) {
+                    ComPtr<IRegisteredTask> pTask;
+                    // Attempt to locate and disable the task
+                    hr = pRootFolder->GetTask(_bstr_t(taskPath.c_str()), &pTask);
+                    
+                    if (SUCCEEDED(hr)) {
+                        hr = pTask->put_Enabled(VARIANT_FALSE);
+                        if (SUCCEEDED(hr)) {
+                            result = true;
+                            Log("[TASK] Disabled telemetry task: " + WideToUtf8(taskPath.c_str()));
+                        } else {
+                            Log("[TASK] Failed to disable task: " + WideToUtf8(taskPath.c_str()) + " HR=" + std::to_string(hr));
+                        }
+                    }
+                }
+            }
+        }
+    } // destructors called here
+
     if (SUCCEEDED(hrInit)) CoUninitialize();
     
     return result;
@@ -598,7 +589,14 @@ bool IsWindowHung(HWND hwnd)
 
 HBITMAP IconToBitmapPARGB32(HINSTANCE hInst, UINT uIconId, int cx, int cy)
 {
-    HICON hIcon = (HICON)LoadImageW(hInst, MAKEINTRESOURCEW(uIconId), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR);
+    // [FIX] RAII: Auto-cleanup for GDI objects
+    auto iconDeleter = [](HICON h) { if(h) DestroyIcon(h); };
+    // Fix C2664: HICON is a strict type, not void*. Use remove_pointer to derive the underlying struct.
+    std::unique_ptr<std::remove_pointer<HICON>::type, decltype(iconDeleter)> hIcon(
+        (HICON)LoadImageW(hInst, MAKEINTRESOURCEW(uIconId), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR), 
+        iconDeleter
+    );
+    
     if (!hIcon) return nullptr;
 
     BITMAPINFO bi = {0};
@@ -610,23 +608,30 @@ HBITMAP IconToBitmapPARGB32(HINSTANCE hInst, UINT uIconId, int cx, int cy)
     bi.bmiHeader.biCompression = BI_RGB;
 
     void* pBits = nullptr;
-    HDC hDC = GetDC(nullptr);
-    HBITMAP hBmp = CreateDIBSection(hDC, &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
-    ReleaseDC(nullptr, hDC);
+    
+    // RAII for Screen DC
+    HDC hRawDC = GetDC(nullptr);
+    HBITMAP hBmp = CreateDIBSection(hRawDC, &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
+    ReleaseDC(nullptr, hRawDC); // Instant release, no need for complex RAII here as it doesn't span logic
 
     if (hBmp) {
-        HDC hMemDC = CreateCompatibleDC(nullptr);
-        HBITMAP hOldBmp = (HBITMAP)SelectObject(hMemDC, hBmp);
+        // RAII for Memory DC
+        auto dcDeleter = [](HDC h) { if(h) DeleteDC(h); };
+        std::unique_ptr<HDC__, decltype(dcDeleter)> hMemDC(CreateCompatibleDC(nullptr), dcDeleter);
         
-        // Initialize with transparency
-        RECT rc = {0, 0, cx, cy};
-        FillRect(hMemDC, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH)); // Alpha 0
-
-        DrawIconEx(hMemDC, 0, 0, hIcon, cx, cy, 0, nullptr, DI_NORMAL);
-        
-        SelectObject(hMemDC, hOldBmp);
-        DeleteDC(hMemDC);
+        if (hMemDC) {
+            HBITMAP hOldBmp = (HBITMAP)SelectObject(hMemDC.get(), hBmp);
+            
+            // Initialize with transparency
+            RECT rc = {0, 0, cx, cy};
+            FillRect(hMemDC.get(), &rc, (HBRUSH)GetStockObject(BLACK_BRUSH)); // Alpha 0
+            DrawIconEx(hMemDC.get(), 0, 0, (HICON)hIcon.get(), cx, cy, 0, nullptr, DI_NORMAL);
+            
+            SelectObject(hMemDC.get(), hOldBmp);
+        } else {
+            DeleteObject(hBmp);
+            return nullptr;
+        }
     }
-    DestroyIcon(hIcon);
     return hBmp;
 }
