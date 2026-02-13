@@ -1363,8 +1363,8 @@ namespace GuiManager {
                         }
                         if (ImGui::BeginTabItem("Aggressive")) {
                             BeginCard("agg", {0.18f, 0.10f, 0.10f, 1.0f});
-                            ImGui::Checkbox("Remove UWP Bloatware", &g_config.bloatware);
-                            HelpMarker("Permanent removal of bundled apps.");
+                            ImGui::Checkbox("Disable OEM/Xbox Background Tasks", &g_config.bloatware);
+                            HelpMarker("Disables background tasks for specific OEM/Xbox apps and hides OneDrive.\nNote: Does NOT uninstall applications.");
                             EndCard();
                             ImGui::EndTabItem();
                         }
