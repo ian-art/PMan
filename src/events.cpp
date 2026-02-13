@@ -51,7 +51,7 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
     }
     
     // Now safe to allocate
-    IocpJob* job = new (std::nothrow) IocpJob();
+    std::unique_ptr<IocpJob> job(new (std::nothrow) IocpJob());
     if (!job) {
         // FIX: Decrement counter if allocation fails, otherwise the slot is leaked forever
         g_iocpQueueSize.fetch_sub(1, std::memory_order_release);
@@ -65,10 +65,10 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
 	// Queue size was already reserved (incremented) at the start of the function.
     // Do NOT increment again here.
     
-    if (!PostQueuedCompletionStatus(g_hIocp.get(), 0, 0, reinterpret_cast<LPOVERLAPPED>(job)))
+    if (!PostQueuedCompletionStatus(g_hIocp.get(), 0, 0, reinterpret_cast<LPOVERLAPPED>(job.get())))
     {
         g_iocpQueueSize.fetch_sub(1, std::memory_order_release);
-        delete job;
+        // job is automatically deleted by unique_ptr
         Log("[IOCP] Post failed, event dropped");
     
         
@@ -79,6 +79,8 @@ bool PostIocp(JobType t, DWORD pid, HWND hwnd)
         return false;
     }
     
+    // Ownership successfully transferred to IOCP
+    job.release();
     return true;
 }
 
