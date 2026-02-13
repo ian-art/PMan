@@ -77,8 +77,18 @@ void InputGuardian::ToggleInterferenceBlocker(bool enable) {
                 // A normal priority hook thread will be preempted by games, causing massive input lag.
                 SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 
+                // [PATCH] RAII Wrapper for Hook Safety
+                // Ensures UnhookWindowsHookEx is ALWAYS called, even on exception or thread termination.
+                struct HookGuard {
+                    HHOOK h;
+                    HookGuard(HHOOK _h) : h(_h) {}
+                    ~HookGuard() { if (h) UnhookWindowsHookEx(h); }
+                };
+
                 // Install Hook on this dedicated thread
-                HHOOK hHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(nullptr), 0);
+                HHOOK hRaw = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(nullptr), 0);
+                HookGuard hook(hRaw); // Lifecycle managed by stack unwinding
+
                 m_hookThreadId = GetCurrentThreadId();
 
                 MSG msg;
@@ -89,8 +99,8 @@ void InputGuardian::ToggleInterferenceBlocker(bool enable) {
                     DispatchMessage(&msg);
                 }
 
-                if (hHook) UnhookWindowsHookEx(hHook);
                 m_hookThreadId = 0;
+                // HookGuard destructor called here automatically
             });
             // Mark as enabled locally using a dummy handle
             m_hKeyHook = (HHOOK)0x1; 
