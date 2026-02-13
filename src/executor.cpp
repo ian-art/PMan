@@ -21,6 +21,7 @@
 #include "context.h"
 #include "globals.h"
 #include "logger.h"
+#include "utils.h"
 #include "throttle_manager.h"
 #include "memory_optimizer.h"
 #include "services_watcher.h"
@@ -43,18 +44,46 @@ typedef struct _PROCESS_PROTECTION_LEVEL_INFORMATION_COMPAT {
 static bool IsProtectedProcess(DWORD pid) {
     if (pid <= 4) return true; 
 
-    // Heuristic 1: If we can't open it for Limited Info, it's likely a protected Anti-Malware service
     UniqueHandle hProcess(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!hProcess) {
+        // Heuristic: Access Denied usually means Protected Process (Anti-Cheat/AV)
         return (GetLastError() == ERROR_ACCESS_DENIED);
     }
 
-    // Heuristic 2: Check standard Windows Protection Level
+    // 1. Check Standard Windows Protection Level (PPL)
     PROCESS_PROTECTION_LEVEL_INFORMATION_COMPAT ppl = {0};
-    // ProcessProtectionLevelInfo = 11
     if (GetProcessInformation(hProcess.get(), (PROCESS_INFORMATION_CLASS)11, &ppl, sizeof(ppl))) {
-        // ProtectionLevel > 0 means it is a Signed/Protected System or Antimalware process
-        return (ppl.ProtectionLevel != 0);
+        if (ppl.ProtectionLevel != 0) return true;
+    }
+
+    // 2. [SAFETY PATCH] Path Validation (Synchronized with SandboxExecutor)
+    // Validate critical system names against their expected System32 location.
+    wchar_t path[MAX_PATH];
+    DWORD sz = MAX_PATH;
+    if (QueryFullProcessImageNameW(hProcess.get(), 0, path, &sz)) {
+        std::wstring fullPath = path;
+        std::wstring name = ExeFromPath(path);
+        
+        // Normalize for comparison
+        for (auto& c : name) c = towlower(c);
+        for (auto& c : fullPath) c = towlower(c);
+
+        wchar_t sysDir[MAX_PATH];
+        GetSystemDirectoryW(sysDir, MAX_PATH);
+        std::wstring sysDirStr = sysDir;
+        for (auto& c : sysDirStr) c = towlower(c);
+
+        bool isSystemLoc = (fullPath.find(sysDirStr) != std::wstring::npos);
+
+        if (name == L"msmpeng.exe" || 
+            (isSystemLoc && name == L"csrss.exe") ||
+            (isSystemLoc && name == L"smss.exe") ||
+            name == L"services.exe" || 
+            name == L"lsass.exe" || 
+            name == L"wininit.exe" || 
+            name == L"winlogon.exe") {
+            return true;
+        }
     }
     return false;
 }
