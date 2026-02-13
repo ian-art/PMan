@@ -405,6 +405,7 @@ static void RunAutonomousCycle() {
              decision.selectedAction = BrainAction::Maintain;
              decision.reason = DecisionReason::GovernorRestricted;
              decision.isReversible = false;
+             actionCost = 0; // [FIX] Prevent spending for rejected action
         }
     }
 
