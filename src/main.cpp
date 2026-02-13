@@ -103,7 +103,9 @@ static UINT g_wmTaskbarCreated = 0;
 #define ID_TRAY_EXPORT_LOG 5001 // Unique ID for Audit Export
 
 static std::atomic<bool> g_isCheckingUpdate{false};
-static GUID* g_pSleepScheme = nullptr;
+// [FIX] RAII: Replaced raw GUID* with smart pointer to prevent leak/manual management
+struct LocalFreeDeleter { void operator()(void* p) const { if (p) LocalFree(p); } };
+static std::unique_ptr<GUID, LocalFreeDeleter> g_pSleepScheme;
 static UniqueHandle g_hGuardProcess; // Handle to the watchdog process
 static uint64_t g_resumeStabilizationTime = 0; // Replaces detached sleep thread;
 
@@ -1828,10 +1830,9 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     g_hShutdownEvent.reset();
     
     // Safety cleanup for Power Scheme
-    if (g_pSleepScheme != nullptr) {
-        PowerSetActiveScheme(NULL, g_pSleepScheme);
-        LocalFree(g_pSleepScheme);
-        g_pSleepScheme = nullptr;
+    if (g_pSleepScheme) {
+        PowerSetActiveScheme(NULL, g_pSleepScheme.get());
+        g_pSleepScheme.reset(); // Auto-calls LocalFree via Deleter
     }
 
     // Terminate Guard Process on graceful shutdown to prevent false positives
