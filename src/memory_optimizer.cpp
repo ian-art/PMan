@@ -59,6 +59,27 @@ void MemoryOptimizer::Initialize() {
 
 void MemoryOptimizer::Shutdown() {
     m_running = false;
+
+    // [CLEANUP] Release all memory locks ("Return the Keys")
+    if (!m_hardenedPids.empty()) {
+        for (DWORD pid : m_hardenedPids) {
+            HANDLE hProc = OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (hProc) {
+                // [SAFETY] Do NOT use -1,-1 (EmptyWorkingSet). That causes lag.
+                // Instead, get current limits and re-apply them with Flags=0 (Unlocked).
+                SIZE_T min, max;
+                DWORD flags;
+                if (GetProcessWorkingSetSizeEx(hProc, &min, &max, &flags)) {
+                    // Re-apply same sizes, but REMOVE the "Hard" flags by passing 0.
+                    SetProcessWorkingSetSizeEx(hProc, min, max, 0);
+                }
+                CloseHandle(hProc);
+            }
+        }
+        m_hardenedPids.clear();
+        Log("[MEMOPT] Released memory locks on shutdown (Seamless Handover).");
+    }
+
     if (m_pdhCounter) {
         PdhRemoveCounter(m_pdhCounter);
         m_pdhCounter = nullptr;
@@ -69,8 +90,14 @@ void MemoryOptimizer::Shutdown() {
     }
 }
 
-// [SUPERIOR] Implementation
 void MemoryOptimizer::HardenProcess(DWORD pid) {
+    // [TRACK] Remember this PID so we can unlock it later
+    bool found = false;
+    for (DWORD existing : m_hardenedPids) {
+        if (existing == pid) { found = true; break; }
+    }
+    if (!found) m_hardenedPids.push_back(pid);
+
     HANDLE hProc = OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!hProc) return;
 
@@ -434,7 +461,7 @@ void MemoryOptimizer::RunThread() {
                 for (int i=0; i<5 && m_running; i++) Sleep(1000); 
             }
 
-            // [SUPERIOR] Constantly reinforce the Shield on the active game
+            // Constantly reinforce the Shield on the active game
             // [FIX] Strict Discrimination: Only Harden (Pin) if it is actually a GAME.
             // Browsers (which are also "Targets" for mitigation) must NEVER be pinned.
             bool isGame = false;

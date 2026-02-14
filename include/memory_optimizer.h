@@ -77,6 +77,7 @@ private:
     // State
     std::atomic<bool> m_running;
     std::map<DWORD, ProcessState> m_processTracker;
+    std::vector<DWORD> m_hardenedPids; // [TRACK] Keep track of locked games
     std::chrono::steady_clock::time_point m_lastPurgeTime;
     
     PDH_HQUERY m_pdhQuery;
