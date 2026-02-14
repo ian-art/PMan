@@ -24,6 +24,8 @@
 #include <atomic>
 #include <mutex>
 #include <thread> // Required for m_worker
+#include <unordered_set>
+#include <string>
 
 class InputGuardian {
 public:
@@ -40,11 +42,17 @@ public:
     void SetGameMode(bool enabled);
     bool IsGameModeActive() const { return m_blockingEnabled; }
 
+    // Update list of games that trigger the hook
+    void UpdateHookTargets(const std::unordered_set<std::wstring>& targets);
+
 private:
+    std::unordered_set<std::wstring> m_hookTargets;
+    mutable std::mutex m_cacheMtx; // [FIX] Thread safety for target list
     std::atomic<bool> m_active{false};
     DWORD m_dwmPid{0};
     
     // Input Interference Blocking
+    HHOOK m_hKeyHook{nullptr};
     STICKYKEYS m_startupSticky{sizeof(STICKYKEYS), 0};
     TOGGLEKEYS m_startupToggle{sizeof(TOGGLEKEYS), 0};
     FILTERKEYS m_startupFilter{sizeof(FILTERKEYS), 0};
@@ -59,6 +67,8 @@ private:
     
     // Managed Worker Threads
     std::thread m_worker;
+    std::thread m_hookThread;
+    std::atomic<DWORD> m_hookThreadId{0};
 
     // Boost Logic
     void ApplyResponsivenessBoost();
