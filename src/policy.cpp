@@ -585,7 +585,16 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                 if (g_oldGames.count(exe)) {
                     mode = 1; 
                     forceOverride = true;
-                    Log("Force-enabling GAME mode for Legacy/DX9 title: " + WideToUtf8(exe.c_str()));
+                    
+                    // [FIX] Anti-Spam: Only log if we aren't already tracking this PID in Game Mode
+                    uint64_t currentPolicy = g_policyState.load(std::memory_order_relaxed);
+                    DWORD currentPid = static_cast<DWORD>(currentPolicy >> 32);
+                    int currentMode = static_cast<int>(currentPolicy & 0xFFFFFFFF);
+
+                    if (currentPid != pid || currentMode != 1) {
+                        Log("Force-enabling GAME mode for Legacy/DX9 title: " + WideToUtf8(exe.c_str()));
+                    }
+                    
                     // Jump to policy application to skip generic heuristics
                     goto apply_policy;
                 }
