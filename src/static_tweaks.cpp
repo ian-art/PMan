@@ -30,9 +30,12 @@
 #include <iomanip>
 #include <taskschd.h>
 #include <comdef.h>
+#include <powersetting.h>
+#include <powrprof.h>
 
 #pragma comment(lib, "taskschd.lib")
 #pragma comment(lib, "comsupp.lib")
+#pragma comment(lib, "PowrProf.lib")
 
 // Define custom flag for Delayed Start since it's not a standard single API value
 #ifndef SERVICE_DELAYED_AUTO_START
@@ -316,6 +319,46 @@ static void EnumerateAndConfigureUserServices(const wchar_t* pattern, DWORD star
 
 // [Removed local DisableScheduledTask to use shared implementation from utils.cpp]
 
+// Helper to use Native Power APIs instead of spawning suspicious powercfg.exe processes
+static void ApplyNativePowerTweaks()
+{
+    GUID* activeScheme = nullptr;
+    if (PowerGetActiveScheme(nullptr, &activeScheme) != ERROR_SUCCESS) {
+        Log("[ERROR] Failed to resolve active power scheme via API.");
+        return;
+    }
+
+    // Subgroup: Processor Settings {54533251-82be-4824-96c1-47b60b740d00}
+    const GUID GUID_PROC_SUBGROUP = { 0x54533251, 0x82be, 0x4824, { 0x96, 0xc1, 0x47, 0xb6, 0x0b, 0x74, 0x0d, 0x00 } };
+    
+    // PERFENERGYBIAS (EPP) {36687f9e-e3a5-4dbf-b1dc-15eb381c6863}
+    const GUID GUID_EPP = { 0x36687f9e, 0xe3a5, 0x4dbf, { 0xb1, 0xdc, 0x15, 0xeb, 0x38, 0x1c, 0x68, 0x63 } };
+
+    // Core Parking Min {0cc5b647-c1df-4637-891a-dec35c318583}
+    const GUID GUID_PARK_MIN = { 0x0cc5b647, 0xc1df, 0x4637, { 0x89, 0x1a, 0xde, 0xc3, 0x5c, 0x31, 0x85, 0x83 } };
+
+    // Core Parking Max {ea062031-0e34-4ff1-9b6d-eb1059334028}
+    const GUID GUID_PARK_MAX = { 0xea062031, 0x0e34, 0x4ff1, { 0x9b, 0x6d, 0xeb, 0x10, 0x59, 0x33, 0x40, 0x28 } };
+
+    // 1. Force Performance EPP (0)
+    DWORD eppValue = 0;
+    PowerWriteACValueIndex(nullptr, activeScheme, &GUID_PROC_SUBGROUP, &GUID_EPP, eppValue);
+
+    // 2. Disable Core Parking (Min/Max = 100%)
+    DWORD corePct = 100;
+    PowerWriteACValueIndex(nullptr, activeScheme, &GUID_PROC_SUBGROUP, &GUID_PARK_MIN, corePct);
+    PowerWriteACValueIndex(nullptr, activeScheme, &GUID_PROC_SUBGROUP, &GUID_PARK_MAX, corePct);
+
+    // 3. Activate Changes
+    if (PowerSetActiveScheme(nullptr, activeScheme) == ERROR_SUCCESS) {
+        Log("[TWEAK] Applied Native Power Settings (EPP 0, Unparked Cores).");
+    } else {
+        Log("[ERROR] Failed to activate power scheme.");
+    }
+
+    LocalFree(activeScheme);
+}
+
 // --------------------------------------------------------------------------------
 // MAIN TWEAK LOGIC
 // --------------------------------------------------------------------------------
@@ -587,13 +630,8 @@ bool ApplyStaticTweaks(const TweakConfig& config)
     // ============================================================================
     Log("[TWEAK] Applying Power & Boot settings...");
     
-    // [FIX] Force Performance EPP (Energy Performance Preference) -> 0
-    RunSilentCommand(L"powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PERFENERGYBIAS 0");
-    RunSilentCommand(L"powercfg /setactive SCHEME_CURRENT");
-
-    // [FIX] Disable Core Parking (Min/Max Cores = 100%)
-    RunSilentCommand(L"powercfg -setacvalueindex SCHEME_CURRENT SUB_PROCESSOR CPMINCORES 100");
-    RunSilentCommand(L"powercfg -setacvalueindex SCHEME_CURRENT SUB_PROCESSOR CPMAXCORES 100");
+    // [FIX] Force Performance EPP & Disable Core Parking via Native API (Avoids AV Flags)
+    ApplyNativePowerTweaks();
 
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\BootControl", L"BootProgressAnimation", 1);
     ConfigureRegistry(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Citrix", L"EnableVisualEffect", 1);
