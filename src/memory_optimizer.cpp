@@ -435,9 +435,19 @@ void MemoryOptimizer::RunThread() {
             }
 
             // [SUPERIOR] Constantly reinforce the Shield on the active game
-            // This ensures that as the game loads more assets (level streaming),
-            // the "Hard Minimum" floor rises to protect the new data.
-            HardenProcess(fgPid);
+            // [FIX] Strict Discrimination: Only Harden (Pin) if it is actually a GAME.
+            // Browsers (which are also "Targets" for mitigation) must NEVER be pinned.
+            bool isGame = false;
+            {
+                std::shared_lock<std::shared_mutex> lock(g_setMtx);
+                if (g_games.find(fgName) != g_games.end()) isGame = true;
+            }
+
+            if (isGame) {
+                // This ensures that as the game loads more assets (level streaming),
+                // the "Hard Minimum" floor rises to protect the new data.
+                HardenProcess(fgPid);
+            }
 
         } else {
             // Passive cleanup for map to prevent memory leaks
