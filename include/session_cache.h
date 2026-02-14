@@ -91,6 +91,9 @@ public:
     bool ValidateIdentity(DWORD livePid) const;
     bool ValidateIdentity(DWORD livePid, HANDLE hProc) const; // Optimization overload
 
+    // [lifecycle] Asynchronous Invalidation
+    static void CALLBACK OnProcessExit(PVOID lpParameter, BOOLEAN TimerOrWaitFired);
+
     // Observability
     void RecordHit() const { m_hits.fetch_add(1, std::memory_order_relaxed); }
     void RecordMiss() const { m_misses.fetch_add(1, std::memory_order_relaxed); }
@@ -109,7 +112,11 @@ private:
     std::unique_ptr<CachedOsFlags> m_osFlags;
     std::unique_ptr<CachedProcessData> m_processData;
 
-    bool m_isValid = false;
+    // [lifecycle] RAII & Event Handling
+    UniqueHandle m_hProcess;
+    HANDLE m_hWait = nullptr;
+
+    std::atomic<bool> m_isValid = false;
 
     // Mutable counters for const-correct telemetry
     mutable std::atomic<uint64_t> m_hits{0};

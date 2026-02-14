@@ -39,6 +39,14 @@ SessionSmartCache::SessionSmartCache(DWORD pid) {
     m_processData = std::make_unique<CachedProcessData>(pid, 0, L"", L"");
     
     InitializeSnapshot();
+
+    // [Analysis Fix] Hook process exit event
+    if (m_isValid && m_hProcess) {
+        if (!RegisterWaitForSingleObject(&m_hWait, m_hProcess.get(), 
+            &SessionSmartCache::OnProcessExit, this, INFINITE, WT_EXECUTEONLYONCE)) {
+            Log("[CACHE] Warning: Failed to register exit hook.");
+        }
+    }
     
     if (m_isValid) {
         EnforceMemoryLimits();
@@ -46,6 +54,12 @@ SessionSmartCache::SessionSmartCache(DWORD pid) {
 }
 
 SessionSmartCache::~SessionSmartCache() {
+    // [Lifecycle] Unregister wait before destruction (Blocking safe-guard)
+    if (m_hWait) {
+        UnregisterWaitEx(m_hWait, INVALID_HANDLE_VALUE);
+        m_hWait = nullptr;
+    }
+
     // Summary Statistics on Destruction
     if (g_hCacheProvider) {
         std::wstring etwMsg = L"Cache Destroyed. Hits: " + std::to_wstring(m_hits) + L" Misses: " + std::to_wstring(m_misses);
@@ -121,13 +135,16 @@ void SessionSmartCache::InitializeSnapshot() {
     std::wstring canonicalPath = L"";
     std::wstring name = L"";
 
-    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    // [Patch] Retain handle with SYNCHRONIZE for invalidation hooks
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
     if (!hProc) {
         Log("[CACHE] ERROR: Failed to open process. PID: " + std::to_string(pid));
         return; // m_isValid remains false
     }
+    m_hProcess.reset(hProc); // RAII ownership
 
     FILETIME ftCreate, ftExit, ftKernel, ftUser;
+    // Note: Use the raw handle for initialization, it is owned by m_hProcess now.
     if (!GetProcessTimes(hProc, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
         Log("[CACHE] ERROR: Failed to get process times.");
         CloseHandle(hProc);
@@ -145,7 +162,7 @@ void SessionSmartCache::InitializeSnapshot() {
     
     asciiLower(canonicalPath);
     name = ExeFromPath(canonicalPath.c_str());
-    CloseHandle(hProc);
+    // CloseHandle(hProc); // Removed: Handle is now managed by m_hProcess (RAII)
 
     // Commit Process Data
     m_processData = std::make_unique<CachedProcessData>(pid, createTime, canonicalPath, name);
@@ -179,6 +196,14 @@ void SessionSmartCache::EnforceMemoryLimits() {
     }
 }
 
+void CALLBACK SessionSmartCache::OnProcessExit(PVOID lpParameter, BOOLEAN) {
+    auto* self = static_cast<SessionSmartCache*>(lpParameter);
+    if (self) {
+        // Atomic invalidation from worker thread
+        self->m_isValid = false;
+    }
+}
+
 bool SessionSmartCache::ValidateIdentity(DWORD livePid) const {
     // Fail immediately if cache is invalid
     if (!m_isValid) return false;
@@ -188,16 +213,17 @@ bool SessionSmartCache::ValidateIdentity(DWORD livePid) const {
         return false;
     }
     
-    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, livePid);
-    if (!hProc) {
+    // [Optimization] Use retained handle (Analysis Fix 17)
+    // This avoids OpenProcess/CloseHandle on every check.
+    if (!m_hProcess) {
         RecordMiss();
-        return false; 
+        return false;
     }
 
     bool match = false;
     
     FILETIME ftCreate, ftExit, ftKernel, ftUser;
-    if (GetProcessTimes(hProc, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+    if (GetProcessTimes(m_hProcess.get(), &ftCreate, &ftExit, &ftKernel, &ftUser)) {
         uint64_t liveCreateTime = FileTimeToULL(ftCreate);
         
         // Primary Anti-Reuse Check
@@ -212,7 +238,6 @@ bool SessionSmartCache::ValidateIdentity(DWORD livePid) const {
         RecordMiss();
     }
     
-    CloseHandle(hProc);
     return match;
 }
 
