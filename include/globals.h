@@ -42,6 +42,9 @@
 #include <condition_variable>
 #include <chrono>
 
+// Global Configuration Lists
+extern std::unordered_set<std::wstring> g_keyBlockList;
+
 // Service Manager
 #define g_serviceManager (*PManContext::Get().subs.serviceMgr)
 #define g_servicesSuspended (PManContext::Get().servicesSuspended)

@@ -25,6 +25,8 @@
 #include <filesystem>
 #include <thread>
 #include <iostream>
+#include <algorithm>
+#include <shared_mutex>
 
 // UpdateLedger logic moved to Shared Utils (UpdateSessionLedger)
 
@@ -75,6 +77,31 @@ void ResponsivenessManager::Update() {
             if (QueryFullProcessImageNameW(hProcCheck.get(), 0, path, &sz)) {
                 std::wstring name = ExeFromPath(path);
                 if (IsSystemCriticalProcess(name)) return;
+
+                // Check User Exclusions (Games, Targets, Ignored)
+                {
+                    std::wstring lower = name;
+                    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+                    
+                    std::shared_lock<std::shared_mutex> setLock(g_setMtx); // Renamed to setLock
+
+                    // Helper to check all lists
+                    auto IsExcluded = [&](const std::wstring& key) {
+                        return g_games.count(key) || g_oldGames.count(key) || 
+                               g_keyBlockList.count(key) || g_ignoredProcesses.count(key);
+                    };
+
+                    if (IsExcluded(lower)) return;
+
+                    // [FIX] Handle games running as .dat/.bin but configured as .exe
+                    // e.g. cnc3ep1.dat -> check for cnc3ep1.exe
+                    std::filesystem::path p(lower);
+                    std::wstring ext = p.extension().wstring();
+                    if (ext == L".dat" || ext == L".bin" || ext == L".tmp") {
+                        std::wstring proxy = p.replace_extension(L".exe").wstring();
+                        if (IsExcluded(proxy)) return;
+                    }
+                }
             }
         }
 
