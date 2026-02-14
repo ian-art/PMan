@@ -26,42 +26,7 @@
 #include "services.h" // Required for Service Suspension
 #include "tweaks.h" // Required for SetProcessIoPriority
 
-// [SECURITY PATCH] Helper to maintain the Shared Ledger
-static void UpdateLeaseLedger(DWORD pid, DWORD prio, DWORD_PTR affinity, bool active) {
-    UniqueHandle hMap(CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(LeaseLedger), L"Local\\PManSessionLedger"));
-    if (!hMap) return;
-    
-    // We map only briefly to update state
-    LeaseLedger* ledger = (LeaseLedger*)MapViewOfFile(hMap.get(), FILE_MAP_ALL_ACCESS, 0, 0, sizeof(LeaseLedger));
-    if (ledger) {
-        if (active) {
-            // FIND FREE SLOT
-            for (int i = 0; i < LeaseLedger::MAX_LEASES; i++) {
-                if (!ledger->entries[i].isActive) {
-                    ledger->entries[i].pid = pid;
-                    ledger->entries[i].originalPriority = prio;
-                    ledger->entries[i].originalAffinity = affinity;
-                    ledger->entries[i].leaseStartTime = GetTickCount64();
-                    ledger->entries[i].isActive = true;
-                    break;
-                }
-            }
-        } else {
-            // REMOVE ENTRY
-            for (int i = 0; i < LeaseLedger::MAX_LEASES; i++) {
-                if (ledger->entries[i].isActive && ledger->entries[i].pid == pid) {
-                    ledger->entries[i].isActive = false;
-                    break;
-                }
-            }
-        }
-        UnmapViewOfFile(ledger);
-    }
-    // Handle is closed immediately; the Mapping object persists if other handles (Watchdog) are open,
-    // or destroys if count=0. We rely on Watchdog opening it when needed or keeping it open.
-    // Ideally, PManContext should hold the handle, but this stateless approach suffices for crash recovery.
-    // hMap.reset(); // Auto-closed by UniqueHandle
-}
+// UpdateLeaseLedger logic moved to Shared Utils (UpdateSessionLedger)
 
 // [SECURITY PATCH] Immutable Core List ("Trusted Assassin" Mitigation)
 // [IMPORT] Re-use the robust heuristic from services.cpp (Move to utils or duplicate here)
@@ -338,7 +303,7 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         
         // [SECURITY PATCH] Update Shared Ledger for Crash Recovery
         if (m_originalPriorityClass != 0) {
-            UpdateLeaseLedger(targetPid, m_originalPriorityClass, 0, true);
+            UpdateSessionLedger(targetPid, m_originalPriorityClass, 0, true);
         }
 
         // COMMIT: We do NOT rollback automatically.
@@ -374,7 +339,7 @@ void SandboxExecutor::Rollback() {
         SetPriorityClass(m_hTarget.get(), m_originalPriorityClass);
         
         // [SECURITY PATCH] Clear from Ledger
-        UpdateLeaseLedger(GetProcessId(m_hTarget.get()), 0, 0, false);
+        UpdateSessionLedger(GetProcessId(m_hTarget.get()), 0, 0, false);
 
         m_actionApplied = false;
         

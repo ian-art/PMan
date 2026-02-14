@@ -118,4 +118,7 @@ bool IsWindowHung(HWND hwnd);
 // Helper to convert Icon to 32-bit PARGB Bitmap for Menus
 HBITMAP IconToBitmapPARGB32(HINSTANCE hInst, UINT uIconId, int cx, int cy);
 
+// Shared Ledger Management (Centralized for ResponsivenessManager & SandboxExecutor)
+void UpdateSessionLedger(DWORD pid, DWORD prio, DWORD_PTR affinity, bool active);
+
 #endif // PMAN_UTILS_H

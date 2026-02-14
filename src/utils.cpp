@@ -635,3 +635,36 @@ HBITMAP IconToBitmapPARGB32(HINSTANCE hInst, UINT uIconId, int cx, int cy)
     }
     return hBmp;
 }
+
+// Shared Ledger Management Implementation
+void UpdateSessionLedger(DWORD pid, DWORD prio, DWORD_PTR affinity, bool active) {
+    // [RAII] Use UniqueHandle for file mapping
+    UniqueHandle hMap(CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(LeaseLedger), L"Local\\PManSessionLedger"));
+    if (!hMap) return;
+
+    LeaseLedger* ledger = (LeaseLedger*)MapViewOfFile(hMap.get(), FILE_MAP_ALL_ACCESS, 0, 0, sizeof(LeaseLedger));
+    if (ledger) {
+        if (active) {
+            // FIND FREE SLOT
+            for (int i = 0; i < LeaseLedger::MAX_LEASES; i++) {
+                if (!ledger->entries[i].isActive) {
+                    ledger->entries[i].pid = pid;
+                    ledger->entries[i].originalPriority = prio;
+                    ledger->entries[i].originalAffinity = affinity;
+                    ledger->entries[i].leaseStartTime = GetTickCount64();
+                    ledger->entries[i].isActive = true;
+                    break;
+                }
+            }
+        } else {
+            // REMOVE ENTRY
+            for (int i = 0; i < LeaseLedger::MAX_LEASES; i++) {
+                if (ledger->entries[i].isActive && ledger->entries[i].pid == pid) {
+                    ledger->entries[i].isActive = false;
+                    break;
+                }
+            }
+        }
+        UnmapViewOfFile(ledger);
+    }
+}
