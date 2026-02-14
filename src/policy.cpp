@@ -86,77 +86,109 @@ static std::vector<DWORD> GetChildProcesses(DWORD parentPid) {
     return children;
 }
 
-// Helper: Apply Boost or Efficiency Mode to a process tree
-static void ApplySmartBrowserPolicy(DWORD pid, bool isForeground) {
+// [ARCHITECTURE] Decoupled Action Request for Sandbox Compliance
+struct BrowserPolicyRequest {
+    DWORD pid;
+    DWORD priorityClass;
+    bool enableEcoQoS;
+    ULONG ioPriority;
+};
+
+// Phase 1: Planning (Safe, Read-Only Analysis)
+static std::vector<BrowserPolicyRequest> PlanSmartBrowserPolicy(DWORD pid, bool isForeground) {
+    std::vector<BrowserPolicyRequest> requests;
     std::vector<DWORD> targets = GetChildProcesses(pid);
-    targets.push_back(pid); // Include main process
+    targets.push_back(pid); 
 
     for (DWORD targetPid : targets) {
-        // [FIX] Request QUERY access to check for GPU/Utility processes
-        HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
-        if (hProc) {
-            bool isCritical = false;
-            
-            // Check process type to avoid throttling GPU/Audio when in background
-            if (!isForeground) {
-                static PNT_QUERY_INFO_PROCESS NtQueryInfo = (PNT_QUERY_INFO_PROCESS)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationProcess");
-                if (NtQueryInfo) {
-                    ULONG len = 0;
-                    NtQueryInfo(hProc, (PROCESS_INFORMATION_CLASS)ProcessCommandLineInformation, nullptr, 0, &len);
-                    if (len > 0) {
-                        std::vector<BYTE> buf(len);
-                        if (NtQueryInfo(hProc, (PROCESS_INFORMATION_CLASS)ProcessCommandLineInformation, buf.data(), len, &len) >= 0) {
-                            auto info = reinterpret_cast<PROCESS_COMMAND_LINE_INFO*>(buf.data());
-                            if (info->CommandLine.Buffer && info->CommandLine.Length > 0) {
-                                std::wstring cmd(info->CommandLine.Buffer, info->CommandLine.Length / sizeof(wchar_t));
-                                // Critical browser processes that must NOT sleep
-                                if (cmd.find(L"type=gpu-process") != std::wstring::npos || 
-                                    cmd.find(L"type=utility") != std::wstring::npos) {
-                                    isCritical = true;
-                                }
+        // Open with QUERY only - Safe analysis
+        HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
+        if (!hProc) continue;
+
+        bool isCritical = false;
+        
+        // Check process type to avoid throttling GPU/Audio when in background
+        if (!isForeground) {
+            static PNT_QUERY_INFO_PROCESS NtQueryInfo = (PNT_QUERY_INFO_PROCESS)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationProcess");
+            if (NtQueryInfo) {
+                ULONG len = 0;
+                NtQueryInfo(hProc, (PROCESS_INFORMATION_CLASS)ProcessCommandLineInformation, nullptr, 0, &len);
+                if (len > 0) {
+                    std::vector<BYTE> buf(len);
+                    if (NtQueryInfo(hProc, (PROCESS_INFORMATION_CLASS)ProcessCommandLineInformation, buf.data(), len, &len) >= 0) {
+                        auto info = reinterpret_cast<PROCESS_COMMAND_LINE_INFO*>(buf.data());
+                        if (info->CommandLine.Buffer && info->CommandLine.Length > 0) {
+                            std::wstring cmd(info->CommandLine.Buffer, info->CommandLine.Length / sizeof(wchar_t));
+                            // Critical browser processes that must NOT sleep
+                            if (cmd.find(L"type=gpu-process") != std::wstring::npos || 
+                                cmd.find(L"type=utility") != std::wstring::npos) {
+                                isCritical = true;
                             }
                         }
                     }
                 }
             }
+        }
+        CloseHandle(hProc);
+
+        BrowserPolicyRequest req = {};
+        req.pid = targetPid;
+        
+        if (isForeground) {
+            // FOREGROUND: High Performance
+            req.priorityClass = ABOVE_NORMAL_PRIORITY_CLASS;
+            req.enableEcoQoS = false;
+            req.ioPriority = 2; // Normal
+        } else {
+            // BACKGROUND
+            if (isCritical) {
+                // Critical background processes (GPU/Audio): Keep responsive
+                req.priorityClass = BELOW_NORMAL_PRIORITY_CLASS;
+                req.enableEcoQoS = false;
+                req.ioPriority = 2; // Normal
+            } else {
+                // Renderers/Tabs: Deep Sleep
+                req.priorityClass = IDLE_PRIORITY_CLASS;
+                req.enableEcoQoS = true;
+                req.ioPriority = 0; // Very Low
+            }
+        }
+        requests.push_back(req);
+    }
+    return requests;
+}
+
+// Phase 2: Execution (The Actuation Layer)
+// [TODO] Move this logic to SandboxExecutor::ExecuteBrowserPolicy
+static void ExecuteBrowserPolicy(const std::vector<BrowserPolicyRequest>& requests) {
+    static PNT_SET_INFO_PROCESS NtSetInfo = (PNT_SET_INFO_PROCESS)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetInformationProcess");
+
+    for (const auto& req : requests) {
+        HANDLE hProc = OpenProcess(PROCESS_SET_INFORMATION, FALSE, req.pid);
+        if (hProc) {
+            SetPriorityClass(hProc, req.priorityClass);
 
             PROCESS_POWER_THROTTLING_STATE PowerThrottling = {};
             PowerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
             PowerThrottling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+            PowerThrottling.StateMask = req.enableEcoQoS ? PROCESS_POWER_THROTTLING_EXECUTION_SPEED : 0;
+            
+            SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
 
-            if (isForeground) {
-                // FOREGROUND: High Performance
-                SetPriorityClass(hProc, ABOVE_NORMAL_PRIORITY_CLASS); 
-                PowerThrottling.StateMask = 0; // DISABLE Efficiency Mode
-                SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
-            } else {
-                // BACKGROUND
-                if (isCritical) {
-                    // [FIX] Critical background processes (GPU/Audio): Keep responsive
-                    SetPriorityClass(hProc, BELOW_NORMAL_PRIORITY_CLASS); 
-                    PowerThrottling.StateMask = 0; // DISABLE Efficiency Mode (Crucial for Video/Audio)
-                    SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
-                } else {
-                    // [FIX] Renderers/Tabs: Deep Sleep
-                    SetPriorityClass(hProc, IDLE_PRIORITY_CLASS);
-                    PowerThrottling.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED; // ENABLE Efficiency Mode
-                    SetProcessInformation(hProc, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
-                }
-            }
-
-            // [OPTIMIZATION] Set I/O Priority silently using existing handle
-            static PNT_SET_INFO_PROCESS NtSetInfo = (PNT_SET_INFO_PROCESS)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetInformationProcess");
             if (NtSetInfo) {
-                // Keep Normal I/O for critical processes to prevent audio/video dropouts
-                ULONG ioPriority = (isForeground || isCritical) ? 2 : 0; // 2=Normal, 0=VeryLow
-                NtSetInfo(hProc, ProcessIoPriority, &ioPriority, sizeof(ioPriority));
+                ULONG pri = req.ioPriority;
+                NtSetInfo(hProc, ProcessIoPriority, &pri, sizeof(pri));
             }
-
             CloseHandle(hProc);
         }
     }
-    // Log summary instead of per-process spam
-    if (isForeground) Log("[BROWSER] Boosted " + std::to_string(targets.size()) + " processes");
+}
+
+// Helper: Apply Boost or Efficiency Mode to a process tree
+static void ApplySmartBrowserPolicy(DWORD pid, bool isForeground) {
+    auto plan = PlanSmartBrowserPolicy(pid, isForeground);
+    ExecuteBrowserPolicy(plan);
+    if (isForeground) Log("[BROWSER] Boosted " + std::to_string(plan.size()) + " processes");
 }
 // POLICY WORKER QUEUE INFRASTRUCTURE
 // ============================================
