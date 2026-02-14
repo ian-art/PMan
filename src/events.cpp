@@ -298,27 +298,41 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
         if (opcode == 1) // Process Start
         {
             // [CIRCUIT BREAKER] Identification
-            // Check if this new process is critical (csrss, lsass, etc)
-            // We do this once at startup/creation to avoid overhead on Exit
-            static const std::vector<std::wstring> CRITICAL_NAMES = {
+            // True System Criticals (Triggers Emergency Revert on Exit)
+            static const std::vector<std::wstring> SYSTEM_CRITICAL = {
                 L"csrss.exe", L"lsass.exe", L"services.exe", 
-                L"wininit.exe", L"winlogon.exe", L"dwm.exe",
-                // [FIX] Whitelist Start Menu and Basic Utilities to prevent UI lag
+                L"wininit.exe", L"winlogon.exe", L"dwm.exe"
+            };
+            
+            // Policy Exemptions (Skips Optimization, but NO Breaker Trigger)
+            static const std::vector<std::wstring> POLICY_EXEMPT = {
                 L"StartMenuExperienceHost.exe", L"ShellExperienceHost.exe", 
                 L"SearchApp.exe", L"TextInputHost.exe", L"notepad.exe"
             };
 
-            bool isCritical = false; // [FIX] Track critical status
+            bool isPolicyExempt = false; 
             std::wstring imgName = GetProcessNameFromPid(pid); 
+            
             if (!imgName.empty()) {
-                for (const auto& crit : CRITICAL_NAMES) {
+                // Check System Critical -> Add to Breaker
+                for (const auto& crit : SYSTEM_CRITICAL) {
                     if (ContainsIgnoreCase(imgName, crit)) {
                         {
                             std::lock_guard lock(g_criticalPidsMtx);
                             g_criticalPids.insert(pid);
                         }
-                        isCritical = true; // [FIX] Mark as critical
+                        isPolicyExempt = true; // Implicitly exempt
                         break;
+                    }
+                }
+                
+                // Check Explicit Exemptions (if not already critical)
+                if (!isPolicyExempt) {
+                    for (const auto& exempt : POLICY_EXEMPT) {
+                        if (ContainsIgnoreCase(imgName, exempt)) {
+                            isPolicyExempt = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -361,8 +375,8 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
                 g_processHierarchy[identity] = node;
             }
 
-            // [FIX] Skip policy enforcement for critical shell components
-            if (!isCritical) {
+            // [FIX] Skip policy enforcement for critical/exempt components
+            if (!isPolicyExempt) {
                 PostIocp(JobType::Policy, pid);
             }
         }
