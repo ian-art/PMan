@@ -43,6 +43,13 @@ public:
     // State Query for Safety Layers
     bool IsLeaseActive() const;
 
+    // [ACTUATION] Centralized Safety Primitives
+    // Static wrappers that strictly enforce the "Sandbox Barrier" logic (Immutable/Protected checks)
+    // These allow other subsystems (Policy) to actuate without bypassing safety.
+    static bool EnforceEcoQoS(DWORD pid, bool enable);
+    static bool EnforceAffinity(DWORD pid, DWORD_PTR mask);
+    static bool EnforceTrim(DWORD pid);
+
     ~SandboxExecutor();
 
 private:

@@ -25,6 +25,20 @@
 #include "globals.h"
 #include "services.h" // Required for Service Suspension
 #include "tweaks.h" // Required for SetProcessIoPriority
+#include "nt_wrapper.h"
+#include <psapi.h>
+
+// [DEFINITIONS] Power Throttling (EcoQoS)
+#ifndef PROCESS_POWER_THROTTLING_CURRENT_VERSION
+#define PROCESS_POWER_THROTTLING_CURRENT_VERSION 1
+#define PROCESS_POWER_THROTTLING_EXECUTION_SPEED 0x1
+#define ProcessPowerThrottling (static_cast<PROCESS_INFORMATION_CLASS>(4))
+typedef struct _PROCESS_POWER_THROTTLING_STATE {
+    ULONG Version;
+    ULONG ControlMask;
+    ULONG StateMask;
+} PROCESS_POWER_THROTTLING_STATE, *PPROCESS_POWER_THROTTLING_STATE;
+#endif
 
 // UpdateLeaseLedger logic moved to Shared Utils (UpdateSessionLedger)
 
@@ -366,4 +380,67 @@ SandboxExecutor::~SandboxExecutor() {
 bool SandboxExecutor::IsReversible(BrainAction action) const {
     // Helper used for pre-checks, though logic is now embedded in TryExecute
     return (action == BrainAction::Throttle_Mild || action == BrainAction::Maintain);
+}
+
+// ----------------------------------------------------------------------
+// [ACTUATION] Centralized Safety Primitives Implementation
+// ----------------------------------------------------------------------
+
+bool SandboxExecutor::EnforceEcoQoS(DWORD pid, bool enable) {
+    if (pid <= 4) return false;
+    
+    // 1. Open Handle
+    UniqueHandle hProc(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (!hProc) return false;
+
+    // 2. Security Check (The Gatekeeper)
+    if (IsImmutableSystemProcess(hProc.get())) {
+        Log("[SANDBOX] Blocked EcoQoS on Immutable Process: " + std::to_string(pid));
+        return false;
+    }
+
+    // 3. Actuate
+    PROCESS_POWER_THROTTLING_STATE PowerThrottling = {};
+    PowerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    PowerThrottling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    PowerThrottling.StateMask = enable ? PROCESS_POWER_THROTTLING_EXECUTION_SPEED : 0;
+
+    if (SetProcessInformation(hProc.get(), ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling))) {
+        return true;
+    }
+    return false;
+}
+
+bool SandboxExecutor::EnforceAffinity(DWORD pid, DWORD_PTR mask) {
+    if (pid <= 4 || mask == 0) return false;
+
+    UniqueHandle hProc(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (!hProc) return false;
+
+    if (IsImmutableSystemProcess(hProc.get())) {
+        Log("[SANDBOX] Blocked Affinity Change on Immutable Process: " + std::to_string(pid));
+        return false;
+    }
+
+    if (SetProcessAffinityMask(hProc.get(), mask)) {
+        return true;
+    }
+    return false;
+}
+
+bool SandboxExecutor::EnforceTrim(DWORD pid) {
+    if (pid <= 4) return false;
+
+    // QUOTA rights required for Working Set
+    UniqueHandle hProc(OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (!hProc) return false;
+
+    if (IsImmutableSystemProcess(hProc.get())) {
+        return false;
+    }
+
+    if (EmptyWorkingSet(hProc.get())) {
+        return true;
+    }
+    return false;
 }
