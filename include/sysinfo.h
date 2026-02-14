@@ -41,4 +41,7 @@ bool DetectGameIoPrioritySupport();
 
 AffinityStrategy GetRecommendedStrategy();
 
+// Real-time System Metrics
+double GetSystemCpuLoad();
+
 #endif // PMAN_SYSINFO_H

@@ -1157,3 +1157,25 @@ DWORD_PTR GetOptimizationTargetCores()
     Log("[CORE] Selection failed validation (Indices collided with Core 0)");
     return 0;
 }
+
+double GetSystemCpuLoad()
+{
+    static uint64_t prevTotal = 0, prevIdle = 0;
+    FILETIME idle, kernel, user;
+    
+    if (!GetSystemTimes(&idle, &kernel, &user)) return 0.0;
+
+    uint64_t tIdle = ((uint64_t)idle.dwHighDateTime << 32) | idle.dwLowDateTime;
+    uint64_t tKernel = ((uint64_t)kernel.dwHighDateTime << 32) | kernel.dwLowDateTime;
+    uint64_t tUser = ((uint64_t)user.dwHighDateTime << 32) | user.dwLowDateTime;
+    uint64_t tTotal = tKernel + tUser;
+
+    uint64_t diffTotal = tTotal - prevTotal;
+    uint64_t diffIdle = tIdle - prevIdle;
+
+    prevTotal = tTotal;
+    prevIdle = tIdle;
+
+    if (diffTotal == 0) return 0.0;
+    return (1.0 - ((double)diffIdle / diffTotal)) * 100.0;
+}

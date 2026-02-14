@@ -114,32 +114,13 @@ static uint64_t g_resumeStabilizationTime = 0; // Replaces detached sleep thread
 
 // --- Authoritative Control Loop ---
 
-// Helper: Calculate CPU Load locally since SysInfo wrapper is unavailable
-static double GetLocalCpuLoad() {
-    static uint64_t prevTotal = 0, prevIdle = 0;
-    FILETIME idle, kernel, user;
-    if (!GetSystemTimes(&idle, &kernel, &user)) return 0.0;
-
-    uint64_t tIdle = ((uint64_t)idle.dwHighDateTime << 32) | idle.dwLowDateTime;
-    uint64_t tKernel = ((uint64_t)kernel.dwHighDateTime << 32) | kernel.dwLowDateTime;
-    uint64_t tUser = ((uint64_t)user.dwHighDateTime << 32) | user.dwLowDateTime;
-    uint64_t tTotal = tKernel + tUser;
-
-    uint64_t diffTotal = tTotal - prevTotal;
-    uint64_t diffIdle = tIdle - prevIdle;
-
-    prevTotal = tTotal;
-    prevIdle = tIdle;
-
-    if (diffTotal == 0) return 0.0;
-    return (1.0 - ((double)diffIdle / diffTotal)) * 100.0;
-}
+// [REF] CPU Load logic moved to SysInfo
 
 static SystemSignalSnapshot CaptureSnapshot() {
     SystemSignalSnapshot snap = {};
     
-    // 1. CPU Load (Fixed: Use local helper)
-    snap.cpuLoad = GetLocalCpuLoad();
+    // 1. CPU Load
+    snap.cpuLoad = GetSystemCpuLoad();
 
     // 2. Memory Pressure
     MEMORYSTATUSEX mem = { sizeof(mem) };
