@@ -65,6 +65,7 @@ class PolicyGuard;       // Policy Boundary Contract
 class ExternalVerdict;   // External Verdict Interface
 class Investigator;      // The System Detective
 class IpcServer;         // Secure IPC
+class TelemetryAgent;    // Forward Declaration
 
 class PManContext {
 public:
@@ -235,6 +236,10 @@ public:
 
     // -- Subsystems (Owned Singletons) --
     struct SubsystemState {
+        // [FIX] Explicit ctor/dtor to allow unique_ptr to incomplete types (PIMPL)
+        SubsystemState();
+        ~SubsystemState();
+
         std::unique_ptr<WindowsServiceManager> serviceMgr;
         std::unique_ptr<PerformanceGuardian>   perf;
         std::unique_ptr<ExplorerBooster>       explorer;
@@ -261,6 +266,7 @@ public:
         std::unique_ptr<ExternalVerdict>       verdict;   // External Verdict Interface
         std::unique_ptr<Investigator>          investigator; // The System Detective
         std::unique_ptr<IpcServer>             ipc;          // Secure IPC Core
+        std::unique_ptr<TelemetryAgent>        telemetry;    // Non-blocking Telemetry
     } subs;
 
 private:

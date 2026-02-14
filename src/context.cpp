@@ -43,6 +43,7 @@
 #include "external_verdict.h"
 #include "investigator.h"
 #include "ipc_server.h"
+#include "telemetry_agent.h" // [FIX] Required for unique_ptr<TelemetryAgent> destructor
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -72,7 +73,12 @@ PManContext::PManContext() {
     subs.verdict    = std::make_unique<ExternalVerdict>();
     subs.investigator = std::make_unique<Investigator>();
     subs.ipc        = std::make_unique<IpcServer>();
+    subs.telemetry  = std::make_unique<TelemetryAgent>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)
 PManContext::~PManContext() = default;
+
+// [FIX] Define SubsystemState ctor/dtor here where TelemetryAgent is complete
+PManContext::SubsystemState::SubsystemState() = default;
+PManContext::SubsystemState::~SubsystemState() = default;

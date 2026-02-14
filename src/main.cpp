@@ -61,6 +61,7 @@
 #include "tray_animator.h"
 #include "ipc_server.h"
 #include "responsiveness_manager.h"
+#include "telemetry_agent.h" // Telemetry Agent
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -114,66 +115,13 @@ static uint64_t g_resumeStabilizationTime = 0; // Replaces detached sleep thread
 
 // --- Authoritative Control Loop ---
 
-// [REF] CPU Load logic moved to SysInfo
-
 static SystemSignalSnapshot CaptureSnapshot() {
-    SystemSignalSnapshot snap = {};
-    
-    // 1. CPU Load
-    snap.cpuLoad = GetSystemCpuLoad();
-
-    // 2. Memory Pressure
-    MEMORYSTATUSEX mem = { sizeof(mem) };
-    if (GlobalMemoryStatusEx(&mem)) {
-        snap.memoryPressure = (double)mem.dwMemoryLoad;
+    // [OPTIMIZED] Non-blocking read from background telemetry agent
+    // Offloads PDH and GetSystemTimes to worker thread
+    if (auto& agent = PManContext::Get().subs.telemetry) {
+        return agent->GetLatestSnapshot();
     }
-
-    // 3. Disk & Latency
-    // [TELEMETRY] Real-Time PDH Monitoring
-    static PDH_HQUERY s_perfQuery = nullptr;
-    static PDH_HCOUNTER s_diskCounter = nullptr;
-    static PDH_HCOUNTER s_thermalCounter = nullptr;
-    static bool s_perfInit = false;
-
-    if (!s_perfInit) {
-        if (PdhOpenQueryW(nullptr, 0, &s_perfQuery) == ERROR_SUCCESS) {
-            // Monitor Total Disk Queue
-            PdhAddEnglishCounterW(s_perfQuery, L"\\PhysicalDisk(_Total)\\Current Disk Queue Length", 0, &s_diskCounter);
-            // Monitor Processor Throttling (<100% means throttling)
-            PdhAddEnglishCounterW(s_perfQuery, L"\\Processor Information(_Total)\\% Performance Limit", 0, &s_thermalCounter);
-            PdhCollectQueryData(s_perfQuery); // Prime counters
-        }
-        s_perfInit = true;
-    }
-
-    if (s_perfQuery) {
-        PdhCollectQueryData(s_perfQuery);
-        
-        PDH_FMT_COUNTERVALUE val;
-        if (s_diskCounter && PdhGetFormattedCounterValue(s_diskCounter, PDH_FMT_DOUBLE, nullptr, &val) == ERROR_SUCCESS) {
-            snap.diskQueueLen = val.doubleValue;
-        } else {
-            snap.diskQueueLen = 0.0;
-        }
-
-        if (s_thermalCounter && PdhGetFormattedCounterValue(s_thermalCounter, PDH_FMT_DOUBLE, nullptr, &val) == ERROR_SUCCESS) {
-            // If Performance Limit is < 99%, system is throttling (Thermal/Power)
-            snap.isThermalThrottling = (val.doubleValue < 99.0);
-        } else {
-            snap.isThermalThrottling = false;
-        }
-    }
-
-    snap.latencyMs = PManContext::Get().telem.lastDpcLatency.load();
-
-    // 4. Thermal & User Activity
-    // snap.isThermalThrottling handled above
-    
-    // Check if user has been active in the last 30 seconds
-    uint64_t lastInput = g_explorerBooster.GetLastUserActivity();
-    snap.userActive = (GetTickCount64() - lastInput) < 30000;
-
-    return snap;
+    return {}; // Safety fallback
 }
 
 // Persistent state for Outcome Guard (Previous Tick)
@@ -336,7 +284,7 @@ static void RunAutonomousCycle() {
         shadowDelta = ctx.subs.shadow->Simulate(decision, telemetry);
     }
 
-    // [NEW] Provenance Integrity Check (Hard Constraint)
+    // Provenance Integrity Check (Hard Constraint)
     if (ctx.subs.provenance && !ctx.subs.provenance->IsProvenanceSecure()) {
         decision.selectedAction = BrainAction::Maintain;
         decision.reason = DecisionReason::HardRuleViolation; 
@@ -399,14 +347,14 @@ static void RunAutonomousCycle() {
     if (ctx.subs.sandbox) {
         sbResult = ctx.subs.sandbox->TryExecute(decision);
 
-        // [NEW] Budget Spending
+        // Budget Spending
         // Only spend if the action was committed and wasn't forced to Maintain by budget check
         if (sbResult.committed && !budgetExhausted) {
              if (ctx.subs.budget) ctx.subs.budget->Spend(actionCost);
         }
     }
 
-    // [NEW] Decision Provenance Recording (The Receipt)
+    // Decision Provenance Recording (The Receipt)
     bool faultActive = ctx.fault.ledgerWriteFail || ctx.fault.budgetCorruption || 
                        ctx.fault.sandboxError || ctx.fault.intentInvalid || 
                        ctx.fault.confidenceInvalid;
@@ -1323,6 +1271,10 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         PManContext::Get().subs.ipc->Initialize();
     }
 
+    // Initialize Telemetry Agent (Unblocks Main Loop)
+    PManContext::Get().subs.telemetry = std::make_unique<TelemetryAgent>();
+    PManContext::Get().subs.telemetry->Initialize();
+
     // Initialize Policy Optimizer
     PManContext::Get().subs.optimizer = std::make_unique<PolicyOptimizer>();
     PManContext::Get().subs.optimizer->Initialize();
@@ -1763,6 +1715,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     
 	g_running = false;
     g_networkMonitor.Stop(); // Stop Monitor
+    if (PManContext::Get().subs.telemetry) PManContext::Get().subs.telemetry->Shutdown();
     g_explorerBooster.Shutdown();
     g_inputGuardian.Shutdown();
     g_memoryOptimizer.Shutdown();
