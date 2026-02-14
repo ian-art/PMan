@@ -45,7 +45,6 @@ private:
     DWORD m_dwmPid{0};
     
     // Input Interference Blocking
-    HHOOK m_hKeyHook{nullptr};
     STICKYKEYS m_startupSticky{sizeof(STICKYKEYS), 0};
     TOGGLEKEYS m_startupToggle{sizeof(TOGGLEKEYS), 0};
     FILTERKEYS m_startupFilter{sizeof(FILTERKEYS), 0};
@@ -60,8 +59,6 @@ private:
     
     // Managed Worker Threads
     std::thread m_worker;
-    std::thread m_hookThread;
-    std::atomic<DWORD> m_hookThreadId{0};
 
     // Boost Logic
     void ApplyResponsivenessBoost();

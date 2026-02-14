@@ -26,24 +26,12 @@
 
 // Removed global instance (Now in PManContext)
 
-// Low-Level Keyboard Hook
-// Blocks Windows Key (Left/Right) when Game Mode is active
-static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode == HC_ACTION) {
-        KBDLLHOOKSTRUCT* p = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
-        if (p->vkCode == VK_LWIN || p->vkCode == VK_RWIN) {
-            // Eat the key message
-            return 1;
-        }
-    }
-    return CallNextHookEx(nullptr, nCode, wParam, lParam);
-}
+// Low-Level Keyboard Hook (Removed for Anti-Cheat Compliance)
 
 // Destructor to ensure thread safety
 InputGuardian::~InputGuardian() {
     Shutdown();
     if (m_worker.joinable()) m_worker.join();
-    if (m_hookThread.joinable()) m_hookThread.join();
 }
 
 void InputGuardian::Initialize() {
@@ -70,41 +58,7 @@ void InputGuardian::SetGameMode(bool enabled) {
 
 void InputGuardian::ToggleInterferenceBlocker(bool enable) {
     if (enable) {
-        // 1. Disable Windows Key Hook (Moved to dedicated thread to prevent input lag)
-        if (!m_hookThread.joinable()) {
-            m_hookThread = std::thread([this]() {
-                // [AUDIT] CRITICAL: Raise priority to TIME_CRITICAL. 
-                // A normal priority hook thread will be preempted by games, causing massive input lag.
-                SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-
-                // [PATCH] RAII Wrapper for Hook Safety
-                // Ensures UnhookWindowsHookEx is ALWAYS called, even on exception or thread termination.
-                struct HookGuard {
-                    HHOOK h;
-                    HookGuard(HHOOK _h) : h(_h) {}
-                    ~HookGuard() { if (h) UnhookWindowsHookEx(h); }
-                };
-
-                // Install Hook on this dedicated thread
-                HHOOK hRaw = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(nullptr), 0);
-                HookGuard hook(hRaw); // Lifecycle managed by stack unwinding
-
-                m_hookThreadId = GetCurrentThreadId();
-
-                MSG msg;
-                // Pump messages to keep hook alive
-                while (GetMessage(&msg, nullptr, 0, 0)) {
-                    if (msg.message == WM_QUIT) break;
-                    TranslateMessage(&msg);
-                    DispatchMessage(&msg);
-                }
-
-                m_hookThreadId = 0;
-                // HookGuard destructor called here automatically
-            });
-            // Mark as enabled locally using a dummy handle
-            m_hKeyHook = (HHOOK)0x1; 
-        }
+        // 1. Windows Key Hook removed to prevent anti-cheat detection.
 
         // 2. Disable Sticky Keys / Filter Keys Hotkeys
         // FIX: Set flags to 0 to disable Hotkeys AND Confirmations. 
@@ -121,15 +75,9 @@ void InputGuardian::ToggleInterferenceBlocker(bool enable) {
         fk.dwFlags = 0;
         SystemParametersInfoW(SPI_SETFILTERKEYS, sizeof(fk), &fk, 0);
 
-        Log("[INPUT] Game Mode: Blocked Windows Key & Sticky Keys");
+        Log("[INPUT] Game Mode: Blocked Sticky Keys (WinKey Block Disabled)");
     } else {
-        // 1. Remove Hook (Signal thread to quit)
-        if (m_hookThread.joinable()) {
-            DWORD tid = m_hookThreadId.load();
-            if (tid != 0) PostThreadMessageW(tid, WM_QUIT, 0, 0);
-            m_hookThread.join();
-            m_hKeyHook = nullptr;
-        }
+        // 1. Hook removal skipped (feature disabled)
 
         // 2. Restore Original Accessibility Settings
         SystemParametersInfoW(SPI_SETSTICKYKEYS, sizeof(m_startupSticky), &m_startupSticky, 0);
