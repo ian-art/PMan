@@ -52,6 +52,18 @@ PMan is built on a "Do No Harm" architecture designed to fail closed.
 
 ---
 
+### 4. Anti-Cheat Compliance
+
+PMan is engineered to be **100% compliant** with modern anti-cheat systems (BattlEye, EAC, Vanguard). It operates strictly as an external system scheduler.
+
+* ✅ **No Hooks:** System-wide input hooks have been removed.
+* ✅ **No Injection:** Does not touch game memory or code.
+* ✅ **Standard APIs:** Uses only documented Windows OS calls.
+
+[👉 **Read the full Anti-Cheat Safety Audit**](docs/ANTICHEAT.md)
+
+---
+
 ## 🎮 Features
 
 | Feature | Description |
