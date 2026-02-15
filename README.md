@@ -129,7 +129,7 @@ cl /std:c++latest /EHsc /O2 /GL /W4 /MP ^
 If you download a pre-compiled binary, some antivirus solutions (like SecureAge) may flag it due to the embedded icon or C++20 standard library patterns ("Wacatac.B!ml").
 
 **Solution:**
-I strongly recommend **building the software yourself** using the command provided in the [Building from Source](#-building-from-source) section above. The official build configuration has been verified to produce a clean binary.
+I strongly recommend **building the software yourself** using the command provided in the [Building from Source](#%EF%B8%8F-building-from-source) section above. The official build configuration has been verified to produce a clean binary.
 
 > **⚠️ OFFICIAL SOURCE WARNING**
 >
