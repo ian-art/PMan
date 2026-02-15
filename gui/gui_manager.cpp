@@ -1434,30 +1434,21 @@ namespace GuiManager {
             }
 
             if (ImGui::Button("Export Log")) {
-                OPENFILENAMEW ofn = {0};
-                wchar_t szFile[MAX_PATH] = {0};
+                SYSTEMTIME st;
+                GetLocalTime(&st);
+                char filename[64];
+                sprintf_s(filename, "Log_%04d-%02d-%02d_%02d-%02d-%02d.txt", 
+                    st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
                 
-                ofn.lStructSize = sizeof(ofn);
-                ofn.hwndOwner = g_hwnd;
-                ofn.lpstrFile = szFile;
-                ofn.nMaxFile = sizeof(szFile);
-                ofn.lpstrFilter = L"Log Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
-                ofn.nFilterIndex = 1;
-                ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
+                std::filesystem::path exportPath = GetLogPath() / filename;
 
-                if (GetSaveFileNameW(&ofn) == TRUE) {
-                    std::wstring path = szFile;
-                    if (path.length() < 4 || path.substr(path.length() - 4) != L".txt") {
-                        path += L".txt";
-                    }
-
-                    std::ofstream out(path);
-                    if (out) {
-                        out << g_logBuffer;
-                        MessageBoxW(g_hwnd, L"Log exported successfully.", L"Success", MB_OK | MB_ICONINFORMATION);
-                    } else {
-                        MessageBoxW(g_hwnd, L"Failed to save log file.\nCheck permissions and try again.", L"Error", MB_OK | MB_ICONERROR);
-                    }
+                std::ofstream out(exportPath);
+                if (out) {
+                    out << g_logBuffer;
+                    std::wstring successMsg = L"Log saved to:\n" + exportPath.wstring();
+                    MessageBoxW(g_hwnd, successMsg.c_str(), L"Export Successful", MB_OK | MB_ICONINFORMATION);
+                } else {
+                    MessageBoxW(g_hwnd, L"Failed to save log file automatically.", L"Error", MB_OK | MB_ICONERROR);
                 }
             }
             ImGui::SameLine();
