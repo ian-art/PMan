@@ -1453,6 +1453,24 @@ namespace GuiManager {
             }
             ImGui::SameLine();
 
+            if (ImGui::Button("Copy Log")) {
+                if (OpenClipboard(g_hwnd)) {
+                    EmptyClipboard();
+                    std::wstring wLog = Utf8ToWide(g_logBuffer.c_str());
+                    size_t size = (wLog.length() + 1) * sizeof(wchar_t);
+                    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size);
+                    if (hMem) {
+                        void* pMem = GlobalLock(hMem);
+                        memcpy(pMem, wLog.c_str(), size);
+                        GlobalUnlock(hMem);
+                        SetClipboardData(CF_UNICODETEXT, hMem);
+                    }
+                    CloseClipboard();
+                    MessageBoxW(g_hwnd, L"Log copied to clipboard.", L"Success", MB_OK | MB_ICONINFORMATION);
+                }
+            }
+            ImGui::SameLine();
+
             if (ImGui::Button("Clear Log")) { 
                 g_logBuffer.clear(); 
                 g_logMaxWidth = 0.0f; 
