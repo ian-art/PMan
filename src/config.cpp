@@ -24,8 +24,6 @@
 #include "utils.h"
 #include "static_tweaks.h"
 #include "network_monitor.h" // For SetBackgroundApps
-#include "context.h" // Required to update InputGuardian
-#include "input_guardian.h" // [FIX] Required for method access
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -62,8 +60,7 @@ static std::unordered_set<std::wstring> GetDefaultBrowsers() {
 // Internal shadow copies for serialization (Moved up for SecureConfigManager)
 static ExplorerConfig g_lastExplorerConfig;
 static std::unordered_set<std::wstring> g_shadowBackgroundApps;
-static TweakConfig g_tweakConfig; // In-memory storage for tweaks
-std::unordered_set<std::wstring> g_keyBlockList; // Global definition (non-static)
+static TweakConfig g_tweakConfig; // [PATCH] In-memory storage for tweaks
 
 static std::unordered_set<std::wstring> GetDefaultIgnoredProcesses() {
     return {
@@ -312,7 +309,7 @@ static bool InternalLoadFile(const std::filesystem::path& path, json& outJson) {
     }
 }
 
-// IPC Integration
+// [PATCH] IPC Integration
 bool SecureConfigManager::ApplyConfig(const json& j) {
     // 2. Apply to Globals (Thread-Safe)
 	try {
@@ -341,13 +338,7 @@ bool SecureConfigManager::ApplyConfig(const json& j) {
         UpdateSet("browser_windows", g_browserWindows);
         UpdateSet("custom_launchers", g_customLaunchers);
         UpdateSet("ignored_processes", g_ignoredProcesses);
-        UpdateSet("key_block_list", g_keyBlockList); // Load Hook Targets
         
-        // Sync to Input Guardian immediately
-        if (PManContext::Get().subs.input) {
-            PManContext::Get().subs.input->UpdateHookTargets(g_keyBlockList);
-        }
-
         if (j.contains("global")) {
             auto& g = j["global"];
             if (g.contains("ignore_non_interactive")) g_ignoreNonInteractive.store(g["ignore_non_interactive"]);
@@ -416,7 +407,7 @@ bool SecureConfigManager::ApplyConfig(const json& j) {
             g_explorerBooster.UpdateConfig(cfg);
         }
 
-        // Apply Tweaks
+        // [PATCH] Apply Tweaks
         if (j.contains("tweaks")) {
             auto& t = j["tweaks"];
             g_tweakConfig.network = t.value("network", false);
@@ -432,7 +423,7 @@ bool SecureConfigManager::ApplyConfig(const json& j) {
     // Sync Subsystems
     g_networkMonitor.SetBackgroundApps(g_shadowBackgroundApps);
     
-    lg.unlock(); // Explicitly unlock before saving to prevent deadlock
+    lg.unlock(); // [PATCH] Explicitly unlock before saving to prevent deadlock
 
 	} catch (const std::exception& e) {
     Log("[SECURE_CFG] JSON Apply Error: " + std::string(e.what()));
@@ -491,7 +482,6 @@ bool SecureConfigManager::LoadSecureConfig() {
             LoadSet("browser_windows", g_browserWindows);
             LoadSet("custom_launchers", g_customLaunchers);
             LoadSet("ignored_processes", g_ignoredProcesses);
-            LoadSet("key_block_list", g_keyBlockList);
             
             if (j.contains("global")) {
                 auto& g = j["global"];
@@ -565,7 +555,6 @@ void SecureConfigManager::SaveSecureConfig() {
             SaveSet("browser_windows", g_browserWindows);
             SaveSet("custom_launchers", g_customLaunchers);
             SaveSet("ignored_processes", g_ignoredProcesses);
-            SaveSet("key_block_list", g_keyBlockList);
 
             j["global"] = {
                 {"ignore_non_interactive", g_ignoreNonInteractive.load()},

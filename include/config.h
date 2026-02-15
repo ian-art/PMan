@@ -38,7 +38,7 @@ public:
     static void SaveSecureConfig();
     static std::filesystem::path GetSecureConfigPath();
     
-    // IPC Integration: Apply JSON config directly from Service
+    // [PATCH] IPC Integration: Apply JSON config directly from Service
     static bool ApplyConfig(const nlohmann::json& j);
 };
 
@@ -48,7 +48,6 @@ void LoadConfig();
 void SetExplorerConfigShadow(const ExplorerConfig& cfg);
 ExplorerConfig GetExplorerConfigShadow();
 std::unordered_set<std::wstring> GetBackgroundAppsShadow(); // [FIX] Accessor for background apps
-extern std::unordered_set<std::wstring> g_keyBlockList; // Selective Keyboard Hook List
 void SaveConfig();
 bool CreateDefaultConfig(const std::filesystem::path& configPath);
 
