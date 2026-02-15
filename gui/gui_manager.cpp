@@ -532,6 +532,8 @@ namespace GuiManager {
             DispatchMessage(&msg);
         }
 
+        if (!g_pd3dDevice) return;
+
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
@@ -1559,6 +1561,7 @@ namespace GuiManager {
         } else {
             Log("[GUI] CRITICAL: Failed to recover from Device Loss.");
         }
+        FlushLogger();
     }
 
 	// ============================================================================================
