@@ -88,7 +88,7 @@ void ResponsivenessManager::Update() {
                     // Helper to check all lists
                     auto IsExcluded = [&](const std::wstring& key) {
                         return g_games.count(key) || g_oldGames.count(key) || 
-                               g_keyBlockList.count(key) || g_ignoredProcesses.count(key);
+                               g_ignoredProcesses.count(key);
                     };
 
                     if (IsExcluded(lower)) return;
