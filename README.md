@@ -96,6 +96,35 @@ Configuration is now managed exclusively via the **Neural Center GUI**, which co
 
 ---
 
+## 🛠️ Building from Source
+
+To ensure a clean, high-performance binary that is free of false positives, use the following MSVC build command. This configuration explicitly defines the application's security context and subsystem, preventing heuristic misidentifications.
+
+**Prerequisites:** Visual Studio 2022 (MSVC)
+
+```cmd
+cl /std:c++latest /EHsc /O2 /GL /W4 /MP ^
+   /I include src\*.cpp pman.res /Fe:pman_x64.exe ^
+   /link /SUBSYSTEM:WINDOWS /ENTRY:wmainCRTStartup ^
+   /MANIFEST:EMBED /MANIFESTUAC:level='requireAdministrator' ^
+   Advapi32.lib User32.lib Shell32.lib Ole32.lib Tdh.lib Wtsapi32.lib
+```
+
+---
+
+## 🛡️ Antivirus Note
+
+If you download a pre-compiled binary, some antivirus solutions (like SecureAge) may flag it due to the embedded icon or C++20 standard library patterns ("Wacatac.B!ml").
+
+**Solution:**
+I strongly recommend **building the software yourself** using the command provided in the [Building from Source](#-building-from-source) section above. The official build configuration has been verified to produce a clean binary.
+
+> **⚠️ OFFICIAL SOURCE WARNING**
+>
+> This GitHub repository is the **only** trusted source for PMan. Do not download the program from third-party sites. For maximum security, build the software locally using the official instructions.
+
+---
+
 ## 📄 License
 
 This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
@@ -124,8 +153,8 @@ This project includes the following third-party software:
 
 <div align="center">
 
-**Architect:** Ian Anthony R. Tancinco  
-**Engineers:** Gemini, GPT, Claude, Kimi, and others.
+**Neural Origin:** Ian Anthony R. Tancinco  
+**Synthetic Cortex:** Gemini, GPT, Claude, Kimi, and others.
 
 *"The system is not sovereign. It is a licensed operator."*
 
