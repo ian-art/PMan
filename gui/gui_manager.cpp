@@ -41,9 +41,12 @@
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
+#include <fstream>      // For file export
+#include <commdlg.h>    // For GetSaveFileName
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "comdlg32.lib") // [PATCH] Required for Save Dialog
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
     HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -1427,6 +1430,35 @@ namespace GuiManager {
                  g_logLineCount = (int)std::count(g_logBuffer.begin(), g_logBuffer.end(), '\n') + 1;
                  g_logPrevSize = g_logBuffer.size();
             }
+
+            if (ImGui::Button("Export Log")) {
+                OPENFILENAMEW ofn = {0};
+                wchar_t szFile[MAX_PATH] = {0};
+                
+                ofn.lStructSize = sizeof(ofn);
+                ofn.hwndOwner = g_hwnd;
+                ofn.lpstrFile = szFile;
+                ofn.nMaxFile = sizeof(szFile);
+                ofn.lpstrFilter = L"Log Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
+                ofn.nFilterIndex = 1;
+                ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
+
+                if (GetSaveFileNameW(&ofn) == TRUE) {
+                    std::wstring path = szFile;
+                    if (path.length() < 4 || path.substr(path.length() - 4) != L".txt") {
+                        path += L".txt";
+                    }
+
+                    std::ofstream out(path);
+                    if (out) {
+                        out << g_logBuffer;
+                        MessageBoxW(g_hwnd, L"Log exported successfully.", L"Success", MB_OK | MB_ICONINFORMATION);
+                    } else {
+                        MessageBoxW(g_hwnd, L"Failed to save log file.\nCheck permissions and try again.", L"Error", MB_OK | MB_ICONERROR);
+                    }
+                }
+            }
+            ImGui::SameLine();
 
             if (ImGui::Button("Clear Log")) { 
                 g_logBuffer.clear(); 
