@@ -565,6 +565,13 @@ struct LeaseEntry {
     bool isActive;
 };
 
+// Watchdog Heartbeat Structure (Must match PManWatchdog.exe)
+struct HeartbeatSharedMemory {
+    std::atomic<uint64_t> counter;  // Monotonic increment
+    uint64_t last_tick;             // System tick at update
+    DWORD pid;                      // Target Process ID
+};
+
 struct LeaseLedger {
     static constexpr size_t MAX_LEASES = 32;
     LeaseEntry entries[MAX_LEASES];

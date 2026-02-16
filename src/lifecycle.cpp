@@ -124,13 +124,27 @@ namespace Lifecycle {
     }
 
     bool InstallTask(const std::wstring& taskName, const std::wstring& exePath, bool passiveMode) {
+        // Deployment Integration
+        // If PManWatchdog.exe exists, we register IT as the startup task instead of PMan.exe.
+        // This ensures the supervisor is always active.
+        std::filesystem::path p(exePath);
+        std::filesystem::path watchdogPath = p.parent_path() / L"PManWatchdog.exe";
+        
+        std::wstring targetExe = exePath;
+        if (std::filesystem::exists(watchdogPath)) {
+            targetExe = watchdogPath.wstring();
+            // [FIX] Log is a global function, not in Logger namespace
+            Log("[LIFECYCLE] Watchdog detected. Registering supervisor task.");
+        }
+
         // Base arguments: Silent only. Passive mode adds --paused
         std::wstring args = L" /S";
         if (passiveMode) args += L" --paused";
 
         // Construct schtasks command
         // /sc onlogon /rl highest /f (Force)
-        std::wstring params = L"/create /tn \"" + taskName + L"\" /tr \"\\\"" + exePath + L"\\\"" + args + L"\" /sc onlogon /rl highest /f";
+        // [FIX] Use targetExe (which might be watchdog) instead of exePath
+        std::wstring params = L"/create /tn \"" + taskName + L"\" /tr \"\\\"" + targetExe + L"\\\"" + args + L"\" /sc onlogon /rl highest /f";
         
         // Execute as Admin via ShellExecute (Trigger UAC if needed)
         HINSTANCE res = ShellExecuteW(nullptr, L"runas", L"schtasks.exe", params.c_str(), nullptr, SW_HIDE);

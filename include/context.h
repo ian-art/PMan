@@ -138,6 +138,10 @@ public:
         // Session Smart Cache (Thread-Safe Atomic Shared Pointer)
         std::atomic<std::shared_ptr<SessionSmartCache>> sessionCache;
 
+        // Watchdog Heartbeat Shared Memory
+        UniqueHandle hHeartbeatMap;
+        struct HeartbeatSharedMemory* pHeartbeat = nullptr;
+
         HPOWERNOTIFY pwr1{nullptr};
         HPOWERNOTIFY pwr2{nullptr};
         UniqueHandle hMutex;

@@ -62,6 +62,7 @@
 #include "ipc_server.h"
 #include "responsiveness_manager.h"
 #include "telemetry_agent.h" // Telemetry Agent
+#include "crash_reporter.h" // Crash Reporting
 #include <thread>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -1102,15 +1103,42 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     }
 }
 
-int wmain(int argc, wchar_t* argv[])
+// Separation of Core Logic for SEH Compatibility
+// We rename the original logic to RunPMan so we can wrap it.
+static int RunPMan(int argc, wchar_t* argv[])
 {
 	try {
 	
     // [DARK MODE] Initialize Centralized Dark Mode Manager
 	DarkMode::Initialize();
+
+    // Initialize Crash Reporter (Black Box & Flight Recorder)
+    // Must be initialized before Logger to capture startup failures
+    CrashReporter::Initialize();
     
     // Initialize Telemetry-Safe Logger
     InitLogger();
+
+    // Heartbeat Initialization
+    // Create Shared Memory for Watchdog monitoring (Local\PManHeartbeat)
+    auto& runtime = PManContext::Get().runtime;
+    runtime.hHeartbeatMap.reset(
+        CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(HeartbeatSharedMemory), L"Local\\PManHeartbeat")
+    );
+    
+    if (runtime.hHeartbeatMap) {
+        runtime.pHeartbeat = (HeartbeatSharedMemory*)MapViewOfFile(
+            runtime.hHeartbeatMap.get(), FILE_MAP_ALL_ACCESS, 0, 0, sizeof(HeartbeatSharedMemory)
+        );
+        
+        if (runtime.pHeartbeat) {
+            // Initialize heartbeat data
+            runtime.pHeartbeat->pid = GetCurrentProcessId();
+            runtime.pHeartbeat->counter.store(0);
+            runtime.pHeartbeat->last_tick = GetTickCount64();
+            Log("[INIT] Watchdog Heartbeat initialized.");
+        }
+    }
 
     // Lifecycle Management
     std::vector<std::thread> lifecycleThreads;
@@ -1648,6 +1676,14 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 
             // Rate limit the tick calls to prevent CPU spinning
             if ((now - g_lastExplorerPollMs) >= pollIntervalMs) {
+                
+                // Update Heartbeat (Proof of Life)
+                // We do this in the MAIN THREAD to prove the message loop is not hung.
+                if (auto* hb = PManContext::Get().runtime.pHeartbeat) {
+                    hb->counter.fetch_add(1, std::memory_order_relaxed);
+                    hb->last_tick = GetTickCount64();
+                }
+
                 // FIX: Offload to persistent worker thread to protect Keyboard Hook
                 {
                     std::lock_guard<std::mutex> lock(g_backgroundQueueMtx);
@@ -1822,6 +1858,25 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
         }
 
         MessageBoxW(nullptr, L"Unknown fatal error occurred.", L"Priority Manager - Fatal Error", MB_OK | MB_ICONERROR);
+        return -1;
+    }
+}
+
+// SEH Entry Point
+// This wrapper catches hardware faults (Stack Overflow, Access Violation)
+// that standard C++ try/catch blocks cannot handle.
+int wmain(int argc, wchar_t* argv[])
+{
+    // Initialize Crash Reporter immediately
+    CrashReporter::Initialize();
+
+    __try {
+        // [FIX] RunPMan is a static function in this file, not a member of GuiManager
+        return RunPMan(argc, argv);
+    }
+    __except (CrashReporter::SehFilter(GetExceptionInformation())) {
+        // The filter writes the dump and terminates the process.
+        // We return -1 just to satisfy the signature if termination is delayed.
         return -1;
     }
 }
