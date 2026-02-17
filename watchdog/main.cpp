@@ -75,16 +75,53 @@ struct HeartbeatSharedMemory {
     DWORD pid;                      // Target Process ID
 };
 
+// [PATCH] Shared Log Structure (Circular Buffer)
+const size_t LOG_BUFFER_SIZE = 16384; // 16KB
+const size_t LOG_BUFFER_MASK = LOG_BUFFER_SIZE - 1;
+
+struct WatchdogLogShared {
+    volatile LONG writeIndex;
+    char buffer[LOG_BUFFER_SIZE];
+};
+
 // --- Global State ---
+UniqueHandle g_hLogMap;
+WatchdogLogShared* g_pLogShared = nullptr;
 UniqueHandle g_hMapFile;
 UniqueView g_pHeartbeatView;
 HeartbeatSharedMemory* g_pHeartbeat = nullptr;
 UniqueHandle g_hTargetProcess;
 
+void InitLogShared() {
+    g_hLogMap.reset(CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(WatchdogLogShared), L"Local\\PManWatchdogLog"));
+    if (g_hLogMap) {
+        g_pLogShared = (WatchdogLogShared*)MapViewOfFile(g_hLogMap.get(), FILE_MAP_ALL_ACCESS, 0, 0, 0);
+        if (g_pLogShared) {
+            // Only zero if we just created it (check GetLastError for ERROR_ALREADY_EXISTS if needed, 
+            // but for watchdog restarts, we might want to keep history. simpler to just clear on fresh start.)
+            // For now, we assume ephemeral per-session logging.
+        }
+    }
+}
+
 void Log(const wchar_t* msg) {
-    // Simple console logging for watchdog
     SYSTEMTIME st; GetLocalTime(&st);
+    
+    // 1. Console Output
     wprintf(L"[%02d:%02d:%02d] %s\n", st.wHour, st.wMinute, st.wSecond, msg);
+
+    // 2. Shared Memory Broadcast
+    if (g_pLogShared) {
+        char buf[512];
+        // Format as UTF-8 for compact storage (%S handles wchar_t conversion)
+        int len = sprintf_s(buf, "[%02d:%02d:%02d] %S\n", st.wHour, st.wMinute, st.wSecond, msg);
+        if (len > 0) {
+            for (int i = 0; i < len; i++) {
+                LONG idx = InterlockedIncrement(&g_pLogShared->writeIndex) - 1;
+                g_pLogShared->buffer[idx & LOG_BUFFER_MASK] = buf[i];
+            }
+        }
+    }
 }
 
 // Write dump of the target process (External Dump)
@@ -194,6 +231,7 @@ bool ConnectToSharedMemory() {
 
 // [FIX] Use wWinMain to run in background (no console window)
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) {
+    InitLogShared(); // [PATCH] Initialize Logging Channel
     Log(L"Watchdog Started.");
 
     // [FIX] Capture raw arguments for restart logic
