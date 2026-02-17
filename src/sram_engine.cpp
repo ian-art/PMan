@@ -34,7 +34,8 @@
 
 // Config
 #define HYSTERESIS_COOLDOWN_MS 2000
-#define HYSTERESIS_SPIKE_COUNT 3
+// [TUNING] Reduced spike count to 1 for 2000ms polling (React in 2s instead of 6s)
+#define HYSTERESIS_SPIKE_COUNT 1
 
 SramEngine& SramEngine::Get() {
     static SramEngine instance;
@@ -321,19 +322,20 @@ void SramEngine::EvaluateState() {
     float n_dpc   = NormalizeMetric((float)m_maxDpcPercent, 5.0f, 20.0f);
 
     // Self-Starvation (Tray Icon): If animation stops, main thread is starving.
-    // Timer is 150ms. >300ms is hiccup. >1000ms is heavy lag.
+    // Timer is 150ms. >250ms implies missed frame (Stutter). >600ms is heavy lag.
     uint64_t lastAnim = TrayAnimator::Get().GetLastAnimationTime();
     uint64_t animDelta = (now > lastAnim) ? (now - lastAnim) : 0;
-    float n_self = NormalizeMetric((float)animDelta, 300.0f, 1500.0f);
+    // [TUNING] Tightened thresholds: 250ms (Missed Frame) to 750ms (Freeze)
+    float n_self = NormalizeMetric((float)animDelta, 250.0f, 750.0f);
 
     // 3. Composite Scoring (Weighted Formula)
-    // Rebalanced to include Self-Starvation (25% weight)
+    // Rebalanced: Self-Starvation boosted to 30% (High confidence metric for UI lag)
     float c_ui    = n_ui * 0.20f;     // Foreground App
     float c_dwm   = n_dwm * 0.15f;    // Render Drops
     float c_input = n_input * 0.15f;  // Input Lag
-    float c_cpu   = n_cpu * 0.15f;    // CPU Queue
+    float c_cpu   = n_cpu * 0.10f;    // CPU Queue (Reduced)
     float c_dpc   = n_dpc * 0.10f;    // Kernel Latency
-    float c_self  = n_self * 0.25f;   // Scheduler Starvation (New)
+    float c_self  = n_self * 0.30f;   // Scheduler Starvation (Boosted)
 
     // Normalize score to 0.0 - 1.0 range (Sum of weights is 1.0)
     float score = (c_ui + c_dwm + c_input + c_cpu + c_dpc + c_self);
