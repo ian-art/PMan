@@ -140,19 +140,27 @@ std::unordered_set<std::wstring> NetworkMonitor::GetBackgroundApps() const {
 // Lightweight probe: Pings Cloudflare (1.1.1.1) and Google (8.8.8.8)
 // Returns TRUE if connection is STABLE (<150ms, no loss)
 bool NetworkMonitor::PerformLatencyProbe() {
-    // Cache result for 5s (matched to WorkerThread) for fresher scoring
-    static uint64_t lastCheck = 0;
-    static bool lastResult = false;
-    uint64_t now = GetTickCount64();
-    if (now - lastCheck < 5000) return lastResult;
+    // [FIX] Thread-Safe Caching: Protect against concurrent polling (Tray + Worker)
+    static std::mutex s_probeMtx;
+    static uint64_t s_lastCheck = 0;
+    static bool s_lastResult = false;
 
-    HANDLE hIcmp = IcmpCreateFile();
-    if (hIcmp == INVALID_HANDLE_VALUE) return false;
+    uint64_t now = GetTickCount64();
+    {
+        std::lock_guard<std::mutex> lock(s_probeMtx);
+        if (now - s_lastCheck < 5000) return s_lastResult;
+    }
+
+    // [FIX] RAII Handle Wrapper: Ensures handle is closed exactly once, preventing INVALID_HANDLE crashes
+    struct IcmpDeleter { void operator()(HANDLE h) { if (h != INVALID_HANDLE_VALUE) IcmpCloseHandle(h); } };
+    std::unique_ptr<void, IcmpDeleter> hIcmp(IcmpCreateFile());
+
+    if (hIcmp.get() == INVALID_HANDLE_VALUE) return false;
 
     char sendData[] = "PManProbe";
-    // [FIX] C28020: Add 8 bytes padding for IO_STATUS_BLOCK/Error info as required by IcmpSendEcho
+    // [FIX] Memory Alignment: Use vector<uint64_t> to enforce 8-byte alignment for ICMP structures
     DWORD replySize = sizeof(ICMP_ECHO_REPLY) + sizeof(sendData) + 8;
-    std::vector<char> replyBuffer(replySize);
+    std::vector<uint64_t> replyBufferAligned((replySize + 7) / 8); 
     
     // Targets: 1.1.1.1 (Cloudflare) and 8.8.8.8 (Google)
     unsigned long targets[] = { 0x01010101, 0x08080808 }; 
@@ -160,11 +168,11 @@ bool NetworkMonitor::PerformLatencyProbe() {
     DWORD totalTime = 0;
 
     for (unsigned long ip : targets) {
-        PICMP_ECHO_REPLY reply = (PICMP_ECHO_REPLY)replyBuffer.data();
+        PICMP_ECHO_REPLY reply = (PICMP_ECHO_REPLY)replyBufferAligned.data();
         
         // [FIX] Increased timeout to 800ms to tolerate bufferbloat during streaming/gaming
-        DWORD status = IcmpSendEcho(hIcmp, ip, sendData, sizeof(sendData), 
-                                  nullptr, replyBuffer.data(), replySize, 800);
+        DWORD status = IcmpSendEcho(hIcmp.get(), ip, sendData, sizeof(sendData), 
+                                  nullptr, replyBufferAligned.data(), replySize, 800);
 
         if (status > 0 && reply->Status == IP_SUCCESS) {
             successCount++;
@@ -172,19 +180,24 @@ bool NetworkMonitor::PerformLatencyProbe() {
         }
     }
 
-    IcmpCloseHandle(hIcmp);
+    // Handle is closed automatically by unique_ptr here
 
+    bool result = false;
     if (successCount > 0) {
         m_lastLatencyMs = totalTime / successCount;
         // [FIX] Relax threshold to 600ms. Streaming 4K often spikes ping to 300-500ms.
-        lastResult = (m_lastLatencyMs <= 600);
+        result = (m_lastLatencyMs <= 600);
     } else {
         m_lastLatencyMs = 9999; // Treat as effectively offline
-        lastResult = false;
+        result = false;
     }
     
-    lastCheck = now;
-    return lastResult;
+    {
+        std::lock_guard<std::mutex> lock(s_probeMtx);
+        s_lastCheck = now;
+        s_lastResult = result;
+    }
+    return result;
 }
 
 bool NetworkMonitor::IsInteractiveApp(const std::wstring& exeName) {
