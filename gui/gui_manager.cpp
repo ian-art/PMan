@@ -1594,9 +1594,11 @@ namespace GuiManager {
         ImGui::Render();
         // [FIX] Clear to transparent (0,0,0,0) so DWM can render the desktop behind the corners
         const float clearColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
-        g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clearColor);
-        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        if (g_mainRenderTargetView) {
+            g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
+            g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clearColor);
+            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        }
         HRESULT hr = g_pSwapChain->Present(1, 0);
 		if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
 			RecoverFromDeviceLoss();
