@@ -120,7 +120,7 @@ To ensure a clean, high-performance binary that is free of false positives, use 
 pman:
 
 ```cmd
-cl /std:c++latest /EHsc /O2 /GL /W4 /MP Zi^
+cl /std:c++latest /EHsc /O2 /GL /W4 /MP /Zi ^
    /I include src\*.cpp pman.res /Fe:pman_x64.exe ^
    /link /OPT:REF /OPT:ICF /SUBSYSTEM:WINDOWS /ENTRY:wmainCRTStartup ^
    /INCREMENTAL:NO /MANIFEST:EMBED /MANIFESTUAC:level='requireAdministrator' ^
