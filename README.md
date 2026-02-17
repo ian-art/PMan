@@ -6,6 +6,8 @@
 
 *"Tune once. Let the system adapt."*
 
+`PMan was originally developed as a private tool. Version numbers reflect chronological progression on my machine. Early versions were stable for personal use but have not been tested broadly.`
+
 </div>
 
 ---
