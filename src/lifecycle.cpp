@@ -26,6 +26,12 @@
 #include "utils.h" // Assumed to contain UniqueHandle
 #include "logger.h"
 
+// [SECURITY] Native Task Scheduler API (Avoids schtasks.exe detection)
+#include <taskschd.h>
+#include <comdef.h>
+#pragma comment(lib, "taskschd.lib")
+#pragma comment(lib, "comsupp.lib")
+
 namespace Lifecycle {
 
     void TerminateExistingInstances() {
@@ -130,35 +136,114 @@ namespace Lifecycle {
     }
 
     bool InstallTask(const std::wstring& taskName, const std::wstring& exePath, bool passiveMode) {
-        // Deployment Integration
-        // If PManWatchdog.exe exists, we register IT as the startup task instead of PMan.exe.
-        // This ensures the supervisor is always active.
+        // 1. Dynamic Target Resolution (Preserved)
         std::filesystem::path p(exePath);
-
-        // [DYNAMIC] Look for a watchdog matching the current executable's name
-        // e.g. "MyTool.exe" -> "MyToolWatchdog.exe"
         std::wstring watchdogName = p.stem().wstring() + L"Watchdog.exe";
         std::filesystem::path watchdogPath = p.parent_path() / watchdogName;
 
         std::wstring targetExe = exePath;
         if (std::filesystem::exists(watchdogPath)) {
             targetExe = watchdogPath.wstring();
-            // [FIX] Log is a global function, not in Logger namespace
             Log("[LIFECYCLE] Watchdog detected. Registering supervisor task.");
         }
 
-        // Base arguments: Silent only. Passive mode adds --paused
-        std::wstring args = L" /S";
+        std::wstring args = L"/S";
         if (passiveMode) args += L" --paused";
 
-        // Construct schtasks command
-        // /sc onlogon /rl highest /f (Force)
-        // [FIX] Use targetExe (which might be watchdog) instead of exePath
-        std::wstring params = L"/create /tn \"" + taskName + L"\" /tr \"\\\"" + targetExe + L"\\\"" + args + L"\" /sc onlogon /rl highest /f";
+        // 2. Initialize COM
+        HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+        bool comInitialized = SUCCEEDED(hr);
         
-        // Execute as Admin via ShellExecute (Trigger UAC if needed)
-        HINSTANCE res = ShellExecuteW(nullptr, L"runas", L"schtasks.exe", params.c_str(), nullptr, SW_HIDE);
-        return ((intptr_t)res > 32);
+        // 3. Connect to Task Scheduler Service
+        ITaskService *pService = NULL;
+        hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&pService);
+        if (FAILED(hr)) { if(comInitialized) CoUninitialize(); return false; }
+
+        hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+        if (FAILED(hr)) { pService->Release(); if(comInitialized) CoUninitialize(); return false; }
+
+        // 4. Get Root Folder
+        ITaskFolder *pRootFolder = NULL;
+        hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
+        if (FAILED(hr)) { pService->Release(); if(comInitialized) CoUninitialize(); return false; }
+
+        // 5. Delete Existing (Force Overwrite)
+        pRootFolder->DeleteTask(_bstr_t(taskName.c_str()), 0);
+
+        // 6. Create Task Definition
+        ITaskDefinition *pTask = NULL;
+        hr = pService->NewTask(0, &pTask);
+        if (FAILED(hr)) { pRootFolder->Release(); pService->Release(); if(comInitialized) CoUninitialize(); return false; }
+
+        // Principal: Highest Privileges (Admin)
+        IPrincipal *pPrincipal = NULL;
+        if (SUCCEEDED(pTask->get_Principal(&pPrincipal))) {
+            pPrincipal->put_LogonType(TASK_LOGON_INTERACTIVE_TOKEN);
+            pPrincipal->put_RunLevel(TASK_RUNLEVEL_HIGHEST);
+            pPrincipal->Release();
+        }
+
+        // Settings: Power Management (Allow on battery, don't stop)
+        ITaskSettings *pSettings = NULL; // [FIX] Correct Interface Name
+        if (SUCCEEDED(pTask->get_Settings(&pSettings))) {
+            pSettings->put_StartWhenAvailable(VARIANT_TRUE);
+            pSettings->put_DisallowStartIfOnBatteries(VARIANT_FALSE);
+            pSettings->put_StopIfGoingOnBatteries(VARIANT_FALSE);
+            pSettings->put_ExecutionTimeLimit(_bstr_t(L"PT0S")); // Infinite
+            pSettings->Release();
+        }
+
+        // Trigger: On Logon
+        ITriggerCollection *pTriggerCollection = NULL;
+        if (SUCCEEDED(pTask->get_Triggers(&pTriggerCollection))) {
+            ITrigger *pTrigger = NULL;
+            if (SUCCEEDED(pTriggerCollection->Create(TASK_TRIGGER_LOGON, &pTrigger))) {
+                pTrigger->Release();
+            }
+            pTriggerCollection->Release();
+        }
+
+        // Action: Execute
+        IActionCollection *pActionCollection = NULL;
+        if (SUCCEEDED(pTask->get_Actions(&pActionCollection))) {
+            IAction *pAction = NULL;
+            if (SUCCEEDED(pActionCollection->Create(TASK_ACTION_EXEC, &pAction))) {
+                IExecAction *pExecAction = NULL;
+                if (SUCCEEDED(pAction->QueryInterface(IID_IExecAction, (void**)&pExecAction))) {
+                    pExecAction->put_Path(_bstr_t(targetExe.c_str()));
+                    pExecAction->put_Arguments(_bstr_t(args.c_str()));
+                    pExecAction->Release();
+                }
+                pAction->Release();
+            }
+            pActionCollection->Release();
+        }
+
+        // 7. Register Task
+        IRegisteredTask *pRegisteredTask = NULL;
+        hr = pRootFolder->RegisterTaskDefinition(
+            _bstr_t(taskName.c_str()),
+            pTask,
+            TASK_CREATE_OR_UPDATE, 
+            _variant_t(), 
+            _variant_t(), 
+            TASK_LOGON_INTERACTIVE_TOKEN,
+            _variant_t(L""),
+            &pRegisteredTask);
+
+        bool success = SUCCEEDED(hr);
+        if (!success) {
+            Log("[LIFECYCLE] Failed to register task via COM: " + std::to_string(hr));
+        }
+
+        // Cleanup
+        if (pRegisteredTask) pRegisteredTask->Release();
+        pTask->Release();
+        pRootFolder->Release();
+        pService->Release();
+        if (comInitialized) CoUninitialize();
+
+        return success;
     }
 
     void UninstallTask(const std::wstring& taskName) {
