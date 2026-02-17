@@ -239,7 +239,16 @@ namespace GuiManager {
     // Log Viewer State
     static std::string g_logBuffer;
     static bool g_logAutoScroll = true;
+    static bool g_viewWatchdogLog = false; // [PATCH] Toggle state
     static uint64_t g_lastLogCheck = 0;
+    
+    // [PATCH] Watchdog Log Reader Structures
+    const size_t WD_LOG_SIZE = 16384;
+    const size_t WD_LOG_MASK = WD_LOG_SIZE - 1;
+    struct WatchdogLogShared {
+        volatile LONG writeIndex;
+        char buffer[WD_LOG_SIZE];
+    };
     // static std::streampos g_logLastPos = 0; // [REMOVED] No longer reading from file
 	static size_t g_logPrevSize = 0;
     static float g_logMaxWidth = 0.0f;
@@ -247,11 +256,41 @@ namespace GuiManager {
 
     static void UpdateLogContent() {
         uint64_t now = GetTickCount64();
-        if (now - g_lastLogCheck < 500) return; // Check every 500ms
+        if (now - g_lastLogCheck < 250) return; // [PATCH] Faster refresh (250ms)
         g_lastLogCheck = now;
 
-        // [PATCH] Direct memory access (Zero-Copy logic handled in Logger)
-        GetLogSnapshot(g_logBuffer);
+        if (g_viewWatchdogLog) {
+            // Read from Watchdog Shared Memory
+            static HANDLE hMap = nullptr;
+            static WatchdogLogShared* pLog = nullptr;
+
+            if (!pLog) {
+                hMap = OpenFileMappingW(FILE_MAP_READ, FALSE, L"Local\\PManWatchdogLog");
+                if (hMap) {
+                    pLog = (WatchdogLogShared*)MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+                }
+            }
+
+            if (pLog) {
+                g_logBuffer.clear();
+                // Reconstruct circular buffer
+                LONG head = pLog->writeIndex;
+                LONG tail = (head > (LONG)WD_LOG_SIZE) ? (head - (LONG)WD_LOG_SIZE) : 0;
+                
+                // Reserve to avoid reallocations
+                g_logBuffer.reserve(WD_LOG_SIZE);
+
+                for (LONG i = tail; i < head; i++) {
+                    char c = pLog->buffer[i & WD_LOG_MASK];
+                    if (c != 0) g_logBuffer.push_back(c);
+                }
+            } else {
+                g_logBuffer = "[GUI] Waiting for Watchdog process...";
+            }
+        } else {
+            // [PATCH] Direct memory access (Zero-Copy logic handled in Logger)
+            GetLogSnapshot(g_logBuffer);
+        }
     }
 
     static WNDCLASSEXW g_wc = {
@@ -1425,6 +1464,20 @@ namespace GuiManager {
         else if (g_activeMode == GuiMode::LogViewer)
         {
             UpdateLogContent();
+
+            // [PATCH] Source Selector
+            ImGui::Text("Source:");
+            ImGui::SameLine();
+            if (ImGui::RadioButton("Internal Core", !g_viewWatchdogLog)) { 
+                g_viewWatchdogLog = false; 
+                g_logBuffer.clear(); // Clear immediately to prevent ghosting
+            }
+            ImGui::SameLine();
+            if (ImGui::RadioButton("Watchdog Process", g_viewWatchdogLog)) { 
+                g_viewWatchdogLog = true; 
+                g_logBuffer.clear();
+            }
+            ImGui::Separator();
 
             // [FIX] Calculate dimensions safely inside the frame loop
             if (g_logBuffer.size() != g_logPrevSize) {
