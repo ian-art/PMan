@@ -114,12 +114,26 @@ To ensure a clean, high-performance binary that is free of false positives, use 
 
 **Prerequisites:** Visual Studio 2022 (MSVC)
 
+pman:
+
 ```cmd
-cl /std:c++latest /EHsc /O2 /GL /W4 /MP ^
+cl /std:c++latest /EHsc /O2 /GL /W4 /MP Zi^
    /I include src\*.cpp pman.res /Fe:pman_x64.exe ^
-   /link /SUBSYSTEM:WINDOWS /ENTRY:wmainCRTStartup ^
-   /MANIFEST:EMBED /MANIFESTUAC:level='requireAdministrator' ^
-   Advapi32.lib User32.lib Shell32.lib Ole32.lib Tdh.lib Wtsapi32.lib
+   /link /OPT:REF /OPT:ICF /SUBSYSTEM:WINDOWS /ENTRY:wmainCRTStartup ^
+   /INCREMENTAL:NO /MANIFEST:EMBED /MANIFESTUAC:level='requireAdministrator' ^
+   Advapi32.lib User32.lib Shell32.lib Ole32.lib Tdh.lib Wtsapi32.lib ^
+   /DEBUG:FULL
+```
+
+pmanwatchdog:
+
+```cmd
+cl /std:c++latest /nologo /Od /Zi /EHsc /D UNICODE /D _UNICODE ^
+ main.cpp pmanwatchdog.res /Fe:pmanwatchdog.exe ^
+ /link /MANIFEST:EMBED /MANIFESTUAC:level='requireAdministrator' ^
+ /OPT:REF /OPT:ICF /INCREMENTAL:NO ^
+ Dbghelp.lib Kernel32.lib User32.lib ^
+ /DEBUG:FULL
 ```
 
 ---
