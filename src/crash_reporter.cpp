@@ -27,8 +27,8 @@
 namespace CrashReporter {
 
     // --- Configuration ---
-    static const wchar_t* DUMP_FOLDER = L"C:\\ProgramData\\PMan\\Dumps";
-    static const wchar_t* MARKER_FILE = L"C:\\ProgramData\\PMan\\crash_marker.dat";
+    static const wchar_t* DUMP_FOLDER = L"C:\\ProgramData\\PriorityMgr\\Dumps";
+    static const wchar_t* MARKER_FILE = L"C:\\ProgramData\\PriorityMgr\\crash_marker.dat";
     static const DWORD STORM_WINDOW_MS = 60000; // 60 seconds
     static const DWORD MAX_CRASHES_IN_WINDOW = 3;
 
@@ -243,7 +243,7 @@ namespace CrashReporter {
         s_initialized = true;
 
         // Create dump directory
-        CreateDirectoryW(L"C:\\ProgramData\\PMan", nullptr);
+        CreateDirectoryW(L"C:\\ProgramData\\PriorityMgr", nullptr);
         CreateDirectoryW(DUMP_FOLDER, nullptr);
 
         // Register Vectored Exception Handler (First response)
