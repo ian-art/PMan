@@ -40,6 +40,7 @@
 #include <memory> // [FIX] Required for std::unique_ptr
 
 #pragma comment(lib, "Dbghelp.lib")
+#pragma comment(linker, "/SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup")
 
 // --- Configuration ---
 const wchar_t* TARGET_EXE = L"PMan.exe";
@@ -182,16 +183,12 @@ bool ConnectToSharedMemory() {
     return false;
 }
 
-// Use wmain to capture arguments
-int wmain(int argc, wchar_t* argv[]) {
+// [FIX] Use wWinMain to run in background (no console window)
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) {
     Log(L"Watchdog Started.");
 
-    // Reconstruct arguments to forward (skip argv[0] which is watchdog exe)
-    std::wstring forwardArgs = L"";
-    for (int i = 1; i < argc; i++) {
-        forwardArgs += argv[i];
-        if (i < argc - 1) forwardArgs += L" ";
-    }
+    // [FIX] Capture raw arguments for restart logic
+    std::wstring forwardArgs = lpCmdLine;
 
     // Initial Launch with arguments
     LaunchTarget(forwardArgs.c_str());
@@ -204,7 +201,7 @@ int wmain(int argc, wchar_t* argv[]) {
 
         // 1. Check if Process is Alive (Kernel Object)
         DWORD exitCode = 0;
-        if (g_hTargetProcess == NULL || !GetExitCodeProcess(g_hTargetProcess, &exitCode) || exitCode != STILL_ACTIVE) {
+        if (g_hTargetProcess == NULL || !GetExitCodeProcess(g_hTargetProcess.get(), &exitCode) || exitCode != STILL_ACTIVE) {
             Log(L"PMan process termination detected.");
             
             // [MEDIUM PRIORITY] RAII Cleanup (Automatic reset)
