@@ -1741,6 +1741,11 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     RidCleanup[1].usUsagePage = 0x01; RidCleanup[1].usUsage = 0x02; RidCleanup[1].dwFlags = RIDEV_REMOVE; RidCleanup[1].hwndTarget = nullptr;
     RegisterRawInputDevices(RidCleanup, 2, sizeof(RAWINPUTDEVICE));
 
+    // [FIX] Stop background worker BEFORE destroying UI/Subsystems to prevent deadlocks/use-after-free
+    g_backgroundRunning = false;
+    g_backgroundCv.notify_all();
+    if (g_backgroundWorker.joinable()) g_backgroundWorker.join();
+
     GuiManager::Shutdown(); // Cleanup DX11/ImGui resources
 
 	UnregisterPowerNotifications();
@@ -1775,10 +1780,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     StopEtwSession(); // Unblocks EtwThread (ProcessTrace returns)
     PostShutdown(); // Wakes IocpConfigWatcher
     
-    // Stop background worker
-    g_backgroundRunning = false;
-    g_backgroundCv.notify_all();
-    if (g_backgroundWorker.joinable()) g_backgroundWorker.join();
+    // Background worker stopped earlier to ensure thread safety
 
     if (configThread.joinable()) configThread.join();
     if (etwThread.joinable()) etwThread.join();
