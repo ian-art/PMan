@@ -44,9 +44,15 @@ namespace Lifecycle {
             pe.dwSize = sizeof(pe);
 
             if (Process32FirstW(hSnap.get(), &pe)) {
+                // [DYNAMIC] Target both the App and its corresponding Watchdog
+                // e.g. "Guardian.exe" and "GuardianWatchdog.exe"
+                std::wstring watchdogName = std::filesystem::path(selfName).stem().wstring() + L"Watchdog.exe";
+
                 do {
-                    // Check strict match
-                    if (_wcsicmp(pe.szExeFile, selfName.c_str()) == 0) {
+                    // Check strict match for Self OR Watchdog
+                    if (_wcsicmp(pe.szExeFile, selfName.c_str()) == 0 || 
+                        _wcsicmp(pe.szExeFile, watchdogName.c_str()) == 0) {
+
                         // Don't kill ourselves
                         if (pe.th32ProcessID != GetCurrentProcessId()) {
                             // [PATCH] Open with SYNCHRONIZE to ensure WaitForSingleObject works correctly
@@ -128,8 +134,12 @@ namespace Lifecycle {
         // If PManWatchdog.exe exists, we register IT as the startup task instead of PMan.exe.
         // This ensures the supervisor is always active.
         std::filesystem::path p(exePath);
-        std::filesystem::path watchdogPath = p.parent_path() / L"PManWatchdog.exe";
-        
+
+        // [DYNAMIC] Look for a watchdog matching the current executable's name
+        // e.g. "MyTool.exe" -> "MyToolWatchdog.exe"
+        std::wstring watchdogName = p.stem().wstring() + L"Watchdog.exe";
+        std::filesystem::path watchdogPath = p.parent_path() / watchdogName;
+
         std::wstring targetExe = exePath;
         if (std::filesystem::exists(watchdogPath)) {
             targetExe = watchdogPath.wstring();

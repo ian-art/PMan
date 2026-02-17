@@ -38,12 +38,13 @@
 #include <tlhelp32.h>
 #include <vector> // [FIX] Required for std::vector
 #include <memory> // [FIX] Required for std::unique_ptr
+#include <filesystem> // [FIX] Required for dynamic path resolution
 
 #pragma comment(lib, "Dbghelp.lib")
 #pragma comment(linker, "/SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup")
 
 // --- Configuration ---
-const wchar_t* TARGET_EXE = L"PMan.exe";
+// [DYNAMIC] TARGET_EXE is resolved at runtime
 // [HIGH PRIORITY] Dump Storm Protection
 const int MAX_RESTARTS = 5;       // Max restarts...
 const int STORM_WINDOW_MS = 60000; // ...in 60 seconds
@@ -126,17 +127,25 @@ void WriteExternalDump(DWORD pid, HANDLE hProcess) {
 // Argument Forwarding
 // We capture the raw command line to pass flags like --paused or /silent
 void LaunchTarget(const wchar_t* args = nullptr) {
-    Log(L"Launching PMan...");
+    Log(L"Launching Core...");
     
     wchar_t selfPath[MAX_PATH];
     GetModuleFileNameW(NULL, selfPath, MAX_PATH);
-    std::wstring targetPath = std::wstring(selfPath);
     
-    // Strip "PManWatchdog.exe" and replace with "PMan.exe"
-    size_t pos = targetPath.find_last_of(L"\\/");
-    if (pos != std::wstring::npos) {
-        targetPath = targetPath.substr(0, pos + 1) + TARGET_EXE;
+    // [DYNAMIC] Derive target executable name from Watchdog's own name
+    // Convention: If named "AppNameWatchdog.exe", target is "AppName.exe"
+    std::filesystem::path self(selfPath);
+    std::wstring stem = self.stem().wstring();
+    std::wstring targetName = L"PMan.exe"; // Fallback default
+
+    std::wstring suffix = L"Watchdog";
+    // Case-insensitive suffix check
+    if (stem.length() > suffix.length() && 
+        _wcsicmp(stem.substr(stem.length() - suffix.length()).c_str(), suffix.c_str()) == 0) {
+        targetName = stem.substr(0, stem.length() - suffix.length()) + L".exe";
     }
+
+    std::wstring targetPath = (self.parent_path() / targetName).wstring();
 
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi = { 0 };
@@ -202,7 +211,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
         // 1. Check if Process is Alive (Kernel Object)
         DWORD exitCode = 0;
         if (g_hTargetProcess == NULL || !GetExitCodeProcess(g_hTargetProcess.get(), &exitCode) || exitCode != STILL_ACTIVE) {
-            Log(L"PMan process termination detected.");
+            
+            // [LOGIC] Respect Graceful Exit (User initiated quit)
+            if (exitCode == 0) {
+                Log(L"Core exited gracefully (Code 0). Watchdog shutting down.");
+                return 0;
+            }
+
+            Log(L"Core process termination detected (Crash/Kill).");
             
             // [MEDIUM PRIORITY] RAII Cleanup (Automatic reset)
             g_hTargetProcess.reset();
