@@ -41,6 +41,7 @@ static std::atomic<bool> g_loggerInitialized{false};
 // Managed flush worker
 static std::thread g_flushWorker;
 static std::mutex g_flushWorkerMtx;
+static std::atomic<bool> g_isFlushing{false}; // [FIX] Atomic flag for non-blocking flush
    
 std::filesystem::path GetLogPath()
 {
@@ -244,14 +245,21 @@ void Log(const std::string& msg)
    // We use a static single-thread worker that joins the previous operation
    // to ensure we never have "fire and forget" zombies accessing dead globals.
    if (hViewer && IsWindowVisible(hViewer)) {
-       std::lock_guard<std::mutex> lock(g_flushWorkerMtx);
-       if (g_flushWorker.joinable()) g_flushWorker.join();
+       // [FIX] Non-blocking flush. Skip if previous flush is still running.
+       // Prevents UI hang when disk I/O is slow.
+       bool expected = false;
+       if (g_isFlushing.compare_exchange_strong(expected, true)) {
+           std::lock_guard<std::mutex> lock(g_flushWorkerMtx);
+           // Join previous thread (now guaranteed to be finished or nearly finished) to clean up resources
+           if (g_flushWorker.joinable()) g_flushWorker.join();
 
-       g_flushWorker = std::thread([]() {
-           FlushLogger(); 
-           if (HWND hTarget = FindWindowW(L"PManLogViewer", nullptr)) {
-               PostMessageW(hTarget, WM_LOG_UPDATED, 0, 0);
-           }
-       });
+           g_flushWorker = std::thread([]() {
+               FlushLogger(); 
+               if (HWND hTarget = FindWindowW(L"PManLogViewer", nullptr)) {
+                   PostMessageW(hTarget, WM_LOG_UPDATED, 0, 0);
+               }
+               g_isFlushing.store(false); // Mark flush complete
+           });
+       }
    }
 }
