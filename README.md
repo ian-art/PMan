@@ -114,6 +114,9 @@ To ensure a clean, high-performance binary that is free of false positives, use 
 
 **Prerequisites:** Visual Studio 2022 (MSVC)
 
+> **⚠️ Crash Reporter Compliance**
+> The flags `/Zi`, `/DEBUG:FULL`, and `/INCREMENTAL:NO` are **strictly required**. They generate the PDB symbols necessary for the internal Crash Reporter to accurately map stack traces in minidumps. Removing these flags will render the "Flight Recorder" and "Watchdog" systems unable to analyze crashes.
+
 pman:
 
 ```cmd
