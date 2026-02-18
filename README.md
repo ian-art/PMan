@@ -66,15 +66,60 @@ PMan is engineered to be **100% compliant** with modern anti-cheat systems (Batt
 
 ---
 
-## 🎮 Features
+## 🎮 Comprehensive Feature Suite
+
+PMan v6 is divided into specific subsystems, each handling a distinct aspect of system harmony.
+
+### ⚡ Responsiveness & Input
 
 | Feature | Description |
 |---------|-------------|
-| **Policy Control** | Configure the agent's behavior via `policy.json`. Define the **Authority Budget** and **Confidence Thresholds**. |
-| **Live Audit** | View the decision chain in real-time. See the Arbiter reject actions due to "Low Confidence" or "Budget Exhausted." |
-| **Sandbox Leasing** | Optimizations are temporary "leases." If the agent crashes, the lease expires, and Windows defaults are automatically restored. |
-| **Hang Recovery** | The `ResponsivenessManager` detects hung applications (Window Ghosting) and applies soft thread boosts to attempt recovery. |
-| **External Verdict** | Supports an enterprise override via `verdict.json` to strictly `ALLOW` or `DENY` actions based on external requirements. |
+| **Input Guardian** | Intercepts raw HID interrupts (Mouse/Keyboard) to instantly boost the foreground window's thread priority the millisecond user activity is detected. |
+| **SRAM Engine** | System Responsiveness Awareness Module. actively probes UI latency (`SendMessageTimeout`), DWM frame drops, and DPC/ISR "Ghost Latency" to detect micro-stutters that standard task managers miss. |
+| **Window Ghosting Recovery** | Detects hung applications (Not Responding) and applies soft thread boosts to attempt recovery without terminating the process. |
+| **Focus Bias** | Automatically detects if the foreground window is a Game, Browser, or IDE, and adjusts scheduling aggression accordingly. |
+
+### 🚀 Performance & Scheduling
+
+| Feature | Description |
+|---------|-------------|
+| **Explorer Booster** | A smart shell manager that distinguishes between "Active" and "Idle" states. Boosts Windows Explorer during file operations but suppresses it during gaming. |
+| **Idle Affinity Manager** | Automatically "parks" background threads onto Efficiency Cores (E-Cores) or specific logical processors when the system is idle to save power and thermal headroom. |
+| **Granular Throttling** | Applies EcoQoS (Efficiency Mode) to heavy background tasks. Supports "Aggressive" throttling (Hard CPU Cap at 5%) via Job Objects for non-critical processes. |
+| **Hybrid Topology Awareness** | Native support for Intel/AMD hybrid architectures. Pins background telemetry and maintenance threads away from High-Performance (P-Cores). |
+
+### 💾 Memory & Resources
+
+| Feature | Description |
+|---------|-------------|
+| **Memory Shield** | "Harden Process" technology locks specific pages of the foreground application (e.g., a game) into physical RAM, preventing the OS from paging it out during Alt-Tab. |
+| **Smart Trim** | A context-aware memory cleaner. Performed only when necessary using two intensities: Gentle (Working Set reduction) and Hard (Standby List flushing). |
+| **Leak Guard** | Monitors specific processes for runaway memory usage and triggers a purge if they exceed safe thresholds. |
+
+### 🌐 Network Intelligence
+
+| Feature | Description |
+|---------|-------------|
+| **Traffic Shaping (QoS)** | Uses Windows `qWave` Quality of Service to tag packets and prioritize gaming/VoIP traffic over bulk downloads. |
+| **Bufferbloat Killer** | Detects latency spikes during heavy downloads and momentarily throttles background transfer agents (like Steam or BITS) to restore ping stability. |
+| **Smart Repair** | Automatically attempts self-healing actions (Flush DNS, Renew IP, Reset Adapter) if connectivity verification fails repeatedly. |
+
+### 🛡️ Safety & Architecture
+
+| Feature | Description |
+|---------|-------------|
+| **Flight Recorder** | A high-speed, lock-free crash reporter that captures "breadcrumbs" (execution history) and generates minidumps for post-mortem analysis. |
+| **Provenance Ledger** | A tamper-proof JSON audit log recording every decision, the active policy hash, and the specific reasons why alternative actions were rejected. |
+| **Registry Guard** | A detached watchdog process that automatically restores default Windows priority settings if the main PMan agent crashes or is forcibly terminated. |
+| **Titanium Config** | Configuration is encrypted via DPAPI (`CRYPTPROTECT_SYSTEM`) and managed via a secure IPC channel. Manual file tampering triggers a factory reset. |
+
+### 🔋 Power & Utility
+
+| Feature | Description |
+|---------|-------------|
+| **Keep Awake** | A tray utility to temporarily block system sleep and display dimming (useful for presentations or long downloads). |
+| **Dark Mode UI** | Fully themed Native Win32 UI (Menus, Dialogs, Scrollbars) that respects the system-wide Dark Mode setting. |
+| **Live Telemetry** | View real-time logic decisions, budget consumption, and confidence metrics via the built-in Dashboard. |
 
 ---
 
