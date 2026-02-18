@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="gif/tray_animation.gif" width="240"/>
+</p>
+
 <div align="center">
 
 # ⚡ Priority Manager (PMan) v6
