@@ -1044,6 +1044,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         else if (wmId == ID_TRAY_PAUSE) {
             bool p = !g_userPaused.load();
             g_userPaused.store(p);
+            PManContext::Get().isPaused.store(p);
 
             // --- ANIMATION STATE SWITCH ---
             TrayAnimator::Get().SetPaused(p);
@@ -1195,6 +1196,7 @@ static int RunPMan(int argc, wchar_t* argv[])
             msg += L"  --help, -h, /?      Show this help message\n";
             msg += L"  --uninstall         Stop instances and remove startup task\n";
             msg += L"  --silent, /S         Run operations without message boxes\n";
+            msg += L"  --paused             Start in paused mode (Protection Disabled)\n";
             msg += L"  --guard             (Internal) Registry safety guard\n\n";
             msg += L"Automated Windows Priority & Affinity Manager";
 
@@ -1203,7 +1205,10 @@ static int RunPMan(int argc, wchar_t* argv[])
         }
 		else if (arg == L"--uninstall" || arg == L"/uninstall") uninstall = true;
         else if (arg == L"/S" || arg == L"/s" || arg == L"/silent" || arg == L"-silent" || arg == L"/quiet") silent = true;
-        else if (arg == L"--paused") g_userPaused.store(true);
+        else if (arg == L"--paused") {
+            g_userPaused.store(true);
+            PManContext::Get().isPaused.store(true);
+        }
     }
 
     if (!uninstall)
