@@ -78,6 +78,8 @@ void NetworkMonitor::Initialize() {
     g_throttleManager.Initialize(); // Init Job Object
     if (m_running.exchange(true)) return;
     
+    m_icmpHandle = IcmpCreateFile();
+
     // [FIX] Initialize qWave (Ephemeral QoS)
     if (!InitializeQwave()) {
         Log("[NET_ERR] Failed to initialize qWave. QoS features may be disabled.");
@@ -119,6 +121,11 @@ void NetworkMonitor::Stop() {
         m_qosHandle = nullptr;
     }
 
+    if (m_icmpHandle != nullptr && m_icmpHandle != INVALID_HANDLE_VALUE) {
+        IcmpCloseHandle(m_icmpHandle);
+        m_icmpHandle = nullptr;
+    }
+
     // Telemetry Report
     Log("[NET_STAT] Session Summary: Interactive Boosts: " + std::to_string(m_statsBoostCount) + 
         ", Contention Interventions: " + std::to_string(m_statsThrottleEvents));
@@ -151,11 +158,12 @@ bool NetworkMonitor::PerformLatencyProbe() {
         if (now - s_lastCheck < 5000) return s_lastResult;
     }
 
-    // [FIX] RAII Handle Wrapper: Ensures handle is closed exactly once, preventing INVALID_HANDLE crashes
-    struct IcmpDeleter { void operator()(HANDLE h) { if (h != INVALID_HANDLE_VALUE) IcmpCloseHandle(h); } };
-    std::unique_ptr<void, IcmpDeleter> hIcmp(IcmpCreateFile());
-
-    if (hIcmp.get() == INVALID_HANDLE_VALUE) return false;
+// [FIX] Use persistent handle to prevent winnsi.dll race condition (Crash mitigation)
+    if (m_icmpHandle == INVALID_HANDLE_VALUE || m_icmpHandle == nullptr) {
+        m_icmpHandle = IcmpCreateFile();
+        if (m_icmpHandle == INVALID_HANDLE_VALUE) return false;
+    }
+    HANDLE hIcmp = m_icmpHandle;
 
     char sendData[] = "PManProbe";
     // [FIX] Memory Alignment: Use vector<uint64_t> to enforce 8-byte alignment for ICMP structures
@@ -171,7 +179,7 @@ bool NetworkMonitor::PerformLatencyProbe() {
         PICMP_ECHO_REPLY reply = (PICMP_ECHO_REPLY)replyBufferAligned.data();
         
         // [FIX] Increased timeout to 800ms to tolerate bufferbloat during streaming/gaming
-        DWORD status = IcmpSendEcho(hIcmp.get(), ip, sendData, sizeof(sendData), 
+        DWORD status = IcmpSendEcho(hIcmp, ip, sendData, sizeof(sendData), 
                                   nullptr, replyBufferAligned.data(), replySize, 800);
 
         if (status > 0 && reply->Status == IP_SUCCESS) {
