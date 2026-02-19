@@ -96,6 +96,7 @@ private:
     
     // qWave State
     HANDLE m_qosHandle = nullptr;
+    HANDLE m_icmpHandle = nullptr; // Persistent handle to avoid winnsi.dll race
     std::vector<HANDLE> m_activeQosSockets; // Duplicated handles holding the flow
     
     // Configurable List
