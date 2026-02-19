@@ -324,7 +324,7 @@ void SramEngine::EvaluateState() {
     // Self-Starvation (Tray Icon): If animation stops, main thread is starving.
     // Timer is 150ms. >250ms implies missed frame (Stutter). >600ms is heavy lag.
     uint64_t lastAnim = TrayAnimator::Get().GetLastAnimationTime();
-    uint64_t animDelta = (now > lastAnim) ? (now - lastAnim) : 0;
+    uint64_t animDelta = (lastAnim > 0 && now > lastAnim) ? (now - lastAnim) : 0;
     // [TUNING] Tightened thresholds: 250ms (Missed Frame) to 750ms (Freeze)
     float n_self = NormalizeMetric((float)animDelta, 250.0f, 750.0f);
 
