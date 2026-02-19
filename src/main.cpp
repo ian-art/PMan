@@ -766,10 +766,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
         // [DARK MODE] Apply Centralized Dark Mode
         DarkMode::ApplyToWindow(hwnd);
+
+        // Keep heartbeat alive during modal loops (e.g., TrackPopupMenuEx)
+        SetTimer(hwnd, 9999, 1000, nullptr);
         return 0;
 
     // [DARK MODE] Refresh Menu Themes if system theme changes
     case WM_TIMER:
+        if (wParam == 9999) {
+            if (auto* hb = PManContext::Get().runtime.pHeartbeat) {
+                hb->counter.fetch_add(1, std::memory_order_relaxed);
+                hb->last_tick = GetTickCount64();
+            }
+            return 0;
+        }
         TrayAnimator::Get().OnTimer(wParam);
         return 0;
 
@@ -1095,6 +1105,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return TRUE;
 
     case WM_DESTROY:
+        KillTimer(hwnd, 9999);
         TrayAnimator::Get().Shutdown();
         PostQuitMessage(0);
         return 0;
@@ -1682,13 +1693,6 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
             // Rate limit the tick calls to prevent CPU spinning
             if ((now - g_lastExplorerPollMs) >= pollIntervalMs) {
                 
-                // Update Heartbeat (Proof of Life)
-                // We do this in the MAIN THREAD to prove the message loop is not hung.
-                if (auto* hb = PManContext::Get().runtime.pHeartbeat) {
-                    hb->counter.fetch_add(1, std::memory_order_relaxed);
-                    hb->last_tick = GetTickCount64();
-                }
-
                 // FIX: Offload to persistent worker thread to protect Keyboard Hook
                 {
                     std::lock_guard<std::mutex> lock(g_backgroundQueueMtx);
