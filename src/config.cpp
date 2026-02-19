@@ -604,6 +604,7 @@ void SecureConfigManager::SaveSecureConfig() {
 
         // Time Lock (Version + Integrity)
         uint64_t nextVer = GetRegistryConfigVersion() + 1;
+        if (nextVer < 15) nextVer = 15; // Enforce MIN_SECURE_VERSION for new installations
         SetRegistryConfigVersion(nextVer);
         
         ConfigHeader header;
