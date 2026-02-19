@@ -34,18 +34,19 @@ void PredictiveModel::Initialize() {
     if (std::filesystem::exists(path)) {
         std::ifstream f(path, std::ios::binary);
         if (f.is_open()) {
-            size_t size = 0;
-            f.read(reinterpret_cast<char*>(&size), sizeof(size));
-
-            for (size_t i = 0; i < size; ++i) {
-                ModelKey key = {};
-                PredictionStats stats = {};
-                f.read(reinterpret_cast<char*>(&key), sizeof(ModelKey));
-                f.read(reinterpret_cast<char*>(&stats), sizeof(PredictionStats));
-                m_stats[key] = stats;
+                size_t size = 0;
+                if (f.read(reinterpret_cast<char*>(&size), sizeof(size))) {
+                    for (size_t i = 0; i < size; ++i) {
+                        ModelKey key = {};
+                        PredictionStats stats = {};
+                        f.read(reinterpret_cast<char*>(&key), sizeof(ModelKey));
+                        f.read(reinterpret_cast<char*>(&stats), sizeof(PredictionStats));
+                        if (!f.good()) break;
+                        m_stats[key] = stats;
+                    }
+                    Log("[BRAIN] Loaded " + std::to_string(m_stats.size()) + " learned patterns.");
+                }
             }
-            Log("[BRAIN] Loaded " + std::to_string(size) + " learned patterns.");
-        }
     }
 }
 
