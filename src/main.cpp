@@ -449,6 +449,21 @@ static void RunAutonomousCycle() {
         confMetrics = ctx.subs.confidence->GetMetrics();
     }
 
+    // [FIX] Feed reality back to the Predictive Model (The Brain) so it actually learns
+    if (ctx.subs.model && decision.selectedAction != BrainAction::Maintain) {
+        OptimizationFeedback fb = {};
+        fb.mode = priorities.mode;
+        fb.dominant = priorities.dominant;
+        fb.action = decision.selectedAction;
+        fb.cpuDelta = observed.cpuLoadDelta;
+        fb.memDelta = 0.0;
+        fb.diskDelta = 0.0;
+        fb.latencyDelta = observed.latencyDelta;
+        fb.userInterrupted = false;
+        
+        ctx.subs.model->Feedback(priorities.mode, priorities.dominant, priorities.allowedActions, consequences.cost, fb);
+    }
+
     // 10. Logger (Trace full decision chain + Reality + Error + Confidence + Sandbox + Budget)
     std::string budgetLog = "";
     if (ctx.subs.budget) {
@@ -1104,6 +1119,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         }
         return TRUE;
 
+    case WM_QUERYENDSESSION:
+        // OS is asking if it can shut down. Tell it yes.
+        return TRUE;
+
+    case WM_ENDSESSION:
+        // Windows is shutting down or restarting right now. 
+        // We have very limited time before the OS forcefully terminates the process.
+        if (wParam == TRUE) {
+            Log("[LIFECYCLE] Windows restart/shutdown detected. Emergency brain flush.");
+            if (PManContext::Get().subs.model) {
+                PManContext::Get().subs.model->Shutdown();
+            }
+        }
+        return 0;
+
     case WM_DESTROY:
         KillTimer(hwnd, 9999);
         TrayAnimator::Get().Shutdown();
@@ -1713,6 +1743,15 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                             }
                         }
                         lastOpt = GetTickCount64();
+                    }
+
+                    // [FIX] Periodic Brain Save (Every 15 minutes)
+                    static uint64_t lastBrainSave = GetTickCount64();
+                    if (GetTickCount64() - lastBrainSave > 900000) {
+                        if (auto& model = PManContext::Get().subs.model) {
+                            model->Shutdown(); // Writes m_stats to brain.bin
+                        }
+                        lastBrainSave = GetTickCount64();
                     }
 
 						// Legacy/Advisory Updates (Data Collection Only)
