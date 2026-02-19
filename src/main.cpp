@@ -623,7 +623,7 @@ private:
 
         if (size.QuadPart > lastPos) {
             DWORD bytesToRead = (DWORD)(size.QuadPart - lastPos);
-            if (bytesToRead > 65536 && lastPos == 0) {
+            if (bytesToRead > 65536) {
                 lastPos = size.QuadPart - 65536;
                 bytesToRead = 65536;
             }
