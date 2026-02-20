@@ -35,44 +35,40 @@
 namespace Lifecycle {
 
     void TerminateExistingInstances() {
-        // [PATCH] Async Termination
-        // Run termination in a detached thread to prevent blocking the main UI/Startup.
-        std::thread([]() {
-            wchar_t self[MAX_PATH] = {};
-            GetModuleFileNameW(nullptr, self, MAX_PATH);
-            std::wstring selfName = std::filesystem::path(self).filename().wstring();
+        wchar_t self[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, self, MAX_PATH);
+        std::wstring selfName = std::filesystem::path(self).filename().wstring();
 
-            // RAII for Snapshot handle
-            UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
-            if (hSnap.get() == INVALID_HANDLE_VALUE) return;
+        // RAII for Snapshot handle
+        UniqueHandle hSnap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+        if (hSnap.get() == INVALID_HANDLE_VALUE) return;
 
-            PROCESSENTRY32W pe{};
-            pe.dwSize = sizeof(pe);
+        PROCESSENTRY32W pe{};
+        pe.dwSize = sizeof(pe);
 
-            if (Process32FirstW(hSnap.get(), &pe)) {
-                // [DYNAMIC] Target both the App and its corresponding Watchdog
-                // e.g. "Guardian.exe" and "GuardianWatchdog.exe"
-                std::wstring watchdogName = std::filesystem::path(selfName).stem().wstring() + L"Watchdog.exe";
+        if (Process32FirstW(hSnap.get(), &pe)) {
+            // [DYNAMIC] Target both the App and its corresponding Watchdog
+            // e.g. "Guardian.exe" and "GuardianWatchdog.exe"
+            std::wstring watchdogName = std::filesystem::path(selfName).stem().wstring() + L"Watchdog.exe";
 
-                do {
-                    // Check strict match for Self OR Watchdog
-                    if (_wcsicmp(pe.szExeFile, selfName.c_str()) == 0 || 
-                        _wcsicmp(pe.szExeFile, watchdogName.c_str()) == 0) {
+            do {
+                // Check strict match for Self OR Watchdog
+                if (_wcsicmp(pe.szExeFile, selfName.c_str()) == 0 || 
+                    _wcsicmp(pe.szExeFile, watchdogName.c_str()) == 0) {
 
-                        // Don't kill ourselves
-                        if (pe.th32ProcessID != GetCurrentProcessId()) {
-                            // [PATCH] Open with SYNCHRONIZE to ensure WaitForSingleObject works correctly
-                            UniqueHandle hProc(OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pe.th32ProcessID));
-                            if (hProc) {
-                                TerminateProcess(hProc.get(), 0);
-                                // Wait up to 3s (Blocks this worker thread only)
-                                WaitForSingleObject(hProc.get(), 3000);
-                            }
+                    // Don't kill ourselves
+                    if (pe.th32ProcessID != GetCurrentProcessId()) {
+                        // [PATCH] Open with SYNCHRONIZE to ensure WaitForSingleObject works correctly
+                        UniqueHandle hProc(OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pe.th32ProcessID));
+                        if (hProc) {
+                            TerminateProcess(hProc.get(), 0);
+                            // Wait up to 3s to guarantee termination before proceeding
+                            WaitForSingleObject(hProc.get(), 3000);
                         }
                     }
-                } while (Process32NextW(hSnap.get(), &pe));
-            }
-        }).detach();
+                }
+            } while (Process32NextW(hSnap.get(), &pe));
+        }
     }
 
     bool IsTaskInstalled(const std::wstring& taskName) {
