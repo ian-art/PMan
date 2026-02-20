@@ -30,12 +30,22 @@ void PredictiveModel::Initialize() {
 
     std::lock_guard<std::mutex> lock(m_mtx);
     std::filesystem::path path = GetLogPath() / L"brain.bin";
+    std::filesystem::path backupPath = GetLogPath() / L"brain.bin.bak";
 
-    if (std::filesystem::exists(path)) {
-        std::ifstream f(path, std::ios::binary);
-        if (f.is_open()) {
+    auto tryLoad = [&](const std::filesystem::path& p) -> bool {
+        if (!std::filesystem::exists(p)) return false;
+        
+        // Scope the file stream to ensure the handle is released before potential deletion
+        {
+            std::ifstream f(p, std::ios::binary);
+            if (!f.is_open()) return false;
+            
+            uint32_t magic = 0;
+            // Verify Magic Signature and Bounds
+            if (f.read(reinterpret_cast<char*>(&magic), sizeof(magic)) && magic == 0x4E415242) {
                 size_t size = 0;
-                if (f.read(reinterpret_cast<char*>(&size), sizeof(size))) {
+                if (f.read(reinterpret_cast<char*>(&size), sizeof(size)) && size < 100000) {
+                    m_stats.clear(); // Ensure clean slate before loading
                     for (size_t i = 0; i < size; ++i) {
                         ModelKey key = {};
                         PredictionStats stats = {};
@@ -44,18 +54,43 @@ void PredictiveModel::Initialize() {
                         if (!f.good()) break;
                         m_stats[key] = stats;
                     }
-                    Log("[BRAIN] Loaded " + std::to_string(m_stats.size()) + " learned patterns.");
+                    return true;
                 }
             }
+        } // std::ifstream goes out of scope and closes the file handle here
+        
+        // If execution reaches here, the file exists but failed validation.
+        // It is corrupted. Delete it immediately to maintain system hygiene.
+        std::error_code ec;
+        std::filesystem::remove(p, ec);
+        return false;
+    };
+
+    if (tryLoad(path)) {
+        Log("[BRAIN] Loaded " + std::to_string(m_stats.size()) + " learned patterns.");
+    } else if (tryLoad(backupPath)) {
+        Log("[BRAIN] Main file corrupted/missing. Recovered " + std::to_string(m_stats.size()) + " patterns from backup.");
+    } else {
+        Log("[BRAIN] No valid brain data found. Starting fresh.");
     }
 }
 
 void PredictiveModel::Shutdown() {
     std::lock_guard<std::mutex> lock(m_mtx);
     std::filesystem::path path = GetLogPath() / L"brain.bin";
-    std::ofstream f(path, std::ios::binary);
+    std::filesystem::path backupPath = GetLogPath() / L"brain.bin.bak";
 
+    // Backup existing known-good brain before writing a new one
+    if (std::filesystem::exists(path)) {
+        std::error_code ec;
+        std::filesystem::copy_file(path, backupPath, std::filesystem::copy_options::overwrite_existing, ec);
+    }
+
+    std::ofstream f(path, std::ios::binary);
     if (f.is_open()) {
+        const uint32_t MAGIC_SIG = 0x4E415242; // "BRAN"
+        f.write(reinterpret_cast<const char*>(&MAGIC_SIG), sizeof(MAGIC_SIG));
+
         size_t size = m_stats.size();
         f.write(reinterpret_cast<const char*>(&size), sizeof(size));
 
