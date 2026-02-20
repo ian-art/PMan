@@ -77,6 +77,12 @@ void PredictiveModel::Initialize() {
 
 void PredictiveModel::Shutdown() {
     std::lock_guard<std::mutex> lock(m_mtx);
+
+    // [OPTIMIZATION] Skip disk I/O and backup rotation if the brain hasn't learned anything yet
+    if (m_stats.empty()) {
+        return;
+    }
+
     std::filesystem::path path = GetLogPath() / L"brain.bin";
     std::filesystem::path backupPath = GetLogPath() / L"brain.bin.bak";
 
