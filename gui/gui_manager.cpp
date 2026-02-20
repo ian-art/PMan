@@ -20,8 +20,8 @@
 #include "gui_manager.h"
 #include "static_tweaks.h"
 #include "config.h"
-#include "ipc_client.h" // [PATCH] IPC Client Integration
-#include "nlohmann/json.hpp" // [PATCH] JSON Support
+#include "ipc_client.h" // IPC Client Integration
+#include "nlohmann/json.hpp" // JSON Support
 #include "logger.h"
 #include "utils.h" // For GetCurrentExeVersion
 #include "context.h"
@@ -43,10 +43,12 @@
 #include "imgui_impl_dx11.h"
 #include <fstream>      // For file export
 #include <commdlg.h>    // For GetSaveFileName
+#include <thread>       // For async ApplyStaticTweaks dispatch
+#include <atomic>       // For g_tweakJob state
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dwmapi.lib")
-#pragma comment(lib, "comdlg32.lib") // [PATCH] Required for Save Dialog
+#pragma comment(lib, "comdlg32.lib") // Required for Save Dialog
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
     HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -68,7 +70,7 @@ namespace GuiManager {
     enum class GuiMode { TuneUp, About, Help, LogViewer, Config };
     static GuiMode g_activeMode = GuiMode::TuneUp;
     
-    // [PATCH] Tab Navigation Request
+    // Tab Navigation Request
     static std::string g_requestedTab = "";
 
     void OpenPolicyTab() {
@@ -79,7 +81,7 @@ namespace GuiManager {
     // Config Window State
     struct ConfigState {
         // Rate Limiting
-        uint64_t lastSaveTime = 0; // [PATCH] Cool-down timer
+        uint64_t lastSaveTime = 0; // Cool-down timer
 
         // Tab 1: Global
         bool ignoreNonInteractive = true;
@@ -126,7 +128,7 @@ namespace GuiManager {
     };
     static ConfigState g_configState;
 
-// [PATCH] List Editor State
+// List Editor State
     struct ListEditorState {
         bool initialized = false;
         int selectedCategory = 0;
@@ -200,7 +202,7 @@ namespace GuiManager {
             // Simple validation: lowercase
             for (auto& c : newItem) c = (char)tolower(c); // [FIX] Explicit cast to silence C4244
             
-            // [PATCH] Validation: Require .exe extension if requested
+            // Validation: Require .exe extension if requested
             bool isValid = true;
             if (requireExe) {
                 if (newItem.length() < 5 || newItem.substr(newItem.length() - 4) != ".exe") {
@@ -239,10 +241,10 @@ namespace GuiManager {
     // Log Viewer State
     static std::string g_logBuffer;
     static bool g_logAutoScroll = true;
-    static bool g_viewWatchdogLog = false; // [PATCH] Toggle state
+    static bool g_viewWatchdogLog = false; // Toggle state
     static uint64_t g_lastLogCheck = 0;
     
-    // [PATCH] Watchdog Log Reader Structures
+    // Watchdog Log Reader Structures
     const size_t WD_LOG_SIZE = 16384;
     const size_t WD_LOG_MASK = WD_LOG_SIZE - 1;
     struct WatchdogLogShared {
@@ -256,7 +258,7 @@ namespace GuiManager {
 
     static void UpdateLogContent() {
         uint64_t now = GetTickCount64();
-        if (now - g_lastLogCheck < 250) return; // [PATCH] Faster refresh (250ms)
+        if (now - g_lastLogCheck < 250) return; // Faster refresh (250ms)
         g_lastLogCheck = now;
 
         if (g_viewWatchdogLog) {
@@ -288,7 +290,7 @@ namespace GuiManager {
                 g_logBuffer = "[GUI] Waiting for Watchdog process...";
             }
         } else {
-            // [PATCH] Direct memory access (Zero-Copy logic handled in Logger)
+            // Direct memory access (Zero-Copy logic handled in Logger)
             GetLogSnapshot(g_logBuffer);
         }
     }
@@ -305,6 +307,10 @@ namespace GuiManager {
     };
 
     static TweakConfig g_config;
+    // 0=idle, 1=running, 2=done_ok, 3=done_fail
+    // ApplyStaticTweaks is dispatched to a background thread to keep the
+    // main message pump alive and prevent heartbeat starvation.
+    static std::atomic<int> g_tweakJob{0};
 
     // Fonts
     static ImFont* g_pFontRegular = nullptr;
@@ -509,7 +515,7 @@ namespace GuiManager {
         g_configState.faultIntent = f.intentInvalid;
         g_configState.faultConfidence = f.confidenceInvalid;
 
-        // [PATCH] Populate Verdict State from Disk
+        // Populate Verdict State from Disk
         {
             std::wstring vPath = GetLogPath() / L"verdict.json";
             auto vData = ExternalVerdict::LoadVerdict(vPath);
@@ -665,7 +671,7 @@ namespace GuiManager {
 
                     // [FIX] Use InputInt for uniformity with other tabs
                     ImGui::InputInt("Idle Timeout", &g_configState.idleTimeoutSec);
-                    if (g_configState.idleTimeoutSec < 10) g_configState.idleTimeoutSec = 10; // [PATCH] Enforce minimum 10s
+                    if (g_configState.idleTimeoutSec < 10) g_configState.idleTimeoutSec = 10; // Enforce minimum 10s
                     HelpMarker("Time in seconds before idle mode activates.");
 
                     ImGui::Separator();
@@ -696,7 +702,7 @@ namespace GuiManager {
                     ImGui::SameLine();
 
                     if (ImGui::Button("Save Settings", ImVec2(140, 32))) {
-                        // [PATCH] Rate Limiting (Prevent Pipe Spam)
+                        // Rate Limiting (Prevent Pipe Spam)
                         uint64_t now = GetTickCount64();
                         if (now - g_configState.lastSaveTime < 1000) {
                             MessageBoxW(g_hwnd, L"Please wait before saving again.", L"Cool-down", MB_OK);
@@ -749,7 +755,7 @@ namespace GuiManager {
                                     g_iconTheme = Utf8ToWide(g_configState.iconTheme);
                                 }
 
-                                // [PATCH] Sync Explorer Local State (Prevent UI Revert)
+                                // Sync Explorer Local State (Prevent UI Revert)
                                 ExplorerConfig ec;
                                 ec.enabled = g_configState.expEnabled;
                                 ec.idleThresholdMs = g_configState.expIdleThresholdSec * 1000;
@@ -784,7 +790,7 @@ namespace GuiManager {
                     if (g_configState.expEnabled) {
                         // [FIX] Use InputInt for uniformity
                         ImGui::InputInt("Idle Threshold", &g_configState.expIdleThresholdSec);
-                        if (g_configState.expIdleThresholdSec < 1) g_configState.expIdleThresholdSec = 1; // [PATCH] Prevent integer overflow/zero
+                        if (g_configState.expIdleThresholdSec < 1) g_configState.expIdleThresholdSec = 1; // Prevent integer overflow/zero
                         HelpMarker("Time in seconds with no user input and no foreground game before boost activates.");
 
                         ImGui::Checkbox("Boost DWM", &g_configState.boostDwm);
@@ -801,7 +807,7 @@ namespace GuiManager {
 
                         // [FIX] Use InputInt for uniformity
                         ImGui::InputInt("Scan Interval", &g_configState.scanIntervalSec);
-                        if (g_configState.scanIntervalSec < 1) g_configState.scanIntervalSec = 1; // [PATCH] Safety Clamp (Min 1s)
+                        if (g_configState.scanIntervalSec < 1) g_configState.scanIntervalSec = 1; // Safety Clamp (Min 1s)
                         HelpMarker("Time in seconds on how often to check for new Explorer windows.");
                     }
                     
@@ -820,7 +826,7 @@ namespace GuiManager {
                     ImGui::SameLine();
 
                     if (ImGui::Button("Save Settings", ImVec2(140, 32))) {
-                        // [PATCH] Trigger the main save logic (reusing Global Tab logic for consistency)
+                        // Trigger the main save logic (reusing Global Tab logic for consistency)
                         // In a real refactor, this should be a shared function.
                         // For now, we replicate the JSON construction to ensure all fields are sent.
                         
@@ -854,7 +860,7 @@ namespace GuiManager {
 
                             IpcClient::Response resp = IpcClient::SendConfig(root);
                              if (resp.success) {
-                                // [PATCH] Synchronize Global Atomics to prevent state regression
+                                // Synchronize Global Atomics to prevent state regression
                                 g_ignoreNonInteractive.store(g_configState.ignoreNonInteractive);
                                 g_restoreOnExit.store(g_configState.restoreOnExit);
                                 g_lockPolicy.store(g_configState.lockPolicy);
@@ -869,7 +875,7 @@ namespace GuiManager {
                                     g_iconTheme = Utf8ToWide(g_configState.iconTheme);
                                 }
 
-                                // [PATCH] Sync Explorer Local State (Prevent UI Revert)
+                                // Sync Explorer Local State (Prevent UI Revert)
                                 ExplorerConfig ec;
                                 ec.enabled = g_configState.expEnabled;
                                 ec.idleThresholdMs = g_configState.expIdleThresholdSec * 1000;
@@ -894,7 +900,7 @@ namespace GuiManager {
                     ImGui::EndTabItem();
                 }
 
-                // [PATCH] Auto-Select Policy Tab if requested
+                // Auto-Select Policy Tab if requested
                 int polFlags = 0;
                 if (g_requestedTab == "Policy") {
                     polFlags = ImGuiTabItemFlags_SetSelected;
@@ -904,7 +910,7 @@ namespace GuiManager {
                 if (ImGui::BeginTabItem("Policy", nullptr, polFlags)) {
                     BeginCard("pol", {0.14f, 0.10f, 0.10f, 1.0f});
                     
-                    // [PATCH] Preset Buttons
+                    // Preset Buttons
                     // Dynamic layout: Calculates exact width to fit 5 buttons in one row
                     float availW = ImGui::GetContentRegionAvail().x;
                     float gap = ImGui::GetStyle().ItemSpacing.x;
@@ -974,7 +980,7 @@ namespace GuiManager {
                     ImGui::InputInt("Authority Budget", &g_configState.maxBudget);
                     HelpMarker("Finite authority limit. Each action consumes budget.\nWhen exhausted, the system permanently reverts to Maintain until externally reset.");
 
-                    // [PATCH] Enforce Safety Limits (0.1% to Engine Max)
+                    // Enforce Safety Limits (0.1% to Engine Max)
                     // Min 0.001 ensures the AI isn't permanently frozen.
                     // Max 25.0/50.0 matches decision_arbiter.h hard limits.
                     ImGui::InputFloat("CPU Variance", &g_configState.cpuVar, 0.005f, 0.01f, "%.3f");
@@ -996,7 +1002,7 @@ namespace GuiManager {
                     //ImGui::BeginDisabled();
                     ImGui::Checkbox("Stability (Inaction)", &g_configState.allowMaintain);
                     //ImGui::EndDisabled();
-                    // [PATCH] Corrected description: Disabling 'Maintain' causes syscall spam, reducing performance.
+                    // Corrected description: Disabling 'Maintain' causes syscall spam, reducing performance.
                     HelpMarker("The 'Do Nothing' choice. Required for stability. Without this, the\nAI is forced to constantly intervene, wasting CPU cycles on unnecessary API calls.\nWARNING: Unchecking this will likely INCREASE input lag.");
 
                     ImGui::Checkbox("Throttle (Mild)", &g_configState.allowThrottleMild);
@@ -1017,7 +1023,7 @@ namespace GuiManager {
                     if (ImGui::Button("Apply Policy", ImVec2(140, 32))) {
                         bool proceed = true;
 
-                        // [PATCH] Rate Limiting (Prevent Pipe Spam)
+                        // Rate Limiting (Prevent Pipe Spam)
                         uint64_t now = GetTickCount64();
                         if (now - g_configState.lastSaveTime < 1000) {
                             MessageBoxW(g_hwnd, L"Please wait before saving again.", L"Cool-down", MB_OK);
@@ -1026,7 +1032,7 @@ namespace GuiManager {
                             g_configState.lastSaveTime = now;
                         }
 
-                        // [PATCH] Safety Warning for High Variance
+                        // Safety Warning for High Variance
                         // Warn if user sets variance >= 1.0 (Chaos Mode), but allow it.
                         if (proceed && (g_configState.cpuVar >= 1.0f || g_configState.latVar >= 1.0f)) {
                             if (MessageBoxW(g_hwnd, 
@@ -1067,7 +1073,7 @@ namespace GuiManager {
                             // Ensure Maintain is present if user checked it (redundant safety)
                             if (g_configState.allowMaintain) limits.allowedActions.insert((int)BrainAction::Maintain);
                             
-                            // [PATCH] Send Policy via IPC
+                            // Send Policy via IPC
                             nlohmann::json root;
                             root["policy"]["max_authority_budget"] = limits.maxAuthorityBudget;
                             root["policy"]["min_confidence"]["cpu_variance"] = limits.minConfidence.cpuVariance;
@@ -1107,21 +1113,21 @@ namespace GuiManager {
                     HelpMarker("ALLOW: AI has full control.\nDENY: AI is completely disabled.\nCONSTRAIN: AI is restricted to specific safe actions only.");
                     
                     ImGui::InputInt("Duration", &g_configState.durationHours);
-                    if (g_configState.durationHours < 1) g_configState.durationHours = 1; // [PATCH] Min 1 hour
-                    if (g_configState.durationHours > 168) g_configState.durationHours = 168; // [PATCH] Max 1 week
+                    if (g_configState.durationHours < 1) g_configState.durationHours = 1; // Min 1 hour
+                    if (g_configState.durationHours > 168) g_configState.durationHours = 168; // Max 1 week
                     HelpMarker("Time in hours on how long this override should last before returning to normal operation.");
 
                     ImGui::Separator();
 
                     if (ImGui::Button("Revoke Authority Now", ImVec2(180, 32))) {
-                        // [PATCH] Rate Limiting
+                        // Rate Limiting
                         uint64_t now = GetTickCount64();
                         if (now - g_configState.lastSaveTime < 1000) {
                             MessageBoxW(g_hwnd, L"Please wait...", L"Cool-down", MB_OK);
                         } else {
                             g_configState.lastSaveTime = now;
 
-                            // [PATCH] IPC Panic Button (Verified)
+                            // IPC Panic Button (Verified)
                             nlohmann::json root;
                             root["verdict"]["status"] = "DENY";
                             root["verdict"]["duration_sec"] = 3600;
@@ -1131,7 +1137,7 @@ namespace GuiManager {
                             
                             if (resp.success) {
                                 MessageBoxW(g_hwnd, L"Emergency Stop Signal Confirmed.\nAI Authority Revoked for 1 Hour.", L"PMan Panic", MB_OK | MB_ICONWARNING);
-                                // [PATCH] Auto-update local UI to reflect reality
+                                // Auto-update local UI to reflect reality
                                 g_configState.verdictIdx = 1; // Set to DENY
                             } else {
                                 MessageBoxW(g_hwnd, Utf8ToWide(resp.message.c_str()).c_str(), L"PANIC FAILED", MB_OK | MB_ICONERROR);
@@ -1143,14 +1149,14 @@ namespace GuiManager {
                     ImGui::SameLine();
                     
                     if (ImGui::Button("Grant Authority", ImVec2(180, 32))) {
-                         // [PATCH] Rate Limiting
+                         // Rate Limiting
                         uint64_t now = GetTickCount64();
                         if (now - g_configState.lastSaveTime < 1000) {
                             MessageBoxW(g_hwnd, L"Please wait before applying again.", L"Cool-down", MB_OK);
                         } else {
                             g_configState.lastSaveTime = now;
 
-                            // [PATCH] IPC Verdict
+                            // IPC Verdict
                             nlohmann::json root;
                             std::string vStr = "ALLOW";
                             if (g_configState.verdictIdx == 1) vStr = "DENY";
@@ -1174,7 +1180,7 @@ namespace GuiManager {
                 }
 
                 if (ImGui::BeginTabItem("Lists")) {
-                    // [PATCH] Real List Editor
+                    // Real List Editor
                     g_listState.Load(); // Ensure local copies are ready
                     
                     BeginCard("lists", {0.14f, 0.14f, 0.16f, 1.0f});
@@ -1237,7 +1243,7 @@ namespace GuiManager {
                     // We send ALL lists at once to ensure consistency
                     ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 160);
                     if (ImGui::Button("Save Process Lists", ImVec2(140, 32))) {
-                         // [PATCH] Rate Limiting
+                         // Rate Limiting
                         uint64_t now = GetTickCount64();
                         if (now - g_configState.lastSaveTime < 1000) {
                             MessageBoxW(g_hwnd, L"Please wait before saving again.", L"Cool-down", MB_OK);
@@ -1313,14 +1319,14 @@ namespace GuiManager {
                     ImGui::Separator();
 
                     if (ImGui::Button("Apply Debug Settings", ImVec2(180, 32))) {
-                        // [PATCH] Rate Limiting
+                        // Rate Limiting
                         uint64_t now = GetTickCount64();
                         if (now - g_configState.lastSaveTime < 1000) {
                             MessageBoxW(g_hwnd, L"Please wait before applying again.", L"Cool-down", MB_OK);
                         } else {
                             g_configState.lastSaveTime = now;
 
-                            // [PATCH] IPC Debug
+                            // IPC Debug
                             nlohmann::json root;
                         
                         // Fault Injection
@@ -1393,10 +1399,33 @@ namespace GuiManager {
                         ImGui::EndTabBar();
                     }
                     ImGui::Separator();
-                    if (ImGui::Button("Apply Tweaks", ImVec2(140, 32))) {
-                        if (ApplyStaticTweaks(g_config)) {
-                            SaveTweakPreferences(g_config);
+                    // [FIX] ApplyStaticTweaks calls CreateRestorePoint (srclient/RPC, 10-30s).
+                    // Running it synchronously blocks the message pump and starves the heartbeat.
+                    // Dispatch to a detached thread; main thread stays responsive.
+                    {
+                        int job = g_tweakJob.load(std::memory_order_acquire);
+                        if (job == 2) {
+                            g_tweakJob.store(0, std::memory_order_release);
                             MessageBoxW(g_hwnd, L"Your selected optimizations have been applied.", L"Success", MB_OK | MB_ICONINFORMATION);
+                        } else if (job == 3) {
+                            g_tweakJob.store(0, std::memory_order_release);
+                            MessageBoxW(g_hwnd, L"Some optimizations could not be applied. Check the Live Log for details.", L"Partial Success", MB_OK | MB_ICONWARNING);
+                        }
+
+                        if (job == 1) {
+                            ImGui::BeginDisabled();
+                            ImGui::Button("Applying...", ImVec2(140, 32));
+                            ImGui::EndDisabled();
+                        } else if (job == 0) {
+                            if (ImGui::Button("Apply Tweaks", ImVec2(140, 32))) {
+                                TweakConfig cfgCopy = g_config; // value copy before thread launch
+                                g_tweakJob.store(1, std::memory_order_release);
+                                std::thread([cfgCopy]() mutable {
+                                    bool ok = ApplyStaticTweaks(cfgCopy);
+                                    if (ok) SaveTweakPreferences(cfgCopy);
+                                    g_tweakJob.store(ok ? 2 : 3, std::memory_order_release);
+                                }).detach();
+                            }
                         }
                     }
                     ImGui::EndTabItem();
@@ -1465,7 +1494,7 @@ namespace GuiManager {
         {
             UpdateLogContent();
 
-            // [PATCH] Source Selector
+            // Source Selector
             ImGui::Text("Source:");
             ImGui::SameLine();
             if (ImGui::RadioButton("Internal Core", !g_viewWatchdogLog)) { 
