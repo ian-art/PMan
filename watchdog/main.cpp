@@ -183,6 +183,7 @@ void LaunchTarget(const wchar_t* args = nullptr) {
     }
 
     std::wstring targetPath = (self.parent_path() / targetName).wstring();
+    std::wstring targetDir = self.parent_path().wstring();
 
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi = { 0 };
@@ -198,7 +199,9 @@ void LaunchTarget(const wchar_t* args = nullptr) {
     std::vector<wchar_t> cmdBuf(cmdLine.begin(), cmdLine.end());
     cmdBuf.push_back(0);
 
-    if (CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE, 0, NULL, NULL, &si, &pi)) {
+    // [PATCH] Set explicit working directory to prevent UAC "Run as Admin" 
+    // from defaulting to C:\Windows\System32, which breaks relative icon paths.
+    if (CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE, 0, NULL, targetDir.c_str(), &si, &pi)) {
         // [MEDIUM PRIORITY] Transfer ownership to RAII handle
         g_hTargetProcess.reset(pi.hProcess);
         CloseHandle(pi.hThread); // We don't need the thread handle
