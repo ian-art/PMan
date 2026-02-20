@@ -67,6 +67,25 @@ static const wchar_t* REG_VALUE_NAME = L"FirstRunRestorePoint";
 // Dynamic function pointer definition
 typedef BOOL (WINAPI *SRSetRestorePointWPtr)(PRESTOREPOINTINFOW, PSTATEMGRSTATUS);
 
+// [FIX] SEH wrapper: srclient!SxLogEvent internally calls RegisterEventSourceW via RPC.
+// If the Event Log service is unavailable, Windows raises structured exception 0x6ba.
+// C++ try/catch cannot catch structured exceptions — only __try/__except can.
+// This function has no C++ objects so SEH unwind is safe.
+static BOOL SafeCallSRSetRestorePointW(
+    SRSetRestorePointWPtr fn,
+    PRESTOREPOINTINFOW pRPInfo,
+    PSTATEMGRSTATUS pSMStatus)
+{
+    __try {
+        return fn(pRPInfo, pSMStatus);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        // 0x6ba = RPC_S_SERVER_UNAVAILABLE (Event Log service not ready)
+        // Treat as a silent failure; caller will log smStatus.
+        return FALSE;
+    }
+}
+
 static bool HasRestorePointBeenCreated()
 {
     HKEY rawKey;
@@ -189,6 +208,39 @@ static bool EnableSystemRestoreWMI()
     return success;
 }
 
+// [FIX] srclient!SxLogEvent calls RegisterEventSourceW (RPC) to the EventLog service.
+// If the RPC endpoint is not ready, exception 0x6ba (RPC_S_SERVER_UNAVAILABLE) fires as
+// EXCEPTION_NONCONTINUABLE — bypassing C++ catch and all frame-based SEH if the crash
+// reporter's VEH handler calls TerminateProcess first.
+// Solution: poll EventLog readiness before calling SRSetRestorePointW so the exception
+// never occurs in the first place.
+static bool WaitForEventLogRpc(DWORD maxWaitMs)
+{
+    const DWORD kStepMs = 500;
+    DWORD waited = 0;
+    while (waited <= maxWaitMs) {
+        SC_HANDLE hSCM = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+        if (hSCM) {
+            SC_HANDLE hSvc = OpenServiceW(hSCM, L"EventLog", SERVICE_QUERY_STATUS);
+            if (hSvc) {
+                SERVICE_STATUS_PROCESS ssp{};
+                DWORD needed = 0;
+                bool ready = QueryServiceStatusEx(hSvc, SC_STATUS_PROCESS_INFO,
+                    reinterpret_cast<LPBYTE>(&ssp), sizeof(ssp), &needed) &&
+                    (ssp.dwCurrentState == SERVICE_RUNNING);
+                CloseServiceHandle(hSvc);
+                CloseServiceHandle(hSCM);
+                if (ready) return true;
+            } else {
+                CloseServiceHandle(hSCM);
+            }
+        }
+        Sleep(kStepMs);
+        waited += kStepMs;
+    }
+    return false;
+}
+
 bool CreateRestorePoint()
 {
     // Fix: Ensure System Restore Service (srservice) is enabled and running
@@ -290,10 +342,18 @@ bool CreateRestorePoint()
 
     Log("[BACKUP] Requesting System Restore point creation...");
 
+    // [FIX] Block until EventLog RPC endpoint is ready (max 10s).
+    // Prevents noncontinuable SEH 0x6ba from srclient!SxLogEvent killing the process.
+    if (!WaitForEventLogRpc(10000)) {
+        Log("[BACKUP] EventLog RPC not available after 10s wait. Skipping restore point.");
+        FreeLibrary(hSrClient);
+        return false;
+    }
+
     // BEGIN transaction
-    if (!pSRSetRestorePointW(&rpInfo, &smStatus))
+    if (!SafeCallSRSetRestorePointW(pSRSetRestorePointW, &rpInfo, &smStatus))
     {
-        Log("[BACKUP] BEGIN_SYSTEM_CHANGE rejected. Status: " +
+        Log("[BACKUP] BEGIN_SYSTEM_CHANGE rejected or RPC unavailable. Status: " +
             std::to_string(smStatus.nStatus));
         FreeLibrary(hSrClient);
         return false;
@@ -303,9 +363,9 @@ bool CreateRestorePoint()
     rpInfo.dwEventType = END_SYSTEM_CHANGE;
     rpInfo.llSequenceNumber = smStatus.llSequenceNumber;
 
-    if (!pSRSetRestorePointW(&rpInfo, &smStatus))
+    if (!SafeCallSRSetRestorePointW(pSRSetRestorePointW, &rpInfo, &smStatus))
     {
-        Log("[BACKUP] END_SYSTEM_CHANGE failed. Status: " +
+        Log("[BACKUP] END_SYSTEM_CHANGE failed or RPC unavailable. Status: " +
             std::to_string(smStatus.nStatus));
         FreeLibrary(hSrClient);
         return false;
