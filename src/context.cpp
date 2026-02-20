@@ -44,6 +44,7 @@
 #include "investigator.h"
 #include "ipc_server.h"
 #include "telemetry_agent.h" // [FIX] Required for unique_ptr<TelemetryAgent> destructor
+#include "heartbeat.h"       // [FIX] Required for unique_ptr<HeartbeatSystem> destructor
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {

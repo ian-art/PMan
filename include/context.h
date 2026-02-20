@@ -66,6 +66,7 @@ class ExternalVerdict;   // External Verdict Interface
 class Investigator;      // The System Detective
 class IpcServer;         // Secure IPC
 class TelemetryAgent;    // Forward Declaration
+class HeartbeatSystem;   // Watchdog Heartbeat Module
 
 class PManContext {
 public:
@@ -271,6 +272,7 @@ public:
         std::unique_ptr<Investigator>          investigator; // The System Detective
         std::unique_ptr<IpcServer>             ipc;          // Secure IPC Core
         std::unique_ptr<TelemetryAgent>        telemetry;    // Non-blocking Telemetry
+        std::unique_ptr<HeartbeatSystem>       heartbeat;    // Dedicated Heartbeat Module
     } subs;
 
 private:

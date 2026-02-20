@@ -62,6 +62,7 @@
 #include "ipc_server.h"
 #include "responsiveness_manager.h"
 #include "telemetry_agent.h" // Telemetry Agent
+#include "heartbeat.h" // Watchdog Heartbeat
 #include "crash_reporter.h" // Crash Reporting
 #include <thread>
 #include <tlhelp32.h>
@@ -781,20 +782,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
         // [DARK MODE] Apply Centralized Dark Mode
         DarkMode::ApplyToWindow(hwnd);
-
-        // Keep heartbeat alive during modal loops (e.g., TrackPopupMenuEx)
-        SetTimer(hwnd, 9999, 1000, nullptr);
         return 0;
 
     // [DARK MODE] Refresh Menu Themes if system theme changes
     case WM_TIMER:
-        if (wParam == 9999) {
-            if (auto* hb = PManContext::Get().runtime.pHeartbeat) {
-                hb->counter.fetch_add(1, std::memory_order_relaxed);
-                hb->last_tick = GetTickCount64();
-            }
-            return 0;
-        }
         TrayAnimator::Get().OnTimer(wParam);
         return 0;
 
@@ -1135,7 +1126,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_DESTROY:
-        KillTimer(hwnd, 9999);
         TrayAnimator::Get().Shutdown();
         PostQuitMessage(0);
         return 0;
@@ -1161,26 +1151,9 @@ static int RunPMan(int argc, wchar_t* argv[])
     // Initialize Telemetry-Safe Logger
     InitLogger();
 
-    // Heartbeat Initialization
-    // Create Shared Memory for Watchdog monitoring (Local\PManHeartbeat)
-    auto& runtime = PManContext::Get().runtime;
-    runtime.hHeartbeatMap.reset(
-        CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(HeartbeatSharedMemory), L"Local\\PManHeartbeat")
-    );
-    
-    if (runtime.hHeartbeatMap) {
-        runtime.pHeartbeat = (HeartbeatSharedMemory*)MapViewOfFile(
-            runtime.hHeartbeatMap.get(), FILE_MAP_ALL_ACCESS, 0, 0, sizeof(HeartbeatSharedMemory)
-        );
-        
-        if (runtime.pHeartbeat) {
-            // Initialize heartbeat data
-            runtime.pHeartbeat->pid = GetCurrentProcessId();
-            runtime.pHeartbeat->counter.store(0);
-            runtime.pHeartbeat->last_tick = GetTickCount64();
-            Log("[INIT] Watchdog Heartbeat initialized.");
-        }
-    }
+    // Initialize Watchdog Heartbeat (Dedicated Thread)
+    PManContext::Get().subs.heartbeat = std::make_unique<HeartbeatSystem>();
+    PManContext::Get().subs.heartbeat->Initialize();
 
     // Lifecycle Management
     std::vector<std::thread> lifecycleThreads;
@@ -1805,6 +1778,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 	g_running = false;
     g_networkMonitor.Stop(); // Stop Monitor
     if (PManContext::Get().subs.telemetry) PManContext::Get().subs.telemetry->Shutdown();
+    if (PManContext::Get().subs.heartbeat) PManContext::Get().subs.heartbeat->Shutdown();
     g_explorerBooster.Shutdown();
     g_inputGuardian.Shutdown();
     g_memoryOptimizer.Shutdown();
