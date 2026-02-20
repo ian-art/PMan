@@ -96,7 +96,7 @@
 // Force Linker to embed Manifest for Visual Styles (Required for TaskDialog)
 #pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
-// [PATCH] Forward Declaration for Tab Redirect
+// Forward Declaration for Tab Redirect
 namespace GuiManager { void OpenPolicyTab(); }
 
 // GLOBAL VARIABLE
@@ -303,7 +303,7 @@ static void RunAutonomousCycle() {
         budgetBefore = ctx.subs.budget->GetUsed();
         bool rejectBudget = false;
         
-        // [PATCH] Budget Exhaustion Notification
+        // Budget Exhaustion Notification
         static bool s_exhaustionNotified = false;
 
         if (ctx.subs.budget->IsExhausted()) {
@@ -508,6 +508,22 @@ static void RunAutonomousCycle() {
     // Update persistent state for next tick's Outcome Guard
     g_lastPredicted = shadowDelta;
     g_lastObserved = observed;
+}
+
+// [FIX] Secondary SEH barrier for the restore thread.
+// Plain C-style function with no local C++ objects → __try/__except compiles without C2712.
+// If WaitForEventLogRpc races and the exception still fires, this catches it at the thread
+// boundary before it becomes unhandled and reaches the crash reporter's termination path.
+static void RestorePointThreadSafe()
+{
+    __try {
+        EnsureStartupRestorePoint();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        // Cannot call Log() here — no C++ objects in __try/__except scope.
+        // Log absence of [BACKUP] success message will indicate the exception path was hit.
+        OutputDebugStringA("[PMAN] Restore thread: SEH 0x6ba caught at thread boundary.\n");
+    }
 }
 
 // --- Background Worker for Async Tasks ---
@@ -782,10 +798,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
         // [DARK MODE] Apply Centralized Dark Mode
         DarkMode::ApplyToWindow(hwnd);
+        // Keep heartbeat alive during modal loops (e.g., TrackPopupMenuEx, Apply Tweaks)
+        SetTimer(hwnd, 9999, 1000, nullptr);
         return 0;
 
     // [DARK MODE] Refresh Menu Themes if system theme changes
     case WM_TIMER:
+        if (wParam == 9999) {
+            if (auto* hb = PManContext::Get().runtime.pHeartbeat) {
+                hb->counter.fetch_add(1, std::memory_order_relaxed);
+                hb->last_tick = GetTickCount64();
+            }
+            return 0;
+        }
         TrayAnimator::Get().OnTimer(wParam);
         return 0;
 
@@ -797,7 +822,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_TRAYICON:
-        // [PATCH] Handle Balloon Click (NIN_BALLOONUSERCLICK = 0x0405)
+        // Handle Balloon Click (NIN_BALLOONUSERCLICK = 0x0405)
         if (lParam == 0x0405) {
             // If budget is exhausted, redirect user to Policy tab
             if (PManContext::Get().subs.budget && PManContext::Get().subs.budget->IsExhausted()) {
@@ -1126,6 +1151,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_DESTROY:
+        KillTimer(hwnd, 9999);
         TrayAnimator::Get().Shutdown();
         PostQuitMessage(0);
         return 0;
@@ -1352,10 +1378,9 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     SramEngine::Get().Initialize();
 
     DetectOSCapabilities();
-    // Managed thread lifetime (removed detach)
-    std::thread restoreThread([]() {
-        EnsureStartupRestorePoint();
-    });
+    // [FIX] Use RestorePointThreadSafe: plain C function with __try/__except at thread entry.
+    // No C++ objects in its scope, so MSVC C2712 does not apply.
+    std::thread restoreThread(RestorePointThreadSafe);
     lifecycleThreads.push_back(std::move(restoreThread));
     
     DetectHybridCoreSupport();
