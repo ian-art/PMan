@@ -22,7 +22,7 @@
 
 #define PMAN_VERSION_MAJOR 6
 #define PMAN_VERSION_MINOR 5
-#define PMAN_VERSION_PATCH 4
+#define PMAN_VERSION_PATCH 5
 #define PMAN_VERSION_BUILD 2026
 
 // Helper macros to turn numbers into strings
