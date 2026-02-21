@@ -219,20 +219,16 @@ static bool WaitForEventLogRpc(DWORD maxWaitMs)
     const DWORD kStepMs = 500;
     DWORD waited = 0;
     while (waited <= maxWaitMs) {
-        SC_HANDLE hSCM = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+        ScHandle hSCM(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
         if (hSCM) {
-            SC_HANDLE hSvc = OpenServiceW(hSCM, L"EventLog", SERVICE_QUERY_STATUS);
+            ScHandle hSvc(OpenServiceW(hSCM.get(), L"EventLog", SERVICE_QUERY_STATUS));
             if (hSvc) {
                 SERVICE_STATUS_PROCESS ssp{};
                 DWORD needed = 0;
-                bool ready = QueryServiceStatusEx(hSvc, SC_STATUS_PROCESS_INFO,
+                bool ready = QueryServiceStatusEx(hSvc.get(), SC_STATUS_PROCESS_INFO,
                     reinterpret_cast<LPBYTE>(&ssp), sizeof(ssp), &needed) &&
                     (ssp.dwCurrentState == SERVICE_RUNNING);
-                CloseServiceHandle(hSvc);
-                CloseServiceHandle(hSCM);
                 if (ready) return true;
-            } else {
-                CloseServiceHandle(hSCM);
             }
         }
         Sleep(kStepMs);
