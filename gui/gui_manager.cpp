@@ -1585,7 +1585,7 @@ namespace GuiManager {
                 
                 // [FIX] Calculate full height to force parent-managed vertical scrolling
                 // If we restrict height to size.y, the widget's internal scrollbar appears off-screen (due to wide width)
-                float minHeight = (std::max)(size.y, g_logLineCount * ImGui::GetTextLineHeight() + ImGui::GetStyle().FramePadding.y * 2);
+                float minHeight = (std::max)(size.y, g_logLineCount * ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().FramePadding.y * 2);
 
                 // [FIX] Safe buffer access for empty strings
                 // Use a mutable empty char for safety if buffer is empty
