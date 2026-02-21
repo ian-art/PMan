@@ -41,6 +41,7 @@
 #include <filesystem> // [FIX] Required for dynamic path resolution
 
 #pragma comment(lib, "Dbghelp.lib")
+#pragma comment(lib, "Version.lib")
 #pragma comment(linker, "/SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup")
 
 // --- Configuration ---
@@ -232,6 +233,37 @@ bool ConnectToSharedMemory() {
     return false;
 }
 
+static std::wstring GetTargetExePath() {
+    wchar_t selfPath[MAX_PATH];
+    GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
+    std::filesystem::path self(selfPath);
+    std::wstring stem = self.stem().wstring();
+    std::wstring targetName = L"PMan.exe";
+    const std::wstring suffix = L"Watchdog";
+    if (stem.length() > suffix.length() &&
+        _wcsicmp(stem.substr(stem.length() - suffix.length()).c_str(), suffix.c_str()) == 0) {
+        targetName = stem.substr(0, stem.length() - suffix.length()) + L".exe";
+    }
+    return (self.parent_path() / targetName).wstring();
+}
+
+static std::wstring GetPManVersionString() {
+    const std::wstring path = GetTargetExePath();
+    DWORD handle = 0;
+    const DWORD size = GetFileVersionInfoSizeW(path.c_str(), &handle);
+    if (size == 0) return L"Unknown";
+    std::vector<BYTE> data(size);
+    if (!GetFileVersionInfoW(path.c_str(), handle, size, data.data())) return L"Unknown";
+    VS_FIXEDFILEINFO* pInfo = nullptr;
+    UINT len = 0;
+    if (!VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&pInfo), &len) || len == 0) return L"Unknown";
+    wchar_t ver[64];
+    StringCchPrintfW(ver, 64, L"%u.%u.%u.%u",
+        HIWORD(pInfo->dwFileVersionMS), LOWORD(pInfo->dwFileVersionMS),
+        HIWORD(pInfo->dwFileVersionLS), LOWORD(pInfo->dwFileVersionLS));
+    return ver;
+}
+
 // [FIX] Use wWinMain to run in background (no console window)
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) {
     InitLogShared(); // [PATCH] Initialize Logging Channel
@@ -279,6 +311,18 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
             }
 
             crashCount++;
+            if (crashCount >= 2) {
+                std::wstring msg = L"PMan has crashed and failed to recover on the second launch.\n\n"
+                    L"Please send the following to the developer:\n"
+                    L"  \u2022 Dump file(s) located in:\n"
+                    L"    C:\\ProgramData\\PriorityMgr\\Dumps\n\n"
+                    L"  \u2022 PMan Version: ";
+                msg += GetPManVersionString();
+                msg += L"\n\nThe Watchdog will now exit.";
+                Log(L"[CRITICAL] PMan failed on second launch. Notifying user and exiting.");
+                MessageBoxW(nullptr, msg.c_str(), L"PMan - Critical Failure", MB_OK | MB_ICONERROR);
+                return 0;
+            }
             if (crashCount > MAX_RESTARTS) {
                 Log(L"[CRITICAL] Dump Storm Detected (Too many crashes). Aborting restart to protect system.");
                 return 1; // Exit Watchdog
