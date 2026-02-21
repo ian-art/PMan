@@ -10,7 +10,7 @@
 
 *"Tune once. Let the system adapt."*
 
-`PMan was originally developed as a private tool. Version numbers reflect chronological progression on my machine. Early versions were stable for personal use but have not been tested broadly.`
+`PMan was originally developed as a private systems tool. Version numbers reflect chronological architectural milestones. Early releases were validated on my personal hardware; beginning with v6, cross-hardware validation has been performed using real-world crash telemetry and forensic analysis.`
 
 </div>
 
@@ -22,7 +22,7 @@
 
 ## 🧠 The Core Logic: Cognitive Control Loop
 
-PMan v5 moves beyond static "If/Then" heuristics to a **Feedback Control Loop**:
+Starting at v5, PMan moves beyond static "If/Then" heuristics to a **Feedback Control Loop**:
 
 1. **Observation**: Captures CPU variance, thermal throttling, and input latency via the **SRAM** engine.
 2. **Prediction**: The **Predictive Model** calculates the expected cost of intervention using historical variance data.
@@ -52,7 +52,7 @@ PMan is built on a "Do No Harm" architecture designed to fail closed.
 
 ### 3. Hardware Integration
 
-- **Hybrid Topology Awareness**: Distinguishes between P-Cores and E-Cores (Intel/AMD) to pin background threads away from critical tasks.
+- **Hybrid Topology Awareness**: Detects heterogeneous core architectures and optimizes thread affinity accordingly.
 - **Input Guardian**: Monitors raw HID interrupts to bias the foreground window the millisecond user activity is detected.
 - **Network Intelligence**: Uses `qWave` QoS and standard ping probes to detect bufferbloat and deprioritize background transfer traffic.
 
@@ -60,7 +60,7 @@ PMan is built on a "Do No Harm" architecture designed to fail closed.
 
 ### 4. Anti-Cheat Compliance
 
-PMan is engineered to be **100% compliant** with modern anti-cheat systems (BattlEye, EAC, Vanguard). It operates strictly as an external system scheduler.
+PMan is designed to remain compliant with modern anti-cheat systems by avoiding injection, hooking, and undocumented kernel manipulation. It operates strictly as an external system scheduler.
 
 * ✅ **No Hooks:** System-wide input hooks have been removed.
 * ✅ **No Injection:** Does not touch game memory or code.
@@ -72,7 +72,7 @@ PMan is engineered to be **100% compliant** with modern anti-cheat systems (Batt
 
 ## 🎮 Comprehensive Feature Suite
 
-PMan v6 is divided into specific subsystems, each handling a distinct aspect of system harmony.
+At v6, PMan is divided into specific subsystems, each handling a distinct aspect of system harmony.
 
 ### ⚡ Responsiveness & Input
 
@@ -113,7 +113,7 @@ PMan v6 is divided into specific subsystems, each handling a distinct aspect of 
 | Feature | Description |
 |---------|-------------|
 | **Flight Recorder** | A high-speed, lock-free crash reporter that captures "breadcrumbs" (execution history) and generates minidumps for post-mortem analysis. |
-| **Provenance Ledger** | A tamper-proof JSON audit log recording every decision, the active policy hash, and the specific reasons why alternative actions were rejected. |
+| **Provenance Ledger** | Append-only structured JSON audit log recording every decision, the active policy hash, and the specific reasons why alternative actions were rejected. |
 | **Registry Guard** | A detached watchdog process that automatically restores default Windows priority settings if the main PMan agent crashes or is forcibly terminated. |
 | **Titanium Config** | Configuration is encrypted via DPAPI (`CRYPTPROTECT_SYSTEM`) and managed via a secure IPC channel. Manual file tampering triggers a factory reset. |
 
@@ -197,11 +197,25 @@ cl /std:c++latest /nologo /Od /Zi /EHsc /D UNICODE /D _UNICODE ^
 If you download a pre-compiled binary, some antivirus solutions (like SecureAge) may flag it due to the embedded icon or C++20 standard library patterns ("Wacatac.B!ml").
 
 **Solution:**
-I strongly recommend **building the software yourself** using the command provided in the [Building from Source](#%EF%B8%8F-building-from-source) section above. The official build configuration has been verified to produce a clean binary.
+I strongly recommend **building the software yourself** using the command provided in the [Building from Source](#%EF%B8%8F-building-from-source) section above. The provided build configuration minimizes heuristic false positives.
 
 > **⚠️ OFFICIAL SOURCE WARNING**
 >
 > This GitHub repository is the **only** trusted source for PMan. Do not download the program from third-party sites. For maximum security, build the software locally using the official instructions.
+
+---
+
+## 🔢 Versioning Philosophy
+
+**PMan versions reflect architectural milestones rather than strict semantic versioning.**
+
+**Major versions represent structural or stability boundaries.**
+
+**Minor versions introduce feature expansions or behavioral refinements.**
+
+**Patch versions address stability fixes.**
+
+**Version 7.0.0 marks the first Public Stability Baseline (PSB) — validated across multiple hardware environments with integrated crash telemetry and watchdog safeguards.**
 
 ---
 
