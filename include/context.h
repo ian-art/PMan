@@ -30,6 +30,7 @@
 #include <memory> 
 #include <vector>
 #include "types.h"
+#include "worker_thread.h"
 
 // Network Intelligence
 enum class NetworkState {
@@ -274,6 +275,9 @@ public:
         std::unique_ptr<TelemetryAgent>        telemetry;    // Non-blocking Telemetry
         std::unique_ptr<HeartbeatSystem>       heartbeat;    // Dedicated Heartbeat Module
     } subs;
+
+    // Access from any TU: PManContext::Get().workerQueue.Push([]{...});
+    WorkerQueue workerQueue;
 
 private:
     // Defined in src/context.cpp to handle unique_ptr of incomplete types

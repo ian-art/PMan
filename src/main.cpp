@@ -74,7 +74,7 @@
 #include <pdh.h>
 #include <shellapi.h> // Required for CommandLineToArgvW
 #include <commctrl.h> // For Edit Control in Live Log
-#include <deque>
+// <deque> removed — owned by worker_thread.cpp
 #include <mutex>
 #include <condition_variable>
 #include <functional>
@@ -527,32 +527,8 @@ static void RestorePointThreadSafe()
     }
 }
 
-// --- Background Worker for Async Tasks ---
-static std::thread g_backgroundWorker;
-static std::mutex g_backgroundQueueMtx;
-static std::deque<std::function<void()>> g_backgroundTasks;
-static std::condition_variable g_backgroundCv;
-static std::atomic<bool> g_backgroundRunning{ true };
-
-static void BackgroundWorkerThread() {
-    while (g_backgroundRunning.load()) {
-        std::function<void()> task;
-        {
-            std::unique_lock<std::mutex> lock(g_backgroundQueueMtx);
-            g_backgroundCv.wait(lock, [] {
-                return !g_backgroundTasks.empty() || !g_backgroundRunning.load();
-            });
-
-            if (!g_backgroundRunning.load() && g_backgroundTasks.empty()) break;
-
-            if (!g_backgroundTasks.empty()) {
-                task = std::move(g_backgroundTasks.front());
-                g_backgroundTasks.pop_front();
-            }
-        }
-        if (task) task();
-    }
-}
+// Background worker queue moved to WorkerQueue (worker_thread.h).
+// Owned by PManContext::workerQueue.
 
 // Instance provided by responsiveness_manager.h/cpp integration or declared here
 static ResponsivenessManager g_responsivenessManager;
@@ -1345,8 +1321,19 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     PinBackgroundThread(configThread);
 
     // Initialize unified background worker
-    g_backgroundWorker = std::thread(BackgroundWorkerThread);
-    PinBackgroundThread(g_backgroundWorker);
+    PManContext::Get().workerQueue.Start();
+    // Pin background worker thread to E-Cores/low-priority physical cores
+    // (mirrors PinBackgroundThread used for other threads)
+    if (!g_eCoreSets.empty()) {
+        DWORD_PTR mask = 0;
+        if (g_eCoreSets.size() >= 1) mask |= (1ULL << g_eCoreSets[0]);
+        if (g_eCoreSets.size() >= 2) mask |= (1ULL << g_eCoreSets[1]);
+        SetThreadAffinityMask(PManContext::Get().workerQueue.NativeHandle(), mask);
+    } else if (g_physicalCoreCount >= 4) {
+        DWORD_PTR affinityMask = (1ULL << (g_physicalCoreCount - 1)) | (1ULL << (g_physicalCoreCount - 2));
+        SetThreadAffinityMask(PManContext::Get().workerQueue.NativeHandle(), affinityMask);
+    }
+    SetThreadPriority(PManContext::Get().workerQueue.NativeHandle(), THREAD_PRIORITY_LOWEST);
     Sleep(100); // [POLISH] Stagger start
     
     std::thread etwThread;
@@ -1502,42 +1489,38 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 		if (g_reloadNow.exchange(false))
         {
             // [PERF FIX] Offload to persistent worker thread
-            {
-                std::lock_guard<std::mutex> lock(g_backgroundQueueMtx);
-                g_backgroundTasks.push_back([]() {
-                    Sleep(250);
-                    // [CACHE] Atomic destruction on Config Reload
-                    g_sessionCache.store(nullptr, std::memory_order_release);
-                    Sleep(250);
-                    LoadConfig();
+            PManContext::Get().workerQueue.Push([]() {
+                Sleep(250);
+                // [CACHE] Atomic destruction on Config Reload
+                g_sessionCache.store(nullptr, std::memory_order_release);
+                Sleep(250);
+                LoadConfig();
 
-                    // [FIX] Reload Policy and Sync Budget
-                    if (PManContext::Get().subs.policy) {
-                        PManContext::Get().subs.policy->Load(GetLogPath() / L"policy.json");
-                        
-                        // [SYNC] Push new thresholds to Arbiter immediately
-                        if (PManContext::Get().subs.arbiter) {
-                             auto& limits = PManContext::Get().subs.policy->GetLimits();
-                             PManContext::Get().subs.arbiter->SetConfidenceThresholds(
-                                limits.minConfidence.cpuVariance,
-                                limits.minConfidence.thermalVariance,
-                                limits.minConfidence.latencyVariance
-                             );
-                        }
-                    }
+                // [FIX] Reload Policy and Sync Budget
+                if (PManContext::Get().subs.policy) {
+                    PManContext::Get().subs.policy->Load(GetLogPath() / L"policy.json");
                     
-                    // [RECOVERY] Sync Budget Cap (But do NOT reset usage)
-                    // Changing config.ini (games/apps) should not grant budget amnesty.
-                    // Only a Policy change (maxAuthorityBudget) should affect the ceiling.
-                    if (PManContext::Get().subs.budget) {
-                        if (PManContext::Get().subs.policy) {
-                            PManContext::Get().subs.budget->SetMax(PManContext::Get().subs.policy->GetLimits().maxAuthorityBudget);
-                        }
-                        // REMOVED: PManContext::Get().subs.budget->ResetByExternalSignal();
+                    // [SYNC] Push new thresholds to Arbiter immediately
+                    if (PManContext::Get().subs.arbiter) {
+                         auto& limits = PManContext::Get().subs.policy->GetLimits();
+                         PManContext::Get().subs.arbiter->SetConfidenceThresholds(
+                            limits.minConfidence.cpuVariance,
+                            limits.minConfidence.thermalVariance,
+                            limits.minConfidence.latencyVariance
+                         );
                     }
-                });
-            }
-            g_backgroundCv.notify_one();
+                }
+                
+                // [RECOVERY] Sync Budget Cap (But do NOT reset usage)
+                // Changing config.ini (games/apps) should not grant budget amnesty.
+                // Only a Policy change (maxAuthorityBudget) should affect the ceiling.
+                if (PManContext::Get().subs.budget) {
+                    if (PManContext::Get().subs.policy) {
+                        PManContext::Get().subs.budget->SetMax(PManContext::Get().subs.policy->GetLimits().maxAuthorityBudget);
+                    }
+                    // REMOVED: PManContext::Get().subs.budget->ResetByExternalSignal();
+                }
+            });
         }
 
         // Safety check: ensure services are not left suspended
@@ -1596,44 +1579,40 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
             if ((now - g_lastExplorerPollMs) >= pollIntervalMs) {
                 
                 // FIX: Offload to persistent worker thread to protect Keyboard Hook
-                {
-                    std::lock_guard<std::mutex> lock(g_backgroundQueueMtx);
-                    g_backgroundTasks.push_back([]{
-						// Moved ExplorerBooster to background thread to prevent blocking the Keyboard Hook
-						g_explorerBooster.OnTick();
+                PManContext::Get().workerQueue.Push([]{
+					// Moved ExplorerBooster to background thread to prevent blocking the Keyboard Hook
+					g_explorerBooster.OnTick();
 
-					// Authoritative Control Loop
-                    RunAutonomousCycle();
+				// Authoritative Control Loop
+                RunAutonomousCycle();
 
-                    // Periodic Policy Optimization (Slow Loop)
-                    static uint64_t lastOpt = 0;
-                    if (GetTickCount64() - lastOpt > 60000) { // Every 1 minute
-                        if (auto& opt = PManContext::Get().subs.optimizer) {
-                            PolicyParameters newParams = opt->Optimize();
-                            if (auto& gov = PManContext::Get().subs.governor) {
-                                gov->UpdatePolicy(newParams);
-                            }
+                // Periodic Policy Optimization (Slow Loop)
+                static uint64_t lastOpt = 0;
+                if (GetTickCount64() - lastOpt > 60000) { // Every 1 minute
+                    if (auto& opt = PManContext::Get().subs.optimizer) {
+                        PolicyParameters newParams = opt->Optimize();
+                        if (auto& gov = PManContext::Get().subs.governor) {
+                            gov->UpdatePolicy(newParams);
                         }
-                        lastOpt = GetTickCount64();
                     }
-
-                    // [FIX] Periodic Brain Save (Every 15 minutes)
-                    static uint64_t lastBrainSave = GetTickCount64();
-                    if (GetTickCount64() - lastBrainSave > 900000) {
-                        if (auto& model = PManContext::Get().subs.model) {
-                            model->Shutdown(); // Writes m_stats to brain.bin
-                        }
-                        lastBrainSave = GetTickCount64();
-                    }
-
-						// Legacy/Advisory Updates (Data Collection Only)
-						g_perfGuardian.OnPerformanceTick();
-                        
-                        // [FIX] Move heavy window checks to background to prevent main thread stutter
-                        g_responsivenessManager.Update();
-                    });
+                    lastOpt = GetTickCount64();
                 }
-                g_backgroundCv.notify_one();
+
+                // [FIX] Periodic Brain Save (Every 15 minutes)
+                static uint64_t lastBrainSave = GetTickCount64();
+                if (GetTickCount64() - lastBrainSave > 900000) {
+                    if (auto& model = PManContext::Get().subs.model) {
+                        model->Shutdown(); // Writes m_stats to brain.bin
+                    }
+                    lastBrainSave = GetTickCount64();
+                }
+
+					// Legacy/Advisory Updates (Data Collection Only)
+					g_perfGuardian.OnPerformanceTick();
+                    
+                    // [FIX] Move heavy window checks to background to prevent main thread stutter
+                    g_responsivenessManager.Update();
+                });
                 
                 // Run Service Watcher
                 ServiceWatcher::OnTick();
@@ -1662,9 +1641,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     RegisterRawInputDevices(RidCleanup, 2, sizeof(RAWINPUTDEVICE));
 
     // [FIX] Stop background worker BEFORE destroying UI/Subsystems to prevent deadlocks/use-after-free
-    g_backgroundRunning = false;
-    g_backgroundCv.notify_all();
-    if (g_backgroundWorker.joinable()) g_backgroundWorker.join();
+    PManContext::Get().workerQueue.Stop();
 
     GuiManager::Shutdown(); // Cleanup DX11/ImGui resources
 
