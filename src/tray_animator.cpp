@@ -33,23 +33,15 @@
 #include "gui_manager.h"      // GuiManager::ShowConfigWindow, ShowLogWindow, etc.
 #include "lifecycle.h"        // Lifecycle::GetStartupMode, InstallTask, UninstallTask
 #include "sram_engine.h"      // SramEngine, LagState
+#include "config.h"           // SaveIconTheme
 #include <shellapi.h>
 #include <filesystem>
 #include <fstream>
 #include <chrono>
 
-// ---------------------------------------------------------------------------
-// Forward declarations for helpers defined in main.cpp
-// ---------------------------------------------------------------------------
-void      UpdateTrayTooltip();
-void      ShowSramNotification(LagState state);
-HBITMAP   IconToBitmapPARGB32(HINSTANCE hInst, UINT iconId, int w, int h);
-void      SaveIconTheme(const std::wstring& themeName);
-void      OpenUpdatePage();
-
-// GuiManager::OpenPolicyTab is not declared in gui_manager.h;
-// it is a free function in the GuiManager namespace defined in main.cpp.
-namespace GuiManager { void OpenPolicyTab(); }
+// IconToBitmapPARGB32 and OpenUpdatePage declared in utils.h (included above).
+// SaveIconTheme declared in config.h (included above).
+// GuiManager::OpenPolicyTab declared in gui_manager.h (included above).
 
 // Resource IDs (Copied from main.cpp to isolate dependency)
 #define IDI_TRAY_FRAME_1 201
@@ -347,8 +339,6 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             GuiManager::ShowConfigWindow();
             // Suppress the trailing WM_LBUTTONUP that follows this double-click
             // to prevent the menu from popping up over the window.
-            static bool s_suppressMenu = true;
-            // Note: We use a static flag that persists to the next message
             SetPropW(hwnd, L"PMan_SuppressMenu", (HANDLE)1);
             return 0;
         }
@@ -679,6 +669,71 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
     default:
         return DefWindowProcW(hwnd, uMsg, wParam, lParam);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tray status helpers — moved from main.cpp
+// ---------------------------------------------------------------------------
+void UpdateTrayTooltip()
+{
+    std::wstring tip = L"Priority Manager";
+
+    // 1. Protection Status
+    if (g_userPaused.load()) {
+        tip += L"\n\U0001F7E1 Status: PAUSED";
+    } else {
+        tip += L"\n\U0001F7E2 Status: Active";
+    }
+
+    // 2. Passive Mode (Idle Optimization Paused)
+    if (g_pauseIdle.load()) {
+        tip += L"\n\u2696 Passive: ON";
+    }
+
+    // 3. Awake Status
+    if (g_keepAwake.load()) {
+        tip += L"\n\u2600 Keep Awake: ON";
+    }
+
+    // 3. Current Mode
+    if (g_sessionLocked.load()) {
+         tip += L"\n\u1F3AE Mode: Gaming";
+    }
+
+    // SRAM Status
+    LagState sramState = SramEngine::Get().GetStatus().state;
+    if (sramState == LagState::SNAPPY) tip += L"\n\u26A1 System: Snappy";
+    else if (sramState == LagState::SLIGHT_PRESSURE) tip += L"\n\u26A0 System: Pressure";
+    else if (sramState == LagState::LAGGING) tip += L"\n\u26D4 System: Lagging";
+    else if (sramState == LagState::CRITICAL_LAG) tip += L"\n\u2620 System: CRITICAL";
+
+    // Delegate to module
+    TrayAnimator::Get().UpdateTooltip(tip);
+}
+
+void ShowSramNotification(LagState state)
+{
+    if (state <= LagState::SLIGHT_PRESSURE) return; // Don't annoy user for minor things
+
+    // Rate Limit: Max 1 notification every 30 seconds
+    static uint64_t lastNotify = 0;
+    uint64_t now = GetTickCount64();
+    if (now - lastNotify < 30000) return;
+    lastNotify = now;
+
+    std::wstring title = L"System Responsiveness Alert";
+    std::wstring msg = L"";
+
+    DWORD flags = NIIF_NONE;
+    if (state == LagState::LAGGING) {
+        msg = L"System is experiencing lag. Optimization scans have been deferred to restore responsiveness.";
+        flags = NIIF_WARNING;
+    } else if (state == LagState::CRITICAL_LAG) {
+        msg = L"CRITICAL LAG DETECTED. Entering 'Do No Harm' mode. All background operations stopped.";
+        flags = NIIF_ERROR;
+    }
+
+    TrayAnimator::Get().ShowNotification(title, msg, flags);
 }
 
 void TrayAnimator::SetTheme(const std::wstring& themeName) {

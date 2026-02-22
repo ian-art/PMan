@@ -98,8 +98,7 @@
 // Force Linker to embed Manifest for Visual Styles (Required for TaskDialog)
 #pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
-// Forward Declaration for Tab Redirect
-namespace GuiManager { void OpenPolicyTab(); }
+// GuiManager::OpenPolicyTab declared in gui_manager.h
 
 // GLOBAL VARIABLE
 HINSTANCE g_hInst = nullptr;
@@ -164,71 +163,12 @@ static DWORD ReadCurrentPrioritySeparation()
 
 // [MOVED] Registry Guard implementation moved to restore.cpp
 
-// Helper to update Tray Icon Tooltip with real-time status
-void UpdateTrayTooltip()
-{
-    std::wstring tip = L"Priority Manager";
-
-    // 1. Protection Status
-    if (g_userPaused.load()) {
-        tip += L"\n\U0001F7E1 Status: PAUSED";
-    } else {
-        tip += L"\n\U0001F7E2 Status: Active";
-    }
-
-    // 2. Passive Mode (Idle Optimization Paused)
-    if (g_pauseIdle.load()) {
-        tip += L"\n\u2696 Passive: ON";
-    }
-
-    // 3. Awake Status
-    if (g_keepAwake.load()) {
-        tip += L"\n\u2600 Keep Awake: ON";
-    }
-
-    // 3. Current Mode
-    if (g_sessionLocked.load()) {
-         tip += L"\n\u1F3AE Mode: Gaming";
-    }
-
-    // SRAM Status
-    LagState sramState = SramEngine::Get().GetStatus().state;
-    if (sramState == LagState::SNAPPY) tip += L"\n\u26A1 System: Snappy";
-    else if (sramState == LagState::SLIGHT_PRESSURE) tip += L"\n\u26A0 System: Pressure";
-    else if (sramState == LagState::LAGGING) tip += L"\n\u26D4 System: Lagging";
-    else if (sramState == LagState::CRITICAL_LAG) tip += L"\n\u2620 System: CRITICAL";
-
-    // Delegate to module
-    TrayAnimator::Get().UpdateTooltip(tip);
-}
+// UpdateTrayTooltip — moved to tray_animator.cpp
 
 // Forward declaration for main program logic
 int RunMainProgram(int argc, wchar_t** argv);
 
-// Notification Helper
-void ShowSramNotification(LagState state) {
-    if (state <= LagState::SLIGHT_PRESSURE) return; // Don't annoy user for minor things
-
-    // Rate Limit: Max 1 notification every 30 seconds
-    static uint64_t lastNotify = 0;
-    uint64_t now = GetTickCount64();
-    if (now - lastNotify < 30000) return;
-    lastNotify = now;
-
-    std::wstring title = L"System Responsiveness Alert";
-    std::wstring msg = L"";
-
-    DWORD flags = NIIF_NONE;
-    if (state == LagState::LAGGING) {
-        msg = L"System is experiencing lag. Optimization scans have been deferred to restore responsiveness.";
-        flags = NIIF_WARNING;
-    } else if (state == LagState::CRITICAL_LAG) {
-        msg = L"CRITICAL LAG DETECTED. Entering 'Do No Harm' mode. All background operations stopped.";
-        flags = NIIF_ERROR;
-    }
-
-    TrayAnimator::Get().ShowNotification(title, msg, flags);
-}
+// ShowSramNotification — moved to tray_animator.cpp
 
 // --- Custom Tray Animation Helpers ---
 // Logic moved to tray_animator.cpp

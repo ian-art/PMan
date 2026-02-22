@@ -27,6 +27,7 @@
 #include <mutex>
 #include <memory>
 #include <atomic>
+#include "sram_engine.h" // LagState — required for ShowSramNotification
 
 class TrayAnimator {
 public:
@@ -94,5 +95,9 @@ public:
     // Returns the value WindowProc should return for uMsg.
     static LRESULT HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 };
+
+// Tray status helpers — defined in tray_animator.cpp
+void UpdateTrayTooltip();
+void ShowSramNotification(LagState state);
 
 #endif // PMAN_TRAY_ANIMATOR_H

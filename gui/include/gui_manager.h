@@ -41,6 +41,10 @@ namespace GuiManager {
 
     // Cleans up DirectX and ImGui resources.
     void Shutdown();
+
+    // Redirects the Neural Center window to the Policy tab.
+    // Called from TrayManager when the budget-exhausted balloon is clicked.
+    void OpenPolicyTab();
 }
 
 #endif // PMAN_GUI_MANAGER_H
