@@ -68,6 +68,7 @@ class Investigator;      // The System Detective
 class IpcServer;         // Secure IPC
 class TelemetryAgent;    // Forward Declaration
 class HeartbeatSystem;   // Watchdog Heartbeat Module
+class AutonomousEngine;  // Autonomous Engine Orchestrator
 
 class PManContext {
 public:
@@ -274,6 +275,7 @@ public:
         std::unique_ptr<IpcServer>             ipc;          // Secure IPC Core
         std::unique_ptr<TelemetryAgent>        telemetry;    // Non-blocking Telemetry
         std::unique_ptr<HeartbeatSystem>       heartbeat;    // Dedicated Heartbeat Module
+        std::unique_ptr<AutonomousEngine>      engine;       // Autonomous Engine Orchestrator
     } subs;
 
     // Access from any TU: PManContext::Get().workerQueue.Push([]{...});
