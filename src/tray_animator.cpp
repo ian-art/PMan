@@ -20,10 +20,36 @@
 #include "tray_animator.h"
 #include "utils.h"
 #include "logger.h"
-#include "constants.h" // For ID_TRAY_APP_ICON if needed
+#include "constants.h"
+#include "globals.h"          // g_userPaused, g_pauseIdle, g_keepAwake, g_isSuspended,
+                               // g_reloadNow, g_iconTheme, g_idleAffinityMgr, g_hInst,
+                               // g_isCheckingUpdate, g_resumeStabilizationTime
+#include "context.h"          // PManContext::Get()
+#include "provenance_ledger.h"// ProvenanceLedger::Record, DecisionJustification
+#include "sandbox_executor.h" // SandboxResult (member of DecisionJustification)
+#include "authority_budget.h" // AuthorityBudget::IsExhausted (complete type required)
+#include "dark_mode.h"        // DarkMode::ApplyToWindow, ApplyToMenu, IsEnabled, RefreshTheme
+#include "log_viewer.h"       // LogViewer::ApplyTheme
+#include "gui_manager.h"      // GuiManager::ShowConfigWindow, ShowLogWindow, etc.
+#include "lifecycle.h"        // Lifecycle::GetStartupMode, InstallTask, UninstallTask
+#include "sram_engine.h"      // SramEngine, LagState
 #include <shellapi.h>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
+
+// ---------------------------------------------------------------------------
+// Forward declarations for helpers defined in main.cpp
+// ---------------------------------------------------------------------------
+void      UpdateTrayTooltip();
+void      ShowSramNotification(LagState state);
+HBITMAP   IconToBitmapPARGB32(HINSTANCE hInst, UINT iconId, int w, int h);
+void      SaveIconTheme(const std::wstring& themeName);
+void      OpenUpdatePage();
+
+// GuiManager::OpenPolicyTab is not declared in gui_manager.h;
+// it is a free function in the GuiManager namespace defined in main.cpp.
+namespace GuiManager { void OpenPolicyTab(); }
 
 // Resource IDs (Copied from main.cpp to isolate dependency)
 #define IDI_TRAY_FRAME_1 201
@@ -260,6 +286,398 @@ void TrayAnimator::LoadCustomFrames(const std::wstring& themeName) {
             HICON h = (HICON)LoadImageW(nullptr, (themePath / filename).c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION | LR_DEFAULTSIZE);
             if (h) m_framesCustomPaused.push_back(h);
         }
+    }
+}
+
+LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+    // -----------------------------------------------------------------------
+    case WM_CREATE:
+        // Initialize Tray Animation Subsystem
+        TrayAnimator::Get().Initialize(g_hInst, hwnd);
+
+        // Restore saved state
+        if (g_iconTheme != L"Default") {
+            TrayAnimator::Get().SetTheme(g_iconTheme);
+        }
+        TrayAnimator::Get().SetPaused(g_userPaused.load());
+
+        UpdateTrayTooltip(); // Set initial text
+
+        // [DARK MODE] Apply Centralized Dark Mode
+        DarkMode::ApplyToWindow(hwnd);
+        // Keep heartbeat alive during modal loops (e.g., TrackPopupMenuEx, Apply Tweaks)
+        SetTimer(hwnd, 9999, 1000, nullptr);
+        return 0;
+
+    // -----------------------------------------------------------------------
+    // [DARK MODE] Refresh Menu Themes if system theme changes
+    case WM_TIMER:
+        if (wParam == 9999) {
+            if (auto* hb = PManContext::Get().runtime.pHeartbeat) {
+                hb->counter.fetch_add(1, std::memory_order_relaxed);
+                hb->last_tick = GetTickCount64();
+            }
+            return 0;
+        }
+        TrayAnimator::Get().OnTimer(wParam);
+        return 0;
+
+    // -----------------------------------------------------------------------
+    case WM_THEMECHANGED:
+    case WM_SETTINGCHANGE:
+        DarkMode::RefreshTheme();      // Flushes the Windows menu theme cache
+        DarkMode::ApplyToWindow(hwnd);
+        LogViewer::ApplyTheme();       // Update log window if open
+        return 0;
+
+    // -----------------------------------------------------------------------
+    case WM_TRAYICON:
+        // Handle Balloon Click (NIN_BALLOONUSERCLICK = 0x0405)
+        if (lParam == 0x0405) {
+            // If budget is exhausted, redirect user to Policy tab
+            if (PManContext::Get().subs.budget && PManContext::Get().subs.budget->IsExhausted()) {
+                GuiManager::OpenPolicyTab();
+            }
+        }
+        // Double Click -> Open Neural Center
+        else if (lParam == WM_LBUTTONDBLCLK) {
+            GuiManager::ShowConfigWindow();
+            // Suppress the trailing WM_LBUTTONUP that follows this double-click
+            // to prevent the menu from popping up over the window.
+            static bool s_suppressMenu = true;
+            // Note: We use a static flag that persists to the next message
+            SetPropW(hwnd, L"PMan_SuppressMenu", (HANDLE)1);
+            return 0;
+        }
+        else if (lParam == WM_RBUTTONUP || lParam == WM_LBUTTONUP)
+        {
+            // Check suppression flag
+            if (lParam == WM_LBUTTONUP) {
+                if (GetPropW(hwnd, L"PMan_SuppressMenu")) {
+                    RemovePropW(hwnd, L"PMan_SuppressMenu");
+                    return 0;
+                }
+            }
+
+            SetForegroundWindow(hwnd);
+
+            // Ensure owner window state is current before menu creation
+            DarkMode::ApplyToWindow(hwnd);
+
+            HMENU hMenu = CreatePopupMenu();
+
+            // Apply Dark Mode styles to the context menu
+            DarkMode::ApplyToMenu(hMenu);
+
+            // --- Icon Management ---
+            std::vector<HBITMAP> menuBitmaps;
+            bool isDark = DarkMode::IsEnabled();
+
+            auto SetMenuIcon = [&](HMENU hM, UINT id, UINT iconLight, UINT iconDark, bool byPos = false) {
+                UINT iconId = isDark ? iconDark : iconLight;
+                HBITMAP hBmp = IconToBitmapPARGB32(g_hInst, iconId, 16, 16);
+                if (hBmp) {
+                    MENUITEMINFOW mii = { sizeof(mii) };
+                    mii.fMask = MIIM_BITMAP;
+                    mii.hbmpItem = hBmp;
+                    SetMenuItemInfoW(hM, id, byPos, &mii);
+                    menuBitmaps.push_back(hBmp);
+                }
+            };
+
+            // 0. PMan Neural Center
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EDIT_CONFIG, L"PMan Neural Center");
+            SetMenuIcon(hMenu, ID_TRAY_EDIT_CONFIG, IDI_TRAY_L_CP, IDI_TRAY_D_CP);
+
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+
+            bool paused = g_userPaused.load();
+
+            // 1. Dashboards Submenu
+            HMENU hDashMenu = CreatePopupMenu();
+            AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_LIVE_LOG, L"Live Log Viewer");
+            AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_OPEN_DIR, L"Open Log Folder");
+            AppendMenuW(hDashMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(hDashMenu, MF_STRING, ID_TRAY_EXPORT_LOG, L"Export Authority Log (JSON)");
+
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hDashMenu, L"Monitor & Logs");
+            // Set icon for "Monitor & Logs" (Last item added)
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_LOG, IDI_TRAY_D_LOG, true);
+
+            // --- Theme Selection Submenu ---
+            HMENU hThemeMenu = CreatePopupMenu();
+            AppendMenuW(hThemeMenu, MF_STRING | (g_iconTheme == L"Default" ? MF_CHECKED : 0), ID_TRAY_THEME_BASE, L"Default (Embedded)");
+
+            std::vector<std::wstring> themes = TrayAnimator::Get().ScanThemes();
+            int themeId = ID_TRAY_THEME_BASE + 1;
+            for (const auto& theme : themes) {
+                bool isSelected = (g_iconTheme == theme);
+                AppendMenuW(hThemeMenu, MF_STRING | (isSelected ? MF_CHECKED : 0), themeId++, theme.c_str());
+            }
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hThemeMenu, L"Icon Theme");
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_THEME, IDI_TRAY_D_THEME, true);
+
+            // 3. Controls Submenu
+            HMENU hControlMenu = CreatePopupMenu();
+            AppendMenuW(hControlMenu, MF_STRING | (paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, paused ? L"Resume Activity" : L"Pause Activity");
+
+            // Pause Idle Optimization (prevent CPU limiting during background tasks)
+            bool idlePaused = g_pauseIdle.load();
+            AppendMenuW(hControlMenu, MF_STRING | (idlePaused ? MF_CHECKED : 0), ID_TRAY_PAUSE_IDLE, L"Passive Mode");
+            AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
+            bool awake = g_keepAwake.load();
+            AppendMenuW(hControlMenu, MF_STRING | (awake ? MF_CHECKED : 0), ID_TRAY_KEEP_AWAKE, L"Keep System Awake");
+            AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_REFRESH_GPU, L"Refresh GPU");
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hControlMenu, L"Controls");
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_CONTROLS, IDI_TRAY_D_CONTROLS, true);
+
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+
+            // 4. Global Actions
+            wchar_t self[MAX_PATH];
+            GetModuleFileNameW(nullptr, self, MAX_PATH);
+            std::wstring taskName = std::filesystem::path(self).stem().wstring();
+
+            // Cache startup mode to avoid blocking UI with GetStartupMode()
+            static int cachedMode = -1;
+            static uint64_t lastCheck = 0;
+            uint64_t now = GetTickCount64();
+
+            if (cachedMode == -1 || (now - lastCheck > 5000)) {
+                // Fast check (non-blocking if cached or assume previous)
+                cachedMode = Lifecycle::GetStartupMode(taskName);
+                lastCheck = now;
+            }
+            int startupMode = cachedMode;
+
+            HMENU hStartupMenu = CreatePopupMenu();
+            AppendMenuW(hStartupMenu, MF_STRING | (startupMode == 0 ? MF_CHECKED : 0), ID_TRAY_STARTUP_DISABLED, L"Disabled (Manual Start)");
+            AppendMenuW(hStartupMenu, MF_STRING | (startupMode == 1 ? MF_CHECKED : 0), ID_TRAY_STARTUP_ACTIVE,   L"Enabled (Active Optimization)");
+            AppendMenuW(hStartupMenu, MF_STRING | (startupMode == 2 ? MF_CHECKED : 0), ID_TRAY_STARTUP_PASSIVE,  L"Enabled (Standby Mode)");
+
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hStartupMenu, L"Startup Behavior");
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_STARTUP, IDI_TRAY_D_STARTUP, true);
+
+            // 5. Help Submenu
+            HMENU hHelpMenu = CreatePopupMenu();
+            AppendMenuW(hHelpMenu, MF_STRING, ID_TRAY_HELP_USAGE, L"Help");
+            AppendMenuW(hHelpMenu, MF_STRING | (g_isCheckingUpdate.load() ? MF_GRAYED : 0), ID_TRAY_UPDATE, L"Check for Updates");
+            AppendMenuW(hHelpMenu, MF_STRING, ID_TRAY_ABOUT, L"About");
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hHelpMenu, L"Help");
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_HELP, IDI_TRAY_D_HELP, true);
+
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_SUPPORT, L"Support PMan \u2764\U0001F97A");
+            SetMenuIcon(hMenu, ID_TRAY_SUPPORT, IDI_TRAY_L_SUPPORT, IDI_TRAY_D_SUPPORT);
+
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
+            SetMenuIcon(hMenu, ID_TRAY_EXIT, IDI_TRAY_L_EXIT, IDI_TRAY_D_EXIT);
+
+            POINT pt; GetCursorPos(&pt);
+            TrackPopupMenuEx(
+                hMenu,
+                TPM_BOTTOMALIGN | TPM_RIGHTALIGN | TPM_NOANIMATION,
+                pt.x,
+                pt.y,
+                hwnd,
+                nullptr
+            );
+
+            DestroyMenu(hControlMenu);
+            // hConfigMenu removed
+            DestroyMenu(hDashMenu);
+            DestroyMenu(hThemeMenu);
+            DestroyMenu(hHelpMenu);
+            DestroyMenu(hMenu);
+
+            // Cleanup bitmaps
+            for (HBITMAP h : menuBitmaps) DeleteObject(h);
+        }
+        return 0;
+
+    // -----------------------------------------------------------------------
+    case WM_COMMAND:
+    {
+        DWORD wmId = LOWORD(wParam);
+
+        // --- Theme Handler ---
+        if (wmId >= ID_TRAY_THEME_BASE && wmId < ID_TRAY_THEME_BASE + 100) {
+            std::wstring newTheme = L"Default";
+            if (wmId != ID_TRAY_THEME_BASE) {
+                std::vector<std::wstring> themes = TrayAnimator::Get().ScanThemes();
+                int index = wmId - (ID_TRAY_THEME_BASE + 1);
+                if (index >= 0 && index < themes.size()) {
+                    newTheme = themes[index];
+                }
+            }
+            TrayAnimator::Get().SetTheme(newTheme);
+            SaveIconTheme(newTheme);
+        }
+
+        // --- New Handlers ---
+        if (wmId == ID_TRAY_LIVE_LOG) {
+            GuiManager::ShowLogWindow();
+        }
+        else if (wmId == ID_TRAY_OPEN_DIR) {
+            ShellExecuteW(nullptr, L"open", GetLogPath().c_str(), nullptr, nullptr, SW_SHOW);
+        }
+        else if (wmId == ID_TRAY_EXPORT_LOG) {
+            // Generate timestamped filename
+            auto now = std::chrono::system_clock::now();
+            auto t   = std::chrono::system_clock::to_time_t(now);
+            std::tm tm;
+            localtime_s(&tm, &t);
+
+            wchar_t filename[64];
+            wcsftime(filename, 64, L"audit_dump_%Y%m%d_%H%M%S.json", &tm);
+
+            std::filesystem::path path = GetLogPath() / filename;
+
+            if (PManContext::Get().subs.provenance) {
+                PManContext::Get().subs.provenance->ExportLog(path);
+
+                // Optional: Show balloon tip to confirm
+                TrayAnimator::Get().ShowNotification(L"Audit Export Complete", filename, NIIF_INFO);
+            }
+        }
+        else if (wmId == ID_TRAY_EDIT_CONFIG) {
+            GuiManager::ShowConfigWindow();
+        }
+        // --- End New Handlers ---
+
+        else if (wmId == ID_TRAY_STARTUP_DISABLED) {
+            wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
+            std::wstring taskName = std::filesystem::path(self).stem().wstring();
+            Lifecycle::UninstallTask(taskName);
+        }
+        else if (wmId == ID_TRAY_STARTUP_ACTIVE || wmId == ID_TRAY_STARTUP_PASSIVE) {
+            wchar_t self[MAX_PATH]; GetModuleFileNameW(nullptr, self, MAX_PATH);
+            std::wstring taskName = std::filesystem::path(self).stem().wstring();
+            bool passive = (wmId == ID_TRAY_STARTUP_PASSIVE);
+            Lifecycle::InstallTask(taskName, self, passive);
+        }
+        else if (wmId == ID_TRAY_EXIT) {
+            DestroyWindow(hwnd);
+        }
+        else if (wmId == ID_TRAY_ABOUT) {
+            GuiManager::ShowAboutWindow();
+        }
+        else if (wmId == ID_TRAY_SUPPORT) {
+            ShellExecuteW(nullptr, L"open", SUPPORT_URL, nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        else if (wmId == ID_TRAY_HELP_USAGE) {
+            GuiManager::ShowHelpWindow();
+        }
+        else if (wmId == ID_TRAY_UPDATE) {
+            OpenUpdatePage();
+        }
+        else if (wmId == ID_TRAY_REFRESH_GPU) {
+            // Simulate Win+Ctrl+Shift+B to reset graphics driver
+            INPUT inputs[8] = {};
+
+            // Press
+            inputs[0].type = INPUT_KEYBOARD; inputs[0].ki.wVk = VK_LCONTROL;
+            inputs[1].type = INPUT_KEYBOARD; inputs[1].ki.wVk = VK_LSHIFT;
+            inputs[2].type = INPUT_KEYBOARD; inputs[2].ki.wVk = VK_LWIN;
+            inputs[3].type = INPUT_KEYBOARD; inputs[3].ki.wVk = 0x42; // 'B' key
+
+            // Release (Reverse order)
+            inputs[4] = inputs[3]; inputs[4].ki.dwFlags = KEYEVENTF_KEYUP;
+            inputs[5] = inputs[2]; inputs[5].ki.dwFlags = KEYEVENTF_KEYUP;
+            inputs[6] = inputs[1]; inputs[6].ki.dwFlags = KEYEVENTF_KEYUP;
+            inputs[7] = inputs[0]; inputs[7].ki.dwFlags = KEYEVENTF_KEYUP;
+
+            if (SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT)) == ARRAYSIZE(inputs)) {
+                Log("[USER] GPU Driver Refresh triggered manually.");
+            } else {
+                Log("[ERROR] Failed to send GPU refresh keystrokes: " + std::to_string(GetLastError()));
+            }
+        }
+        else if (wmId == ID_TRAY_PAUSE) {
+            bool p = !g_userPaused.load();
+            g_userPaused.store(p);
+            PManContext::Get().isPaused.store(p);
+
+            // --- ANIMATION STATE SWITCH ---
+            TrayAnimator::Get().SetPaused(p);
+            // -----------------------------
+
+            UpdateTrayTooltip();
+            Log(p ? "[USER] Protection PAUSED." : "[USER] Protection RESUMED.");
+            if (!p) g_reloadNow.store(true);
+
+            // [PROVENANCE] User override of the Governor must be logged.
+            // Sandbox Barrier: we are NOT calling executor.cpp — we set a flag that
+            // RunAutonomousCycle reads. The Ledger records the override for audit.
+            if (PManContext::Get().subs.provenance) {
+                DecisionJustification j{};
+                j.actionType            = BrainAction::Maintain;
+                j.timestamp             = GetTickCount64();
+                j.finalCommitted        = true;
+                j.policyHash            = "UserOverride";
+                j.sandboxResult.reason  = "UserOverride";
+                j.externalVerdict.state = "UserOverride";
+                j.externalVerdict.expiresAt = 0;
+                j.counterfactuals.push_back({ BrainAction::Maintain, RejectionReason::ManualOverride });
+                PManContext::Get().subs.provenance->Record(j);
+            }
+        }
+        else if (wmId == ID_TRAY_PAUSE_IDLE) {
+            bool p = !g_pauseIdle.load();
+            g_pauseIdle.store(p);
+
+            UpdateTrayTooltip(); // Refresh tooltip immediately
+
+            Log(p ? "[USER] Idle Optimization PAUSED (CPU Limiting Disabled)." : "[USER] Idle Optimization RESUMED.");
+
+            // Immediate effect: If we just paused, force the Idle Manager to think we are active
+            // This restores all parked cores instantly.
+            if (p) {
+                g_idleAffinityMgr.OnIdleStateChanged(false);
+            }
+        }
+        else if (wmId == ID_TRAY_KEEP_AWAKE) {
+            bool k = !g_keepAwake.load();
+            g_keepAwake.store(k);
+
+            if (k) {
+                // Prevent Sleep (System) and Screen Off (Display)
+                SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+                Log("[USER] Keep Awake ENABLED (System Sleep & Display Off blocked).");
+            } else {
+                // Clear flags, allow OS to sleep normally
+                SetThreadExecutionState(ES_CONTINUOUS);
+                Log("[USER] Keep Awake DISABLED (System power settings restored).");
+            }
+            UpdateTrayTooltip(); // Refresh Tooltip
+        }
+        return 0;
+    } // End of WM_COMMAND Block
+
+    case WM_POWERBROADCAST:
+        if (wParam == PBT_APMQUERYSUSPEND || wParam == PBT_APMSUSPEND)
+        {
+            Log("System suspending - pausing operations to prevent memory corruption");
+            g_isSuspended.store(true);
+        }
+        else if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND)
+        {
+            Log("System resumed - waiting 5s for kernel stability");
+
+            // State-based delay instead of detached thread
+            g_resumeStabilizationTime = GetTickCount64() + 5000;
+            g_isSuspended.store(true); // Keep suspended until stabilization
+        }
+        else if (wParam == PBT_POWERSETTINGCHANGE)
+        {
+            g_reloadNow = true;
+        }
+        return 0;
+    default:
+        return DefWindowProcW(hwnd, uMsg, wParam, lParam);
     }
 }
 

@@ -83,4 +83,16 @@ private:
     static const UINT ICON_UID = 1001; // Internal ID for Shell_NotifyIcon
 };
 
+// ---------------------------------------------------------------------------
+// TrayManager — owns all tray message routing
+// All ID_TRAY_* command dispatch, context menu build, theme scanner,
+// shell execution, and WM_POWERBROADCAST handling live here.
+// ---------------------------------------------------------------------------
+class TrayManager {
+public:
+    // Thin dispatcher target: WindowProc routes tray-related messages here.
+    // Returns the value WindowProc should return for uMsg.
+    static LRESULT HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+};
+
 #endif // PMAN_TRAY_ANIMATOR_H

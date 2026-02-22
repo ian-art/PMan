@@ -198,4 +198,9 @@
 // Session Smart Cache (Atomic Raw Pointer)
 #define g_sessionCache (PManContext::Get().runtime.sessionCache)
 
+// Non-static globals defined in main.cpp; needed by TrayManager (tray_animator.cpp)
+extern HINSTANCE         g_hInst;
+extern std::atomic<bool> g_isCheckingUpdate;
+extern uint64_t          g_resumeStabilizationTime;
+
 #endif // PMAN_GLOBALS_H

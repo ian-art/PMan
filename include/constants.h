@@ -97,6 +97,9 @@ static constexpr UINT IDI_TRAY_D_EXIT           = 4014;
 static constexpr UINT IDI_TRAY_D_CP             = 4015;
 static constexpr UINT IDI_TRAY_D_LOG            = 4016;
 
+// Audit Export
+static constexpr UINT    ID_TRAY_EXPORT_LOG         = 5001;
+
 // PAYPAL
 static constexpr wchar_t SUPPORT_URL[] = L"https://paypal.me/ianart/100";
 
