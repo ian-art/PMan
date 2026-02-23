@@ -58,6 +58,10 @@ private:
     // Internal State for Rollback
     bool m_actionApplied = false;
     DWORD m_originalPriorityClass = 0;
+    SIZE_T m_originalMinWS = 0;
+    SIZE_T m_originalMaxWS = 0;
+    DWORD m_originalWSFlags = 0;
+    bool m_wsModified = false;
     UniqueHandle m_hTarget;
 
     // Time-Bound Authority Lease

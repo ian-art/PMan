@@ -337,7 +337,8 @@ enum class AllowedActionClass : uint8_t {
     MemoryReclaim,     // Working set trimming
     ThermalSafety,     // Throttling only
     SecurityMitigation, // [DCM] Universal Foreground Shielding
-    PerformanceBoost    // [FIX] Traffic Enforcer: Explicit permission for reflex boosts
+    PerformanceBoost,   // [FIX] Traffic Enforcer: Explicit permission for reflex boosts
+    MemoryHarden
 };
 
 struct SystemSignalSnapshot {
@@ -386,12 +387,14 @@ enum class BrainAction : uint8_t {
     Shield_Foreground, // [DCM] Universal Foreground Shielding (Boost FG + IO)
     Boost_Process, // [FIX] Restored core action to match policy.json
     Probation, // Security Containment for Proxy Launches
+    Action_MemoryHarden,
+    Action_MemoryTrim,
     Count // Compile-time fixed size
 };
 
 // Compile-time check
 constexpr size_t ACTION_COUNT = static_cast<size_t>(BrainAction::Count);
-static_assert(ACTION_COUNT == 10, "BrainAction count");
+static_assert(ACTION_COUNT == 12, "BrainAction count");
 
 // Decision Arbiter Types
 enum class DecisionReason : uint8_t {
@@ -430,6 +433,7 @@ struct ArbiterDecision {
     DecisionReason reason;
     uint64_t decisionTime;
     bool isReversible = false; // Authority Grant (Default: False)
+    DWORD targetPid = 0; // The target process for the action
     
     // The "Why not?" Ledger
     std::vector<CounterfactualRecord> rejectedAlternatives;

@@ -40,6 +40,10 @@ CostVector ConsequenceEvaluator::LookupBaseCost(AllowedActionClass action) {
             // Trim: Reduces CPU contention (Source 13), but increases Disk Pressure and Latency Risk
             return {-2, 3, 2, 3};
 
+        case AllowedActionClass::MemoryHarden:
+            // Harden: High risk of starving background processes
+            return {0, 0, 1, 5};
+
         case AllowedActionClass::ThermalSafety:
             // Throttle: Reduces CPU heat, Neutral Disk, Destroys Latency, Hard Recovery
             return {-3, 0, 5, 4};

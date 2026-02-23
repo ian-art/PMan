@@ -160,7 +160,9 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         decision.selectedAction != BrainAction::Optimize_Memory && 
         decision.selectedAction != BrainAction::Optimize_Memory_Gentle &&
         decision.selectedAction != BrainAction::Suspend_Services && 
-        decision.selectedAction != BrainAction::Release_Pressure) {
+        decision.selectedAction != BrainAction::Release_Pressure &&
+        decision.selectedAction != BrainAction::Action_MemoryHarden &&
+        decision.selectedAction != BrainAction::Action_MemoryTrim) {
         result.executed = false;
         result.reversible = false; // Strictly forbidden
         result.committed = false;
@@ -207,7 +209,7 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     }
 
     // 3. Target Selection
-    DWORD targetPid = GetCurrentProcessId();
+    DWORD targetPid = decision.targetPid != 0 ? decision.targetPid : GetCurrentProcessId();
     if (decision.selectedAction == BrainAction::Shield_Foreground) {
         GetWindowThreadProcessId(GetForegroundWindow(), &targetPid);
         // Safety: Do not target self or system idle
@@ -246,7 +248,8 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
 
     // 3. Capture State (For potential manual rollback, though we intend to commit)
     m_originalPriorityClass = GetPriorityClass(m_hTarget.get());
-    if (m_originalPriorityClass == 0) {
+    GetProcessWorkingSetSizeEx(m_hTarget.get(), &m_originalMinWS, &m_originalMaxWS, &m_originalWSFlags);
+    if (m_originalPriorityClass == 0 && m_originalMinWS == 0) {
         m_hTarget.reset();
         result.executed = false;
         result.reversible = true;
@@ -310,6 +313,20 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
             success = SetPriorityClass(m_hTarget.get(), HIGH_PRIORITY_CLASS);
         }
     }
+    else if (decision.selectedAction == BrainAction::Action_MemoryHarden) {
+        PROCESS_MEMORY_COUNTERS pmc;
+        if (GetProcessMemoryInfo(m_hTarget.get(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+            SIZE_T current = pmc.WorkingSetSize;
+            if (current > 200 * 1024 * 1024) {
+                success = SetProcessWorkingSetSizeEx(m_hTarget.get(), current, (SIZE_T)-1, QUOTA_LIMITS_HARDWS_MIN_ENABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE);
+                if (success) m_wsModified = true;
+            }
+        }
+    }
+    else if (decision.selectedAction == BrainAction::Action_MemoryTrim) {
+        success = SetProcessWorkingSetSizeEx(m_hTarget.get(), 4096, 256 * 1024 * 1024, 0);
+        if (success) m_wsModified = true;
+    }
     
     if (success) {
         m_actionApplied = true;
@@ -350,7 +367,12 @@ void SandboxExecutor::Rollback() {
     ResumeBackgroundServices();
 
     if (m_actionApplied && m_hTarget) {
-        SetPriorityClass(m_hTarget.get(), m_originalPriorityClass);
+        if (m_wsModified) {
+            SetProcessWorkingSetSizeEx(m_hTarget.get(), m_originalMinWS, m_originalMaxWS, 0);
+            m_wsModified = false;
+        } else {
+            SetPriorityClass(m_hTarget.get(), m_originalPriorityClass);
+        }
         
         // [SECURITY PATCH] Clear from Ledger
         UpdateSessionLedger(GetProcessId(m_hTarget.get()), 0, 0, false);

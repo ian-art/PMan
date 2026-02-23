@@ -48,6 +48,18 @@ PredictedStateDelta ShadowExecutor::Simulate(const ArbiterDecision& decision, co
             delta.latencyDelta = 15.0; // Hard faults cause stutter
             break;
 
+        case BrainAction::Action_MemoryHarden:
+            // Simulation: Predicted page faults reduced, predicted free RAM decreased
+            delta.cpuLoadDelta = -2.0;
+            delta.latencyDelta = -5.0;
+            break;
+
+        case BrainAction::Action_MemoryTrim:
+            // Simulation: Trimming spikes CPU and Latency momentarily
+            delta.cpuLoadDelta = 5.0; 
+            delta.latencyDelta = 15.0;
+            break;
+
         case BrainAction::Suspend_Services:
             // Simulation: Stopping services frees minimal CPU, mostly RAM
             delta.cpuLoadDelta = -1.0;

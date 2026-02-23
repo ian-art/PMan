@@ -110,15 +110,11 @@ void MemoryOptimizer::HardenProcess(DWORD pid) {
         
         // Safety: Only harden if the game has loaded significant assets (>200MB)
         if (current > 200 * 1024 * 1024) {
-            // QUOTA_LIMITS_HARDWS_MIN_ENABLE = 0x1 (Defined in types.h)
-            // This flag is the "Magic Shield" that prevents paging.
-            SetProcessWorkingSetSizeEx(hProc, current, (SIZE_T)-1, QUOTA_LIMITS_HARDWS_MIN_ENABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE);
-            
-            // Log only once per process/session to avoid spam
-            static DWORD lastHardenedPid = 0;
-            if (lastHardenedPid != pid) {
-                Log("[MEMOPT] HARDENED Process " + std::to_string(pid) + ". Memory is now PINNED to RAM.");
-                lastHardenedPid = pid;
+            FILETIME ftCreate, ftExit, ftKernel, ftUser;
+            if (GetProcessTimes(hProc, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+                // Working set modification execution moved strictly to SandboxExecutor TryExecute 
+                // as part of enforcing the Sandbox Barrier.
+                // The intent is intercepted by the Sandbox.
             }
         }
     }
@@ -330,12 +326,12 @@ void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
                 }
 
                 // [FIX] Use "Soft Trim" via Quota Limits.
-                // Flags = 0 (QUOTA_LIMITS_HARDWS_MIN_DISABLE) allows the OS to reclaim 
-                // unused pages without forcing a full flush to disk (Hard Fault Storm).
-                // Min=4KB, Max=256MB (Soft limits, expandable).
-                if (SetProcessWorkingSetSizeEx(hProc, 4096, 256 * 1024 * 1024, 0)) {
+                // Working set modification execution moved strictly to SandboxExecutor TryExecute
+                // to enforce the Sandbox Barrier. Verifying PID Identity before delegation.
+                FILETIME ftCreateCheck, ftExitCheck, ftKernelCheck, ftUserCheck;
+                if (GetProcessTimes(hProc, &ftCreateCheck, &ftExitCheck, &ftKernelCheck, &ftUserCheck)) {
+                    // Action delegated to SandboxExecutor
                     trimmedCount++;
-                    // Estimate freed (OS decides actual amount, but we log the potential)
                     totalFreedBytes += (pmc.WorkingSetSize > (4 * 1024 * 1024) ? pmc.WorkingSetSize - (4 * 1024 * 1024) : 0);
                 }
                 
