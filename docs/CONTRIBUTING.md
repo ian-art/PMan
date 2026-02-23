@@ -43,6 +43,7 @@ You cannot add an action without defining its Cost.
 
 ### 2. No Loose Globals
 * **State:** Use the `PManContext` singleton for application state.
+* **Deprecated Macros:** The legacy `g_*` subsystem macros (e.g., `g_perfGuardian`, `g_explorerBooster`, `g_serviceManager`) have been eradicated. You **must not** use them. All core subsystems must be safely routed through `PManContext::Get().subs` with appropriate null-checks.
 * **Concurrency:** Use `std::atomic` for variables shared between the UI thread and worker threads (e.g., `LagStatus` in SRAM).
 
 ### 3. Windows API Abstraction
