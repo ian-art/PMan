@@ -46,6 +46,7 @@
 #include "telemetry_agent.h" // [FIX] Required for unique_ptr<TelemetryAgent> destructor
 #include "heartbeat.h"       // [FIX] Required for unique_ptr<HeartbeatSystem> destructor
 #include "autonomous_engine.h" // [FIX] Required for unique_ptr<AutonomousEngine> destructor
+#include "responsiveness_manager.h" // [FIX] Required for unique_ptr<ResponsivenessManager> destructor
 
 // Constructor: Initialize Subsystems
 PManContext::PManContext() {
@@ -76,7 +77,8 @@ PManContext::PManContext() {
     subs.investigator = std::make_unique<Investigator>();
     subs.ipc        = std::make_unique<IpcServer>();
     subs.telemetry  = std::make_unique<TelemetryAgent>();
-    subs.engine     = std::make_unique<AutonomousEngine>();
+    subs.engine          = std::make_unique<AutonomousEngine>();
+    subs.responsiveness  = std::make_unique<ResponsivenessManager>();
 }
 
 // Destructor: Default (Required for unique_ptr with forward declared types)

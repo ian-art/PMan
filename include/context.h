@@ -69,6 +69,7 @@ class IpcServer;         // Secure IPC
 class TelemetryAgent;    // Forward Declaration
 class HeartbeatSystem;   // Watchdog Heartbeat Module
 class AutonomousEngine;  // Autonomous Engine Orchestrator
+class ResponsivenessManager; // Responsiveness Recovery Manager
 
 class PManContext {
 public:
@@ -277,6 +278,7 @@ public:
         std::unique_ptr<TelemetryAgent>        telemetry;    // Non-blocking Telemetry
         std::unique_ptr<HeartbeatSystem>       heartbeat;    // Dedicated Heartbeat Module
         std::unique_ptr<AutonomousEngine>      engine;       // Autonomous Engine Orchestrator
+        std::unique_ptr<ResponsivenessManager> responsiveness; // Responsiveness Recovery Manager
     } subs;
 
     // Access from any TU: PManContext::Get().workerQueue.Push([]{...});

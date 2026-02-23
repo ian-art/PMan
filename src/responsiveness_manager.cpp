@@ -21,7 +21,7 @@
 #include "globals.h"
 #include "logger.h"
 #include "utils.h"
-#include "performance.h" // For g_perfGuardian
+#include "performance.h"
 #include <filesystem>
 #include <thread>
 #include <iostream>

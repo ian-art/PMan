@@ -139,8 +139,7 @@ static void RestorePointThreadSafe()
 // Background worker queue moved to WorkerQueue (worker_thread.h).
 // Owned by PManContext::workerQueue.
 
-// Instance provided by responsiveness_manager.h/cpp integration or declared here
-static ResponsivenessManager g_responsivenessManager;
+// ResponsivenessManager owned by PManContext::Get().subs.responsiveness
 
 // LogViewer moved to log_viewer.cpp / log_viewer.h
 
@@ -814,7 +813,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
 					if (PManContext::Get().subs.perf) PManContext::Get().subs.perf->OnPerformanceTick();
                     
                     // [FIX] Move heavy window checks to background to prevent main thread stutter
-                    g_responsivenessManager.Update();
+                    if (PManContext::Get().subs.responsiveness) PManContext::Get().subs.responsiveness->Update();
                 });
                 
                 // Run Service Watcher
