@@ -20,6 +20,8 @@
 #include "governor.h"
 #include "globals.h"
 #include "security_utils.h"
+#include "context.h"
+#include "memory_optimizer.h"
 #include <algorithm>
 
 // 5.2 Normalized Signals
@@ -91,7 +93,8 @@ AllowedActionClass PerformanceGovernor::DetermineActions(SystemMode mode, Domina
         // we authorize the Foreground Shield (SecurityMitigation)
         if (pressure == DominantPressure::Security) return AllowedActionClass::SecurityMitigation;
 
-        if (pressure == DominantPressure::None) return AllowedActionClass::None;
+        // No resource pressure means we have budget to harden the foreground game
+        if (pressure == DominantPressure::None) return AllowedActionClass::MemoryHarden;
         if (pressure == DominantPressure::Latency || pressure == DominantPressure::Cpu) return AllowedActionClass::Scheduling;
         if (pressure == DominantPressure::Disk) return AllowedActionClass::IoPrioritization;
     }
@@ -135,6 +138,20 @@ GovernorDecision PerformanceGovernor::Decide(const SystemSignalSnapshot& snapsho
     
     // 4. Gate Actions
     decision.allowedActions = DetermineActions(decision.mode, decision.dominant);
-    
+
+    // Attach target PID from MemoryOptimizer sensor before returning.
+    // Governor queries the Sensor (read-only); no system state is mutated here.
+    DWORD fgPid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &fgPid);
+
+    auto& mem = PManContext::Get().subs.mem;
+    if (mem) {
+        if (decision.allowedActions == AllowedActionClass::MemoryReclaim) {
+            decision.targetPid = mem->ProposeTrimTarget(fgPid);
+        } else if (decision.allowedActions == AllowedActionClass::MemoryHarden) {
+            decision.targetPid = mem->ProposeHardenTarget(fgPid);
+        }
+    }
+
     return decision;
 }

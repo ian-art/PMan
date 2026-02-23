@@ -206,324 +206,139 @@ bool MemoryOptimizer::IsTargetProcess(const std::wstring& procName) {
     return false;
 }
 
-void MemoryOptimizer::SmartMitigate(DWORD foregroundPid) {
-    // Rate limit to once per minute
-    static uint64_t lastMitigation = 0;
-    uint64_t nowTick = GetTickCount64();
-    if (nowTick - lastMitigation < 60000) return;
-    lastMitigation = nowTick;
-
-    // Offload to background thread
-    std::thread([this, foregroundPid]() {
-        // Resolve foreground process name to prevent cannibalizing child processes (e.g. Chrome Renderers)
-        std::wstring fgName;
-        HANDLE hFgProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, foregroundPid);
-    if (hFgProc) {
-        wchar_t fBuf[MAX_PATH];
-        DWORD fLen = MAX_PATH;
-        if (QueryFullProcessImageNameW(hFgProc, 0, fBuf, &fLen)) {
-            fgName = std::filesystem::path(fBuf).filename().wstring();
-            std::transform(fgName.begin(), fgName.end(), fgName.begin(), ::towlower);
+DWORD MemoryOptimizer::ProposeTrimTarget(DWORD foregroundPid) {
+    // Resolve foreground process name to prevent cannibalizing child/related processes
+    std::wstring fgName;
+    {
+        HANDLE hFgRaw = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, foregroundPid);
+        if (hFgRaw) {
+            UniqueHandle hFgProc(hFgRaw);
+            wchar_t fBuf[MAX_PATH];
+            DWORD fLen = MAX_PATH;
+            if (QueryFullProcessImageNameW(hFgRaw, 0, fBuf, &fLen)) {
+                fgName = std::filesystem::path(fBuf).filename().wstring();
+                std::transform(fgName.begin(), fgName.end(), fgName.begin(), ::towlower);
+            }
         }
-        CloseHandle(hFgProc);
     }
 
-    DWORD needed{};
     // [FIX] C6262: Use heap allocation instead of large stack array
     std::vector<DWORD> pids(4096);
-    if (!EnumProcesses(pids.data(), static_cast<DWORD>(pids.size() * sizeof(DWORD)), &needed)) return;
+    DWORD needed{};
+    if (!EnumProcesses(pids.data(), static_cast<DWORD>(pids.size() * sizeof(DWORD)), &needed)) return 0;
 
     DWORD myPid = GetCurrentProcessId();
     size_t count = needed / sizeof(DWORD);
-    int trimmedCount = 0;
-    SIZE_T totalFreedBytes = 0;
     auto now = std::chrono::steady_clock::now();
+
+    DWORD worstPid = 0;
+    SIZE_T worstWorkingSet = 0;
 
     for (size_t i = 0; i < count; i++) {
         DWORD pid = pids[i];
-        if (pid == 0 || pid == myPid || pid == foregroundPid) continue;
 
-		// [SAFETY] Do not rely on PID heuristics (pid < 1000). 
-        // Only skip strictly known kernel PIDs here. 
-        // Real system processes are filtered via IsSystemCriticalProcess() later to prevent BSODs.
-        if (pid == 0 || pid == 4) continue;
+        // [SAFETY] Skip kernel PIDs, self, and the protected foreground process
+        if (pid == 0 || pid == 4 || pid == myPid || pid == foregroundPid) continue;
 
-        // Check internal cooldown
+        // Check internal cooldown (read-only — sensor does not write to tracker)
         if (m_processTracker.count(pid)) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                 now - m_processTracker[pid].lastTrimTime).count();
-            if (elapsed < PROCESS_COOLDOWN_SEC) continue; 
+            if (elapsed < PROCESS_COOLDOWN_SEC) continue;
         }
 
-        // Proceed to open handle. We check exclusion list name later to save perf on invalid handles.
-        HANDLE hProc = OpenProcess(
-            PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, 
+        // [SENSOR] Open with read-only flags — no mutation flags permitted
+        HANDLE hProcRaw = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
             FALSE, pid
         );
 
-        if (!hProc) {
-            // Process gone or access denied. 
-            // Do NOT update lastTrimTime here; if the PID is reused later, we want to treat it as new.
-            // m_processTracker[pid].lastTrimTime = now; <--- REMOVED
-            // Instead, remove it from tracker to reset state
+        if (!hProcRaw) {
+            // Process gone or access denied; reset tracker state for this PID
             if (m_processTracker.count(pid)) m_processTracker.erase(pid);
             continue;
         }
+        UniqueHandle hProc(hProcRaw);
 
-        // [RACE FIX] Verify PID Identity: Ensure this is not a reused PID
-        // If the process is brand new (< 2 seconds old), skip trimming to allow initialization
+        // [RACE FIX] Verify PID Identity: skip brand-new processes (< 2 seconds old)
         FILETIME ftCreate, ftExit, ftKernel, ftUser;
-        if (GetProcessTimes(hProc, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
-             ULARGE_INTEGER ulCreate;
-             ulCreate.LowPart = ftCreate.dwLowDateTime;
-             ulCreate.HighPart = ftCreate.dwHighDateTime;
-             
-             // Current system time as FILETIME
-             FILETIME ftNow;
-             GetSystemTimeAsFileTime(&ftNow);
-             ULARGE_INTEGER ulNow;
-             ulNow.LowPart = ftNow.dwLowDateTime;
-             ulNow.HighPart = ftNow.dwHighDateTime;
+        if (GetProcessTimes(hProcRaw, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+            ULARGE_INTEGER ulCreate;
+            ulCreate.LowPart = ftCreate.dwLowDateTime;
+            ulCreate.HighPart = ftCreate.dwHighDateTime;
 
-             // 10,000,000 ticks per second. 2 seconds = 20,000,000
-             if (ulNow.QuadPart > ulCreate.QuadPart && (ulNow.QuadPart - ulCreate.QuadPart) < 20000000) {
-                 CloseHandle(hProc);
-                 continue; 
-             }
+            FILETIME ftNow;
+            GetSystemTimeAsFileTime(&ftNow);
+            ULARGE_INTEGER ulNow;
+            ulNow.LowPart = ftNow.dwLowDateTime;
+            ulNow.HighPart = ftNow.dwHighDateTime;
+
+            // 10,000,000 ticks per second. 2 seconds = 20,000,000
+            if (ulNow.QuadPart > ulCreate.QuadPart && (ulNow.QuadPart - ulCreate.QuadPart) < 20000000) {
+                continue;
+            }
         }
 
         PROCESS_MEMORY_COUNTERS_EX pmc;
-        if (GetProcessMemoryInfo(hProc, (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
-            
+        if (GetProcessMemoryInfo(hProcRaw, (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
             if (pmc.WorkingSetSize > MIN_MEM_TO_TRIM) {
-                
-                // Check Exclusion List
                 wchar_t buf[MAX_PATH];
                 DWORD len = MAX_PATH;
-                if (QueryFullProcessImageNameW(hProc, 0, buf, &len)) {
+                if (QueryFullProcessImageNameW(hProcRaw, 0, buf, &len)) {
                     std::filesystem::path p(buf);
                     std::wstring name = p.filename().wstring();
                     std::transform(name.begin(), name.end(), name.begin(), ::towlower);
-                    
-                    // Critical Safety Check (Defender Safe)
-                    // Explicitly prevent trimming AV or System processes
-                    if (IsSystemCriticalProcess(name)) {
-                        CloseHandle(hProc);
-                        continue;
-                    }
 
-                    // [FIX] Safety: Don't trim child processes of the active application
-                    if (!fgName.empty() && name == fgName) {
-                        CloseHandle(hProc);
-                        continue;
-                    }
+                    // Critical Safety Check: never trim AV or system processes
+                    if (IsSystemCriticalProcess(name)) continue;
 
-                    std::shared_lock<std::shared_mutex> lock(g_setMtx);
-                    if (g_ignoredProcesses.find(name) != g_ignoredProcesses.end()) {
-                        CloseHandle(hProc);
-                        continue;
-                    }
-                }
+                    // [FIX] Safety: Don't target child processes of the active application
+                    if (!fgName.empty() && name == fgName) continue;
 
-                // [FIX] Use "Soft Trim" via Quota Limits.
-                // Working set modification execution moved strictly to SandboxExecutor TryExecute
-                // to enforce the Sandbox Barrier. Verifying PID Identity before delegation.
-                FILETIME ftCreateCheck, ftExitCheck, ftKernelCheck, ftUserCheck;
-                if (GetProcessTimes(hProc, &ftCreateCheck, &ftExitCheck, &ftKernelCheck, &ftUserCheck)) {
-                    // Action delegated to SandboxExecutor
-                    trimmedCount++;
-                    totalFreedBytes += (pmc.WorkingSetSize > (4 * 1024 * 1024) ? pmc.WorkingSetSize - (4 * 1024 * 1024) : 0);
-                }
-                
-                m_processTracker[pid].lastTrimTime = now;
-            }
-        }
-        CloseHandle(hProc);
-    }
-
-    if (trimmedCount > 0) {
-        Log("[MEMOPT] High Pressure Mitigation: Trimmed " + std::to_string(trimmedCount) + 
-            " processes (" + std::to_string(totalFreedBytes / 1024 / 1024) + " MB)");
-
-        // Intelligent Standby Purge
-        auto timeSincePurge = std::chrono::duration_cast<std::chrono::seconds>(
-            now - m_lastPurgeTime).count();
-
-        // Only purge if we freed significant RAM (>100MB) AND cooldown expired
-        if (timeSincePurge > PURGE_COOLDOWN_SEC && totalFreedBytes > (100 * 1024 * 1024)) {
-            // [FIX] Disable Standby List Purge.
-            // Purging the Standby List deletes file cache (icons, DLLs), causing 
-            // immediate micro-stutters when the user opens Start Menu or switches apps.
-            // Modern Windows (10/11) manages Standby memory correctly; empty RAM is wasted RAM.
-            // FlushStandbyList(); <--- COMMENTED OUT TO FIX LAG
-            Log("[MEMOPT] Trim complete. Standby List Purge skipped to preserve responsiveness.");
-            m_lastPurgeTime = now;
-        }
-    }
-    // End of background thread
-    }).detach();
-}
-
-void MemoryOptimizer::RunThread() {
-    Log("[MEMOPT] Background Monitor Thread Started");
-
-    while (m_running) {
-        // Cleanup dead processes every hour to prevent map bloat
-        static uint64_t lastCleanup = 0;
-        uint64_t nowTick = GetTickCount64();
-        if (nowTick - lastCleanup > 3600000) {
-            for (auto it = m_processTracker.begin(); it != m_processTracker.end(); ) {
-                HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, it->first);
-                bool dead = (!hProc);
-                if (hProc) {
-                    DWORD exitCode = 0;
-                    if (!GetExitCodeProcess(hProc, &exitCode) || exitCode != STILL_ACTIVE) dead = true;
-                    CloseHandle(hProc);
-                }
-                if (dead) it = m_processTracker.erase(it); else ++it;
-            }
-            lastCleanup = nowTick;
-        }
-
-        // 1. Check Pause State
-        if (g_userPaused.load() || g_isSuspended.load()) {
-            Sleep(1000);
-            continue;
-        }
-
-        // 2. Browser Check: Abort logic if ANY browser is running (User Constraint)
-        bool browserRunning = false;
-        {
-            // Scope for snapshot handles
-            HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if (hSnap != INVALID_HANDLE_VALUE) {
-                PROCESSENTRY32W pe = { sizeof(pe) };
-                if (Process32FirstW(hSnap, &pe)) {
-                    do {
+                    {
                         std::shared_lock<std::shared_mutex> lock(g_setMtx);
-                        if (g_browsers.find(pe.szExeFile) != g_browsers.end()) {
-                            browserRunning = true;
-                            break;
-                        }
-                    } while (Process32NextW(hSnap, &pe));
-                }
-                CloseHandle(hSnap);
-            }
-        }
-
-        if (browserRunning) {
-            Sleep(2000); // Check again later
-            continue; 
-        }
-
-        // 3. Identify Foreground
-        HWND hFg = GetForegroundWindow();
-        DWORD fgPid = 0;
-        GetWindowThreadProcessId(hFg, &fgPid);
-        
-        std::wstring fgName = L"";
-        HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, fgPid);
-        if (hProc) {
-            wchar_t buf[MAX_PATH];
-            DWORD len = MAX_PATH;
-            if (QueryFullProcessImageNameW(hProc, 0, buf, &len)) {
-                fgName = std::filesystem::path(buf).filename().wstring();
-            }
-            CloseHandle(hProc);
-        }
-        std::transform(fgName.begin(), fgName.end(), fgName.begin(), ::towlower);
-
-        // 4. Check if target active (Game)
-        if (IsTargetProcess(fgName)) {
-            // SRAM Policy Integration
-            // Rule: If SLIGHT_PRESSURE (or worse), pause background trimming.
-            // Memory trimming is I/O and Lock intensive; we must back off early.
-            if (GetSystemResponsiveness() >= LagState::SLIGHT_PRESSURE) {
-                Sleep(2000); // Wait for system to settle
-                continue;
-            }
-
-            // Monitor Logic
-            MemorySnapshot snap = CollectSnapshot();
-            
-            // Trigger if RAM load > 85% OR Page Faults > 2000/sec
-            bool pressureHigh = (snap.memoryLoadPercent > 80 || snap.hardFaultsPerSec > HARD_FAULT_THRESHOLD);
-            
-            if (pressureHigh) {
-                // Run Mitigation
-                SmartMitigate(fgPid);
-                
-                // Cooldown to prevent spamming trims
-                for (int i=0; i<5 && m_running; i++) Sleep(1000); 
-            }
-
-            // Constantly reinforce the Shield on the active game
-            // [FIX] Strict Discrimination: Only Harden (Pin) if it is actually a GAME.
-            // Browsers (which are also "Targets" for mitigation) must NEVER be pinned.
-            bool isGame = false;
-            {
-                std::shared_lock<std::shared_mutex> lock(g_setMtx);
-                if (g_games.find(fgName) != g_games.end()) isGame = true;
-            }
-
-            if (isGame) {
-                // This ensures that as the game loads more assets (level streaming),
-                // the "Hard Minimum" floor rises to protect the new data.
-                HardenProcess(fgPid);
-            }
-
-        } else {
-            // Passive cleanup for map to prevent memory leaks
-            if (m_processTracker.size() > 1000) m_processTracker.clear();
-        }
-
-        // [AUDIT] Relaxed polling to 5s. 1s PDH polling creates unnecessary background noise.
-        Sleep(5000);
-    }
-}
-
-void MemoryOptimizer::PerformSmartTrim(const std::vector<DWORD>& targets, TrimIntensity intensity) {
-    std::lock_guard<std::mutex> lock(m_mtx);
-
-    // 1. Global Action: Flush Standby List (Hard Mode Only)
-    // Flush System Standby List (Global benefit)
-    // [AUDIT] CRITICAL: Purging standby list forces hard faults on active assets, causing verifiable stutter. Disabled.
-    if (intensity == TrimIntensity::Hard) {
-        // FlushStandbyList();
-    }
-
-    // 2. Targeted Action
-    for (DWORD pid : targets) {
-        // Skip own process and critical system processes
-        if (pid == GetCurrentProcessId() || pid == 0 || pid == 4) continue;
-
-        HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
-        if (!hProcess) continue;
-        UniqueHandle uhProcess(hProcess);
-
-        // "DO NOT touch the Game/Foreground App"
-        // (This filtering is expected to be done by the Executor's Targeting System,
-        // but we double-check implementation constraints if needed. 
-        // For now, we trust the 'targets' vector passed by Executor).
-
-        SIZE_T minWS, maxWS;
-        if (GetProcessWorkingSetSize(hProcess, &minWS, &maxWS)) {
-            bool shouldTrim = true;
-
-            // "Gentle Trim" logic
-            if (intensity == TrimIntensity::Gentle) {
-                PROCESS_MEMORY_COUNTERS_EX pmc;
-                if (GetProcessMemoryInfo(hProcess, (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
-                    if (pmc.WorkingSetSize < 100 * 1024 * 1024) { // < 100MB
-                        shouldTrim = false;
+                        if (g_ignoredProcesses.find(name) != g_ignoredProcesses.end()) continue;
                     }
                 }
-            }
 
-            if (shouldTrim) {
-                // EmptyWorkingSet is achieved by passing -1, -1
-                SetProcessWorkingSetSize(hProcess, (SIZE_T)-1, (SIZE_T)-1);
+                // [SENSOR] Track worst offender by largest working set; do not execute any trim
+                // Track worst offender by largest working set
+                if (pmc.WorkingSetSize > worstWorkingSet) {
+                    worstWorkingSet = pmc.WorkingSetSize;
+                    worstPid = pid;
+                }
             }
         }
     }
+
+    return worstPid;
+}
+
+DWORD MemoryOptimizer::ProposeHardenTarget(DWORD foregroundPid) {
+    if (foregroundPid == 0) return 0;
+
+    HANDLE hProcRaw = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, foregroundPid);
+    if (!hProcRaw) return 0;
+    UniqueHandle hProc(hProcRaw);
+
+    wchar_t buf[MAX_PATH];
+    DWORD len = MAX_PATH;
+    if (!QueryFullProcessImageNameW(hProcRaw, 0, buf, &len)) return 0;
+
+    std::wstring name = std::filesystem::path(buf).filename().wstring();
+    std::transform(name.begin(), name.end(), name.begin(), ::towlower);
+
+    {
+        std::shared_lock<std::shared_mutex> lock(g_setMtx);
+        if (g_games.find(name) == g_games.end()) return 0;
+    }
+
+    PROCESS_MEMORY_COUNTERS pmc;
+    if (!GetProcessMemoryInfo(hProcRaw, &pmc, sizeof(pmc))) return 0;
+
+    if (pmc.WorkingSetSize > 200 * 1024 * 1024) {
+        return foregroundPid;
+    }
+
+    return 0;
 }

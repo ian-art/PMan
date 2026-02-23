@@ -566,15 +566,10 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     std::thread watchdogThread(AntiInterferenceWatchdog);
     PinBackgroundThread(watchdogThread);
     Sleep(100); // [POLISH] Stagger start
-    
-    // Start Memory Optimizer in background thread
-    std::thread memOptThread([]() {
-        if (PManContext::Get().subs.mem) PManContext::Get().subs.mem->RunThread();
-    });
-    PinBackgroundThread(memOptThread);
-    // Store for clean shutdown
-    lifecycleThreads.push_back(std::move(memOptThread));
-	
+
+    // MemoryOptimizer background thread removed.
+    // The Optimizer now runs synchronously as a pure Sensor during AutonomousEngine::Tick().
+
     // FIX: Check return value (C6031)
     HRESULT hrInit = CoInitialize(nullptr);
     if (FAILED(hrInit)) {

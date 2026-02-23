@@ -468,17 +468,11 @@ bool Executor::ApplyThrottle(const TargetSet& targets, bool aggressive) {
 }
 
 bool Executor::ApplyMemoryTrim(const TargetSet& targets, bool aggressive) {
-    // Integration with the Memory Optimizer subsystem
-    std::vector<DWORD> pids;
-    for (const auto& t : targets.targets) pids.push_back(t.pid);
-
-    auto& mem = PManContext::Get().subs.mem;
-    if (mem) {
-        // Access via Friend or Public API? 
-        // We added PerformSmartTrim
-        // We cast to access the new method if it's not in the unique_ptr type yet (it is).
-        mem->PerformSmartTrim(pids, aggressive ? MemoryOptimizer::TrimIntensity::Hard : MemoryOptimizer::TrimIntensity::Gentle);
-    }
+    // PerformSmartTrim removed from MemoryOptimizer (now a pure Sensor).
+    // Trim execution will be routed through SandboxExecutor via Action_MemoryTrim.
+    // This function is preserved for call-site compatibility during the transition.
+    (void)targets;
+    (void)aggressive;
     return true;
 }
 

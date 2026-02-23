@@ -36,26 +36,19 @@ public:
 
     void Initialize();
     void Shutdown();
-    
-    // Main loop meant to be run in a dedicated thread
-    void RunThread();
 
-    // Memory Muscles
-    enum class TrimIntensity {
-        Gentle,  // Trim only if WorkingSet > 100MB
-        Hard     // Unconditional trim + Standby List purge
-    };
+    // [SENSOR] Pure heuristic query: enumerates background processes and returns
+    // the single worst offender PID eligible for a trim action, or 0 if none qualify.
+    // Does NOT modify any process state.
+    DWORD ProposeTrimTarget(DWORD foregroundPid);
 
-    // One-Shot Trigger
-    void PerformSmartTrim(const std::vector<DWORD>& targets, TrimIntensity intensity);
+    // [SENSOR] Pure heuristic query: returns foregroundPid if it is a known game
+    // with a working set > 200MB and eligible for hardening, or 0 otherwise.
+    // Does NOT modify any process state.
+    DWORD ProposeHardenTarget(DWORD foregroundPid);
 
-    // Memory Shield
-    // Locks the target process's working set into RAM, preventing the OS from paging it out
-    // during Alt-Tab or high memory pressure.
+    // Memory Shield - applied by SandboxExecutor via Action_MemoryHarden lease
     void HardenProcess(DWORD pid);
-
-    // [PATCH] Exposed for SandboxExecutor
-    void SmartMitigate(DWORD foregroundPid);
 
 private:
     struct ProcessState {

@@ -148,6 +148,13 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
         }
     }
 
+    // Propagate sensor target PID into the ArbiterDecision for SandboxExecutor.
+    // Only attach for memory actions; other actions resolve their own targets via ResolveTargets().
+    if (decision.selectedAction == BrainAction::Action_MemoryTrim ||
+        decision.selectedAction == BrainAction::Action_MemoryHarden) {
+        decision.targetPid = govDecision.targetPid;
+    }
+
     // 4. Generate Counterfactuals (The "Why not?" List)
     // "Which other actions were considered, and exactly why they were rejected."
     for (int i = 0; i < (int)BrainAction::Count; ++i) {
@@ -236,13 +243,19 @@ BrainAction DecisionArbiter::MapIntentToAction(const GovernorDecision& gov) {
     
     switch (gov.allowedActions) {
         case AllowedActionClass::MemoryReclaim:
-            // Context-Aware Selection:
-            // If the system is under load (User Active / High CPU), use Gentle trim to avoid stutter.
-            // If the system is in Background Maintenance (Idle), use Hard trim for maximum reclamation.
-            if (gov.mode == SystemMode::SustainedLoad || gov.mode == SystemMode::Interactive) {
-                return BrainAction::Optimize_Memory_Gentle;
+            // Route through sensor pipeline: only act if Optimizer identified a target.
+            // If no target was proposed (targetPid == 0), do nothing to avoid blind trimming.
+            if (gov.targetPid != 0) {
+                return BrainAction::Action_MemoryTrim;
             }
-            return BrainAction::Optimize_Memory;
+            return BrainAction::Maintain;
+
+        case AllowedActionClass::MemoryHarden:
+            // Route through sensor pipeline: only harden if Optimizer confirmed eligibility.
+            if (gov.targetPid != 0) {
+                return BrainAction::Action_MemoryHarden;
+            }
+            return BrainAction::Maintain;
 
         case AllowedActionClass::ThermalSafety:
             // If thermal pressure is critical, throttle aggressively
