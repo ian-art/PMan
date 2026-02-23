@@ -749,7 +749,10 @@ bool WindowsServiceManager::IsCriticalService(const std::wstring& serviceName) c
         L"WinDefend", L"MsMpSvc", L"SecurityHealthService", L"Sppsvc", L"AppInfo",
         
         // --- Remote Access ---
-        L"TermService", L"UmRdpService"
+        L"TermService", L"UmRdpService",
+        
+        // --- Protected Manual Services ---
+        L"lmhosts", L"NgcSvc", L"NgcCtnrSvc", L"WdiSystemHost"
     };
 
     if (CRITICAL_WHITELIST.count(serviceName)) return true;
