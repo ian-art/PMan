@@ -157,8 +157,6 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     if (decision.selectedAction != BrainAction::Throttle_Mild && 
         decision.selectedAction != BrainAction::Shield_Foreground &&
         decision.selectedAction != BrainAction::Boost_Process && // [FIX] Allow Boost
-        decision.selectedAction != BrainAction::Optimize_Memory && 
-        decision.selectedAction != BrainAction::Optimize_Memory_Gentle &&
         decision.selectedAction != BrainAction::Suspend_Services && 
         decision.selectedAction != BrainAction::Release_Pressure &&
         decision.selectedAction != BrainAction::Action_MemoryHarden &&
@@ -288,20 +286,8 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
              }
         }
     }
-    else if (decision.selectedAction == BrainAction::Optimize_Memory || 
-             decision.selectedAction == BrainAction::Optimize_Memory_Gentle) {
-        // [PATCH] Trigger Memory Optimizer
-        // We use the subsystem instance to perform the smart trim
-        DWORD fgPid = 0;
-        GetWindowThreadProcessId(GetForegroundWindow(), &fgPid);
-        if (PManContext::Get().subs.mem) PManContext::Get().subs.mem->SmartMitigate(fgPid);
-        success = TRUE; // Dispatched to background thread
-    }
-    else if (decision.selectedAction == BrainAction::Suspend_Services) {
-        // [PATCH] Trigger Service Suspension
-        SuspendBackgroundServices();
-        success = TRUE;
-    }
+    // Deprecated backward calls to Ring 2 (MemoryOptimizer) have been removed to strictly 
+    // enforce the Sandbox Barrier. Duplicate Suspend_Services block has also been removed.
     else if (decision.selectedAction == BrainAction::Boost_Process) {
         // [FIX] Active Enforcer: High Priority for Games/Browsers
         // If target is self (default), switch to foreground window
