@@ -247,6 +247,11 @@ This project includes the following third-party software:
 
 <div align="center">
 
+Vibe coding. ✅ ½  
+Practicing: Constraint-driven systems architecture with AI-assisted implementation. ✅ ½
+
+`I'm not a traditional programmer. I'm building PMan as a systems architecture project using AI as a development tool. I'm learning deeply as I go.`
+
 **Neural Origin:** Ian Anthony R. Tancinco  
 **Synthetic Cortex:** Gemini, GPT, Claude, Kimi, and others.
 
