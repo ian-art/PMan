@@ -116,7 +116,7 @@ void ServiceWatcher::ScanAndTrimManualServices() {
             if (services[i].ServiceStatusProcess.dwCurrentState != SERVICE_RUNNING) continue;
             
             // 1. Safety: Check Central Critical Whitelist
-            if (g_serviceManager.IsCriticalService(svcName)) continue;
+            if (PManContext::Get().subs.serviceMgr && PManContext::Get().subs.serviceMgr->IsCriticalService(svcName)) continue;
 
             ScHandle hSvc(OpenServiceW(hSc.get(), svcName.c_str(), SERVICE_QUERY_CONFIG | SERVICE_ENUMERATE_DEPENDENTS));
             if (!hSvc) {
@@ -145,8 +145,8 @@ void ServiceWatcher::ScanAndTrimManualServices() {
                             Log("[AUTO-TRIM] Stopping idle manual service: " + WideToUtf8(svcName.c_str()));
                             
                             // Register & Stop using Operational Bypass
-                            if (g_serviceManager.AddService(svcName, SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP)) {
-                                g_serviceManager.SuspendService(svcName, WindowsServiceManager::BypassMode::Operational); 
+                            if (PManContext::Get().subs.serviceMgr && PManContext::Get().subs.serviceMgr->AddService(svcName, SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP)) {
+                                PManContext::Get().subs.serviceMgr->SuspendService(svcName, WindowsServiceManager::BypassMode::Operational); 
                             }
                         }
                     }
@@ -224,7 +224,7 @@ void ServiceWatcher::SuspendAllowedServices() {
     for (const auto& svc : SAFE_HEAVY_SERVICES) {
         if (std::find(s_suspendedServices.begin(), s_suspendedServices.end(), svc) != s_suspendedServices.end()) continue;
         if (!IsSafeToSuspend(svc)) continue; // Basic safety check
-        if (g_serviceManager.IsServiceRunning(svc)) {
+        if (PManContext::Get().subs.serviceMgr && PManContext::Get().subs.serviceMgr->IsServiceRunning(svc)) {
             candidates.push_back(svc);
         }
     }
@@ -309,8 +309,8 @@ void ServiceWatcher::SuspendAllowedServices() {
     // 3. Execute Suspension in Order
     for (const auto& svc : candidates) {
         Log("[EXECUTOR] Suspending heavy service: " + WideToUtf8(svc.c_str()));
-        if (g_serviceManager.AddService(svc, SERVICE_STOP | SERVICE_QUERY_STATUS)) {
-             g_serviceManager.SuspendService(svc, WindowsServiceManager::BypassMode::Operational);
+        if (PManContext::Get().subs.serviceMgr && PManContext::Get().subs.serviceMgr->AddService(svc, SERVICE_STOP | SERVICE_QUERY_STATUS)) {
+             PManContext::Get().subs.serviceMgr->SuspendService(svc, WindowsServiceManager::BypassMode::Operational);
              s_suspendedServices.push_back(svc);
         }
     }
@@ -326,7 +326,7 @@ void ServiceWatcher::ResumeSuspendedServices() {
     for (const auto& svc : s_suspendedServices) {
         // Resume (Start) the service
         // ServiceManager::ResumeService actually calls StartService
-        g_serviceManager.ResumeService(svc);
+        if (PManContext::Get().subs.serviceMgr) PManContext::Get().subs.serviceMgr->ResumeService(svc);
     }
 
     s_suspendedServices.clear();

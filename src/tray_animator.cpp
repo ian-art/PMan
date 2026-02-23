@@ -626,7 +626,7 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             // Immediate effect: If we just paused, force the Idle Manager to think we are active
             // This restores all parked cores instantly.
             if (p) {
-                g_idleAffinityMgr.OnIdleStateChanged(false);
+                if (PManContext::Get().subs.idle) PManContext::Get().subs.idle->OnIdleStateChanged(false);
             }
         }
         else if (wmId == ID_TRAY_KEEP_AWAKE) {

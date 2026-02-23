@@ -394,13 +394,13 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     Log("All Levels Implemented: Session-Scoped | Cooldown | Registry Guard | Graceful Shutdown | OS Detection | Anti-Interference");
     
 	// Initialize Performance Guardian
-    g_perfGuardian.Initialize();
+    if (PManContext::Get().subs.perf) PManContext::Get().subs.perf->Initialize();
 
     // Initialize Smart Shell Booster
-    g_explorerBooster.Initialize();
+    if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->Initialize();
 
     // Initialize Input Responsiveness Guard
-    g_inputGuardian.Initialize();
+    if (PManContext::Get().subs.input) PManContext::Get().subs.input->Initialize();
 
     // Initialize Secure IPC Core
     if (PManContext::Get().subs.ipc) {
@@ -438,7 +438,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     }
 
 	// Initialize Smart Memory Optimizer
-    g_memoryOptimizer.Initialize();
+    if (PManContext::Get().subs.mem) PManContext::Get().subs.mem->Initialize();
 
 	// Initialize Service Watcher
     ServiceWatcher::Initialize();
@@ -456,12 +456,12 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     DetectHybridCoreSupport();
 
     // Safety check: Restore services if they were left suspended from a crash
-    if (g_caps.hasAdminRights && g_serviceManager.Initialize())
+    if (g_caps.hasAdminRights && PManContext::Get().subs.serviceMgr && PManContext::Get().subs.serviceMgr->Initialize())
     {
 		/*
-        g_serviceManager.AddService(L"wuauserv", 
+        PManContext::Get().subs.serviceMgr->AddService(L"wuauserv", 
             SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START);
-        g_serviceManager.AddService(L"BITS", 
+        PManContext::Get().subs.serviceMgr->AddService(L"BITS", 
             SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_PAUSE_CONTINUE | SERVICE_STOP | SERVICE_START);
         */
 
@@ -570,7 +570,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     
     // Start Memory Optimizer in background thread
     std::thread memOptThread([]() {
-        g_memoryOptimizer.RunThread();
+        if (PManContext::Get().subs.mem) PManContext::Get().subs.mem->RunThread();
     });
     PinBackgroundThread(memOptThread);
     // Store for clean shutdown
@@ -673,11 +673,11 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
             if (msg.message == WM_INPUT) 
             {
                 // Signal user activity to Smart Shell Booster
-                g_explorerBooster.OnUserActivity();
+                if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->OnUserActivity();
                 
                 // Input Responsiveness Guard
                 // Monitor latency and boost foreground threads
-                g_inputGuardian.OnInput(msg.time);
+                if (PManContext::Get().subs.input) PManContext::Get().subs.input->OnInput(msg.time);
                 
                 DefWindowProc(msg.hwnd, msg.message, msg.wParam, msg.lParam);
             }
@@ -767,8 +767,8 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
             // Calculate adaptive polling interval based on idle state
             // FIX: Use GetTickCount64 (C28159)
             uint64_t now = GetTickCount64();
-            uint64_t idleDurationMs = now - g_explorerBooster.GetLastUserActivity();
-            uint32_t thresholdMs = g_explorerBooster.GetIdleThreshold();
+            uint64_t idleDurationMs = PManContext::Get().subs.explorer ? (now - PManContext::Get().subs.explorer->GetLastUserActivity()) : 0;
+            uint32_t thresholdMs = PManContext::Get().subs.explorer ? PManContext::Get().subs.explorer->GetIdleThreshold() : 300000;
             
             // Adaptive poll rate: poll faster when approaching idle threshold (within 5s)
             bool approachingIdle = (idleDurationMs > 0 && idleDurationMs < thresholdMs && 
@@ -781,7 +781,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                 // FIX: Offload to persistent worker thread to protect Keyboard Hook
                 PManContext::Get().workerQueue.Push([]{
 					// Moved ExplorerBooster to background thread to prevent blocking the Keyboard Hook
-					g_explorerBooster.OnTick();
+					if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->OnTick();
 
 				// Authoritative Control Loop
                 if (PManContext::Get().subs.engine) {
@@ -810,7 +810,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                 }
 
 					// Legacy/Advisory Updates (Data Collection Only)
-					g_perfGuardian.OnPerformanceTick();
+					if (PManContext::Get().subs.perf) PManContext::Get().subs.perf->OnPerformanceTick();
                     
                     // [FIX] Move heavy window checks to background to prevent main thread stutter
                     g_responsivenessManager.Update();
@@ -862,9 +862,9 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     g_networkMonitor.Stop(); // Stop Monitor
     if (PManContext::Get().subs.telemetry) PManContext::Get().subs.telemetry->Shutdown();
     if (PManContext::Get().subs.heartbeat) PManContext::Get().subs.heartbeat->Shutdown();
-    g_explorerBooster.Shutdown();
-    g_inputGuardian.Shutdown();
-    g_memoryOptimizer.Shutdown();
+    if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->Shutdown();
+    if (PManContext::Get().subs.input) PManContext::Get().subs.input->Shutdown();
+    if (PManContext::Get().subs.mem) PManContext::Get().subs.mem->Shutdown();
     SramEngine::Get().Shutdown();
 
     // [FIX] Save Brain and Stop Executor

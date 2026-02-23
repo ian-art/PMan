@@ -106,7 +106,7 @@ void AutonomousEngine::Tick()
     SystemSignalSnapshot telemetry = CaptureSnapshot();
     
     // [FIX] Traffic Enforcer: Check for Reflex Signal
-    if (g_perfGuardian.ConsumeEmergencySignal()) {
+    if (PManContext::Get().subs.perf && PManContext::Get().subs.perf->ConsumeEmergencySignal()) {
         telemetry.requiresPerformanceBoost = true;
     }
 

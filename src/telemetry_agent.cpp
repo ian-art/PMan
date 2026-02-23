@@ -114,7 +114,7 @@ void TelemetryAgent::WorkerLoop() {
 
         // 5. User Activity (Global)
         // Checks if user input occurred in the last 30 seconds
-        uint64_t lastInput = g_explorerBooster.GetLastUserActivity();
+        uint64_t lastInput = PManContext::Get().subs.explorer ? PManContext::Get().subs.explorer->GetLastUserActivity() : 0;
         m_cachedUserActive.store((GetTickCount64() - lastInput) < 30000, std::memory_order_release);
 
         // Poll Rate: 4Hz (250ms)

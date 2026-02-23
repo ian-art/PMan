@@ -1066,8 +1066,11 @@ void SuspendBackgroundServices()
         return;
     }
     
+    auto& svcMgr = PManContext::Get().subs.serviceMgr;
+    if (!svcMgr) return;
+
     // Initialize service manager
-    if (!g_serviceManager.Initialize())
+    if (!svcMgr->Initialize())
     {
         Log("[SERVICE] Failed to initialize service manager");
         return;
@@ -1076,41 +1079,41 @@ void SuspendBackgroundServices()
     // Add services to manage
     bool hasAnyService = false;
     
-    if (g_serviceManager.AddService(L"wuauserv", 
+    if (svcMgr->AddService(L"wuauserv", 
         SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
     {
         hasAnyService = true;
     }
     
-    if (g_serviceManager.AddService(L"BITS", 
+    if (svcMgr->AddService(L"BITS", 
         SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_PAUSE_CONTINUE | SERVICE_STOP | SERVICE_START))
     {
         hasAnyService = true;
     }
 
     // Block Delivery Optimization (The main cause of "Online Lag")
-    if (g_serviceManager.AddService(L"dosvc", 
+    if (svcMgr->AddService(L"dosvc", 
         SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
     {
         hasAnyService = true;
     }
 
     // Block Office Background Updates
-    if (g_serviceManager.AddService(L"clicktorunsvc", 
+    if (svcMgr->AddService(L"clicktorunsvc", 
         SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
     {
         hasAnyService = true;
     }
 
     // [DISK SILENCER] Block Search Indexing to prevent 100% Disk Usage
-    if (g_serviceManager.AddService(L"wsearch", 
+    if (svcMgr->AddService(L"wsearch", 
         SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
     {
         hasAnyService = true;
     }
 
     // [DISK SILENCER] Block Superfetch to prevent random RAM compression/paging
-    if (g_serviceManager.AddService(L"sysmain", 
+    if (svcMgr->AddService(L"sysmain", 
         SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_START))
     {
         hasAnyService = true;
@@ -1123,12 +1126,12 @@ void SuspendBackgroundServices()
     }
     
     // Suspend all managed services
-	if (g_serviceManager.SuspendAll())
+	if (svcMgr->SuspendAll())
     {
         g_servicesSuspended.store(true);
         Log("[SERVICE] Background services suspended successfully");
 
-        double bw = g_serviceManager.GetBitsBandwidthMBps();
+        double bw = svcMgr->GetBitsBandwidthMBps();
         if (bw > 0.1) {
             Log("[SERVICE] BITS bandwidth was active before suspension: " + std::to_string(bw) + " MB/s");
         }
@@ -1143,13 +1146,16 @@ void ResumeBackgroundServices()
 {
     Log("[SERVICE] ResumeBackgroundServices() called");
     
-    if (!g_serviceManager.IsAnythingSuspended())
+    auto& svcMgr = PManContext::Get().subs.serviceMgr;
+    if (!svcMgr) return;
+
+    if (!svcMgr->IsAnythingSuspended())
     {
         Log("[SERVICE] Nothing to resume - no services were suspended");
         return;
     }
     
-g_serviceManager.ResumeAll();
+    svcMgr->ResumeAll();
     g_servicesSuspended.store(false);
 }
 

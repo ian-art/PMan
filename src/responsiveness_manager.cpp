@@ -43,7 +43,7 @@ void ResponsivenessManager::Update() {
     }
 
     // GLOBAL CONSTRAINT: Disabled if Game Boost active
-    if (g_perfGuardian.HasActiveSessions()) {
+    if (PManContext::Get().subs.perf && PManContext::Get().subs.perf->HasActiveSessions()) {
         if (m_state.boosted) Revert();
         Reset();
         return;

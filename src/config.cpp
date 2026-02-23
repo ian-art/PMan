@@ -24,6 +24,7 @@
 #include "utils.h"
 #include "static_tweaks.h"
 #include "network_monitor.h" // For SetBackgroundApps
+#include "context.h"
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -404,7 +405,7 @@ bool SecureConfigManager::ApplyConfig(const json& j) {
             }
 
             g_lastExplorerConfig = cfg;
-            g_explorerBooster.UpdateConfig(cfg);
+            if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->UpdateConfig(cfg);
         }
 
         // [PATCH] Apply Tweaks
@@ -507,7 +508,7 @@ bool SecureConfigManager::LoadSecureConfig() {
                 cfg.preventShellPaging = e.value("prevent_paging", true);
                 cfg.scanIntervalMs = e.value("scan_interval", 5000);
                 g_lastExplorerConfig = cfg;
-                g_explorerBooster.UpdateConfig(cfg);
+                if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->UpdateConfig(cfg);
             }
 
             if (j.contains("tweaks")) {
@@ -692,7 +693,7 @@ bool CreateDefaultConfig(const std::filesystem::path& configPath)
         ec.preventShellPaging = true;
         ec.scanIntervalMs = 5000;
         g_lastExplorerConfig = ec;
-        g_explorerBooster.UpdateConfig(ec);
+        if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->UpdateConfig(ec);
         
         g_tweakConfig = {}; // Reset tweaks
     } catch (...) {}

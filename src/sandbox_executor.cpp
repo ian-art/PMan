@@ -289,10 +289,10 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     else if (decision.selectedAction == BrainAction::Optimize_Memory || 
              decision.selectedAction == BrainAction::Optimize_Memory_Gentle) {
         // [PATCH] Trigger Memory Optimizer
-        // We use the global instance to perform the smart trim
+        // We use the subsystem instance to perform the smart trim
         DWORD fgPid = 0;
         GetWindowThreadProcessId(GetForegroundWindow(), &fgPid);
-        g_memoryOptimizer.SmartMitigate(fgPid);
+        if (PManContext::Get().subs.mem) PManContext::Get().subs.mem->SmartMitigate(fgPid);
         success = TRUE; // Dispatched to background thread
     }
     else if (decision.selectedAction == BrainAction::Suspend_Services) {

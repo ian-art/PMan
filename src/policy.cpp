@@ -26,6 +26,7 @@
 #include "tweaks.h"
 #include "services.h"
 #include "sysinfo.h"
+#include "context.h"
 #include <wtsapi32.h>
 #include <mutex>
 #include <shared_mutex>
@@ -324,7 +325,7 @@ void CheckAndReleaseSessionLock()
             Log("Session lock RELEASED - process " + std::to_string(lockedPid) + " no longer exists");
             
             // Notify Performance Guardian
-            g_perfGuardian.OnGameStop(lockedPid);
+            if (PManContext::Get().subs.perf) PManContext::Get().subs.perf->OnGameStop(lockedPid);
 
             // [CACHE] Atomic destruction (Acquire)
             // Storing nullptr releases our reference. If other threads hold it, it stays alive.
@@ -334,7 +335,7 @@ void CheckAndReleaseSessionLock()
             // CRITICAL FIX: Trigger Post-Game Boost immediately
             // Since the game is gone, we must restore the Desktop UI now.
             // ---------------------------------------------------------
-            g_explorerBooster.OnGameStop(); 
+            if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->OnGameStop(); 
             // ---------------------------------------------------------
 
             // Use memory barriers for atomic consistency
@@ -348,8 +349,10 @@ void CheckAndReleaseSessionLock()
         // Lock released by scope exit before potentially blocking operation
         
         // Restoration (Crash/Force-Kill Safety)
-        g_serviceManager.RestoreSessionStates();
-        g_serviceManager.InvalidateSessionSnapshot();
+        if (PManContext::Get().subs.serviceMgr) {
+            PManContext::Get().subs.serviceMgr->RestoreSessionStates();
+            PManContext::Get().subs.serviceMgr->InvalidateSessionSnapshot();
+        }
         
         ResumeBackgroundServices();
     }
@@ -722,9 +725,9 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
         // CRITICAL: Revert Explorer BEFORE game mode applies to prevent conflict
         if (mode == 1) {
             // Pre-emptive revert
-            g_explorerBooster.OnGameStart(pid);
+            if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->OnGameStart(pid);
         } else if (mode == 2) {
-            g_explorerBooster.OnBrowserStart(pid);
+            if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->OnBrowserStart(pid);
         }
         
         // 1. Exact same process and mode - skip entirely
@@ -753,7 +756,7 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
             if (mode == 1 && g_sessionLocked.load())
             {
                 // Transition profiling to new PID (Stop old launcher, start new game)
-                g_perfGuardian.OnGameStop(g_lockedGamePid.load());
+                if (PManContext::Get().subs.perf) PManContext::Get().subs.perf->OnGameStop(g_lockedGamePid.load());
 
                 // Check if new PID is a child/worker
                 bool isNewChild = false;
@@ -764,7 +767,7 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                 }
 
                 if (!isNewChild) {
-                    g_perfGuardian.OnGameStart(pid, exe);
+                    if (PManContext::Get().subs.perf) PManContext::Get().subs.perf->OnGameStart(pid, exe);
                 }
 
                 g_lockedGamePid.store(pid);
@@ -903,7 +906,7 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
 
                 if (!isGameChild) {
                     // Initialize Performance Guardian Session (Loads Profile)
-                    g_perfGuardian.OnGameStart(pid, exe);
+                    if (PManContext::Get().subs.perf) PManContext::Get().subs.perf->OnGameStart(pid, exe);
 
                     // [CACHE] Atomic Publication (Release)
                     initCache = std::make_shared<SessionSmartCache>(pid);
@@ -920,7 +923,7 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
         
                 // Verify if core pinning is allowed by profile
                 // Note: Actual enforcement happens in Affinity Strategy block below
-                if (!isGameChild && !g_perfGuardian.IsOptimizationAllowed(exe, "pin")) {
+                if (!isGameChild && PManContext::Get().subs.perf && !PManContext::Get().subs.perf->IsOptimizationAllowed(exe, "pin")) {
                     Log("[PERF] Core pinning disabled by learned profile for " + WideToUtf8(exe.c_str()));
                     SetProcessAffinity(pid, 2); // Ensure default state
                 }   
@@ -949,12 +952,12 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                     
                     if (offloadAffinity != 0) {
                         // 2. Capture & Filter
-                        if (g_serviceManager.CaptureSessionSnapshot()) {
-                            if (g_serviceManager.ResolveAllowlist()) {
+                        if (PManContext::Get().subs.serviceMgr && PManContext::Get().subs.serviceMgr->CaptureSessionSnapshot()) {
+                            if (PManContext::Get().subs.serviceMgr->ResolveAllowlist()) {
                                 // 3. Snapshot State
-                                if (g_serviceManager.SnapshotServiceStates()) {
+                                if (PManContext::Get().subs.serviceMgr->SnapshotServiceStates()) {
                                     // 4. Apply Optimization
-                                    g_serviceManager.ApplySessionOptimizations(offloadAffinity);
+                                    PManContext::Get().subs.serviceMgr->ApplySessionOptimizations(offloadAffinity);
                                 }
                             }
                         }
@@ -968,12 +971,12 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
             else
             {
                 // CRITICAL FIX: Only stop/boost explorer if we are returning to DESKTOP (0).
-                if (mode == 0) g_explorerBooster.OnGameStop();
+                if (mode == 0 && PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->OnGameStop();
 
                 if (g_sessionLocked.load())
                 {
                     DWORD stoppingPid = g_lockedGamePid.load();
-                    if (stoppingPid != 0) g_perfGuardian.OnGameStop(stoppingPid);
+                    if (stoppingPid != 0 && PManContext::Get().subs.perf) PManContext::Get().subs.perf->OnGameStop(stoppingPid);
 
                     g_sessionCache.store(nullptr, std::memory_order_release);
 
@@ -986,8 +989,10 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
                         Log("[SERVICE] About to resume background services...");
                         
                         // Restoration & Cleanup
-                        g_serviceManager.RestoreSessionStates();
-                        g_serviceManager.InvalidateSessionSnapshot();
+                        if (PManContext::Get().subs.serviceMgr) {
+                            PManContext::Get().subs.serviceMgr->RestoreSessionStates();
+                            PManContext::Get().subs.serviceMgr->InvalidateSessionSnapshot();
+                        }
                         
                         ResumeBackgroundServices();
                     }
@@ -999,7 +1004,7 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
 
             // [FIX] Check if profile forbids pinning (Prevents Thrashing)
             bool allowAffinity = true;
-            if (mode == 1 && !g_perfGuardian.IsOptimizationAllowed(exe, "pin")) {
+            if (mode == 1 && PManContext::Get().subs.perf && !PManContext::Get().subs.perf->IsOptimizationAllowed(exe, "pin")) {
                 allowAffinity = false;
             }
 

@@ -45,26 +45,7 @@
 // Global Configuration Lists
 
 // Service Manager
-#define g_serviceManager (*PManContext::Get().subs.serviceMgr)
 #define g_servicesSuspended (PManContext::Get().servicesSuspended)
-
-// Performance Guardian
-#define g_perfGuardian (*PManContext::Get().subs.perf)
-
-// Explorer Booster
-#define g_explorerBooster (*PManContext::Get().subs.explorer)
-
-// Input Guardian
-#define g_inputGuardian (*PManContext::Get().subs.input)
-
-// Policy Optimizer
-#define g_policyOptimizer (*PManContext::Get().subs.optimizer)
-
-// Idle Core Parking
-#define g_idleAffinityMgr (*PManContext::Get().subs.idle)
-
-// Memory Optimizer
-#define g_memoryOptimizer (*PManContext::Get().subs.mem)
 
 // Memory Telemetry
 #define g_memTelemetry (PManContext::Get().telem.mem)

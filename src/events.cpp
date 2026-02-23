@@ -199,7 +199,7 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
         }
         
         if (isPresentEvent) {
-             g_perfGuardian.OnPresentEvent(pid, timestamp);
+             if (PManContext::Get().subs.perf) PManContext::Get().subs.perf->OnPresentEvent(pid, timestamp);
         }
         return;
     }
@@ -212,7 +212,7 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
         USHORT eventId = rec->EventHeader.EventDescriptor.Id;
         // 1 = D3D9Present, 2 = D3D9PresentEx, 3 = D3D9SwapPresent
         if (eventId >= 1 && eventId <= 3) {
-            g_perfGuardian.OnPresentEvent(rec->EventHeader.ProcessId, rec->EventHeader.TimeStamp.QuadPart);
+            if (PManContext::Get().subs.perf) PManContext::Get().subs.perf->OnPresentEvent(rec->EventHeader.ProcessId, rec->EventHeader.TimeStamp.QuadPart);
             static int dx9FrameCount = 0;
             if (++dx9FrameCount % 300 == 0) {
 				/* Commented out debug logging in hot path to prevent I/O micro-stutter
@@ -232,7 +232,7 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
         // D3D10/11 present event IDs: 8 = Present, 10 = PresentMultiplaneOverlay
         USHORT eventId = rec->EventHeader.EventDescriptor.Id;
         if (eventId == 8 || eventId == 10) {
-            g_perfGuardian.OnPresentEvent(rec->EventHeader.ProcessId, rec->EventHeader.TimeStamp.QuadPart);
+            if (PManContext::Get().subs.perf) PManContext::Get().subs.perf->OnPresentEvent(rec->EventHeader.ProcessId, rec->EventHeader.TimeStamp.QuadPart);
         }
         return;
     }
@@ -338,8 +338,8 @@ static void WINAPI EtwCallback(EVENT_RECORD* rec)
             }
 
             // [INTEGRATION] Idle Core Parking - Catch processes starting during sleep
-            if (g_idleAffinityMgr.IsIdle()) {
-                g_idleAffinityMgr.OnProcessStart(pid);
+            if (PManContext::Get().subs.idle && PManContext::Get().subs.idle->IsIdle()) {
+                PManContext::Get().subs.idle->OnProcessStart(pid);
             }
 
             // Process Start - Build Hierarchy
@@ -766,8 +766,10 @@ void IocpConfigWatcher()
                             case JobType::Config:
                                 // Enforce session termination on config reload
                                 if (g_sessionLocked.load()) {
-                                    g_serviceManager.RestoreSessionStates();
-                                    g_serviceManager.InvalidateSessionSnapshot();
+                                    if (PManContext::Get().subs.serviceMgr) {
+                                        PManContext::Get().subs.serviceMgr->RestoreSessionStates();
+                                        PManContext::Get().subs.serviceMgr->InvalidateSessionSnapshot();
+                                    }
                                     g_sessionLocked.store(false);
                                     g_lockedGamePid.store(0);
                                     Log("[CONFIG] Session ended immediately due to configuration reload.");
@@ -780,7 +782,7 @@ void IocpConfigWatcher()
                                 break;
                             case JobType::PerformanceEmergency:
                                 // Handle Stutter Emergency
-                                g_perfGuardian.TriggerEmergencyBoost(job->pid);
+                                if (PManContext::Get().subs.perf) PManContext::Get().subs.perf->TriggerEmergencyBoost(job->pid);
                                 break;
                             default:
                                 Log("[IOCP] ERROR: Unknown job type encountered");
@@ -915,7 +917,7 @@ void AntiInterferenceWatchdog()
 		else if (waitResult == WAIT_TIMEOUT) // Heartbeat
         {
             // 0a. Update BITS Metrics (Background)
-            g_serviceManager.UpdateBitsMetrics();
+            if (PManContext::Get().subs.serviceMgr) PManContext::Get().subs.serviceMgr->UpdateBitsMetrics();
 
             // 0b. Unified Idle Detection
             // Calculate once to share between Core Parking and Mode Revert logic
@@ -940,14 +942,14 @@ void AntiInterferenceWatchdog()
                 bool currentIdleState = (idleMs >= 30000) && (g_lastMode.load() != MODE_GAME);
                 
                 if (currentIdleState != lastIdleState) {
-                    g_idleAffinityMgr.OnIdleStateChanged(currentIdleState);
+                    if (PManContext::Get().subs.idle) PManContext::Get().subs.idle->OnIdleStateChanged(currentIdleState);
                     lastIdleState = currentIdleState;
                 }
             }
 
             // Active Session Monitoring Hook
             if (g_sessionLocked.load()) {
-                g_serviceManager.EnforceSessionPolicies();
+                if (PManContext::Get().subs.serviceMgr) PManContext::Get().subs.serviceMgr->EnforceSessionPolicies();
             }
 
             // [LOGIC] Idle Revert (Browser Mode Revert)
@@ -1261,7 +1263,7 @@ void PerformGracefulShutdown()
         Log("Cleaned up DPC/ISR state tracking");
     }
     
-    g_serviceManager.Cleanup();
+    if (PManContext::Get().subs.serviceMgr) PManContext::Get().subs.serviceMgr->Cleanup();
     Log("Service manager cleaned up");
     
     if (g_timerResolutionActive.load() != 0)

@@ -767,7 +767,7 @@ namespace GuiManager {
                                 ec.debugLogging = g_configState.debugLog;
                                 
                                 SetExplorerConfigShadow(ec);
-                                g_explorerBooster.UpdateConfig(ec);
+                                if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->UpdateConfig(ec);
                             } else {
                                 std::wstring errMsg = Utf8ToWide(resp.message.c_str());
                                 MessageBoxW(g_hwnd, errMsg.c_str(), 
@@ -887,7 +887,7 @@ namespace GuiManager {
                                 ec.debugLogging = g_configState.debugLog;
                                 
                                 SetExplorerConfigShadow(ec);
-                                g_explorerBooster.UpdateConfig(ec);
+                                if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->UpdateConfig(ec);
 
                                 MessageBoxW(g_hwnd, L"Explorer settings synced to Service.", L"Success", MB_OK | MB_ICONINFORMATION);
                             } else {
