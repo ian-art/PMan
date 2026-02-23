@@ -102,6 +102,7 @@ public:
         std::atomic<bool> sandboxError{false};
         std::atomic<bool> intentInvalid{false};
         std::atomic<bool> confidenceInvalid{false};
+        std::atomic<bool> comFailure{false};
     } fault;
 
     // -- Session State --

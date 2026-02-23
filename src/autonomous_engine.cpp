@@ -89,6 +89,13 @@ void AutonomousEngine::Tick()
     // [FIX] Stop decision loop if protection is paused
     if (ctx.isPaused.load()) return;
 
+    // Graceful Degradation: If COM failed at startup, the engine must not
+    // operate in a partially-initialized state. Demote all decisions to safe inaction.
+    if (ctx.fault.comFailure.load()) {
+        Log("[FAULT] COM not initialized. AutonomousEngine demoted to BrainAction::Maintain.");
+        return;
+    }
+
     // 0. Outcome-Based Early Termination (Reactive Rollback Guard)
     // "Stop immediately if this is going badly."
     // We check if the active lease (from previous tick) is causing actual harm.
@@ -315,7 +322,16 @@ void AutonomousEngine::Tick()
                        ctx.fault.confidenceInvalid;
 
     if (ctx.subs.provenance) {
-        bool shouldRecord = (decision.selectedAction != BrainAction::Maintain && sbResult.executed);
+        // Also record when an API-level failure was pushed as a counterfactual,
+        // so the Ledger captures "TargetAccessDenied" and "ApiFailure" events
+        bool hasApiRejection = std::any_of(
+            decision.rejectedAlternatives.begin(), decision.rejectedAlternatives.end(),
+            [](const CounterfactualRecord& r) {
+                return r.reason == RejectionReason::TargetAccessDenied ||
+                       r.reason == RejectionReason::ApiFailure;
+            });
+        bool shouldRecord = (decision.selectedAction != BrainAction::Maintain && sbResult.executed) ||
+                            hasApiRejection;
         
         // Force record if a fault is active (Audit Proof of Failure)
         if (faultActive) shouldRecord = true;

@@ -37,6 +37,8 @@ static std::string ReasonToString(RejectionReason r) {
         case RejectionReason::SandboxRejected: return "SandboxRejected";
         case RejectionReason::ManualOverride: return "ManualOverride";
         case RejectionReason::ExternalDenial: return "ExternalDenial";
+        case RejectionReason::TargetAccessDenied: return "TargetAccessDenied";
+        case RejectionReason::ApiFailure: return "ApiFailure";
         default: return "Unknown";
     }
 }

@@ -222,10 +222,12 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     // [SECURITY FIX] TOCTOU Mitigation: Open Handle FIRST
     m_hTarget.reset(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid));
     if (!m_hTarget) {
+        // Provenance: API failure must not be silent — push counterfactual for audit
+        decision.rejectedAlternatives.push_back({decision.selectedAction, RejectionReason::TargetAccessDenied});
         result.executed = false;
         result.reversible = true;
         result.committed = false;
-        result.reason = "AccessDenied";
+        result.reason = "TargetAccessDenied";
         decision.isReversible = false;
         return result;
     }
@@ -346,6 +348,8 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         // Grant Authority
         decision.isReversible = true; 
     } else {
+        // Provenance: Win32 API failure must not be silent — push counterfactual for audit
+        decision.rejectedAlternatives.push_back({decision.selectedAction, RejectionReason::ApiFailure});
         result.executed = false;
         result.reversible = true;
         result.committed = false;

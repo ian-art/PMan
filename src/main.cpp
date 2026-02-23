@@ -580,6 +580,7 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
     HRESULT hrInit = CoInitialize(nullptr);
     if (FAILED(hrInit)) {
         Log("[INIT] CoInitialize failed: " + std::to_string(hrInit));
+        PManContext::Get().fault.comFailure.store(true);
     }
 
     // Network Intelligence
