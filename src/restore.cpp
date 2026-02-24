@@ -79,7 +79,7 @@ static BOOL SafeCallSRSetRestorePointW(
     __try {
         return fn(pRPInfo, pSMStatus);
     }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
+    __except (GetExceptionCode() == 0x6ba ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
         // 0x6ba = RPC_S_SERVER_UNAVAILABLE (Event Log service not ready)
         // Treat as a silent failure; caller will log smStatus.
         return FALSE;
