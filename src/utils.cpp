@@ -49,6 +49,10 @@ std::string WideToUtf8(const wchar_t* wstr)
     try {
         result.resize(len - 1);
         WideCharToMultiByte(CP_UTF8, 0, wstr, -1, &result[0], len, nullptr, nullptr);
+    } catch (const std::bad_alloc&) {
+        // [FIX] Catch allocation failure explicitly to surface root cause and prevent
+        // silent downstream logic failures (e.g. failed process name match).
+        return "[ERROR: String conversion failed - out of memory]";
     } catch (const std::exception&) {
         return "[ERROR: String conversion failed]";
     }
@@ -357,25 +361,28 @@ if (AC_ARM64.count(exeName)) return true;
 }
 
 double GetCpuLoad() {
-    // Fix: Protect static state with mutex
-    static std::mutex mtx;
-    std::lock_guard lock(mtx);
+    // [FIX] Replace static mutex with lock-free atomics per CONTRIBUTING.md §2 (Concurrency).
+    // ULONGLONG is 64-bit; std::atomic<ULONGLONG> is lock-free on x64/ARM64 Windows targets.
+    // Semantics are preserved: exchange() returns the previous value, mirroring the prior read-then-write.
+    static std::atomic<ULONGLONG> prevIdle{0}, prevKernel{0}, prevUser{0};
 
-    static FILETIME prevIdle = {0}, prevKernel = {0}, prevUser = {0};
     FILETIME idle, kernel, user;
-
     if (!GetSystemTimes(&idle, &kernel, &user)) return 0.0;
 
-    ULONGLONG idleDiff = FileTimeToULL(idle) - FileTimeToULL(prevIdle);
-    ULONGLONG kernelDiff = FileTimeToULL(kernel) - FileTimeToULL(prevKernel);
-    ULONGLONG userDiff = FileTimeToULL(user) - FileTimeToULL(prevUser);
+    ULONGLONG newIdle   = FileTimeToULL(idle);
+    ULONGLONG newKernel = FileTimeToULL(kernel);
+    ULONGLONG newUser   = FileTimeToULL(user);
 
-    prevIdle = idle;
-    prevKernel = kernel;
-    prevUser = user;
+    ULONGLONG oldIdle   = prevIdle.exchange(newIdle,    std::memory_order_acq_rel);
+    ULONGLONG oldKernel = prevKernel.exchange(newKernel, std::memory_order_acq_rel);
+    ULONGLONG oldUser   = prevUser.exchange(newUser,    std::memory_order_acq_rel);
+
+    ULONGLONG idleDiff   = newIdle   - oldIdle;
+    ULONGLONG kernelDiff = newKernel - oldKernel;
+    ULONGLONG userDiff   = newUser   - oldUser;
 
     ULONGLONG total = kernelDiff + userDiff;
-	if (total == 0) return 0.0;
+    if (total == 0) return 0.0;
 
     return 100.0 * (1.0 - (double)idleDiff / (double)total);
 }
