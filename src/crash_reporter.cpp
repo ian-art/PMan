@@ -187,20 +187,24 @@ namespace CrashReporter {
         
         struct CrashMarker {
             DWORD crash_count;
-            DWORD last_crash_time;
+            ULONGLONG last_crash_time;
         } marker = { 0, 0 };
 
         bool allowDump = true;
-        DWORD now = GetTickCount();
+        ULONGLONG now = GetTickCount64();
 
         if (hFile != INVALID_HANDLE_VALUE) {
-            DWORD bytesRead;
-            if (ReadFile(hFile, &marker, sizeof(marker), &bytesRead, NULL) && bytesRead == sizeof(marker)) {
+            DWORD bytesRead = 0;
+            CrashMarker tempMarker = { 0, 0 };
+            if (ReadFile(hFile, &tempMarker, sizeof(tempMarker), &bytesRead, NULL) && bytesRead == sizeof(tempMarker)) {
+                marker = tempMarker;
                 if (now - marker.last_crash_time < STORM_WINDOW_MS) {
                     marker.crash_count++;
                 } else {
                     marker.crash_count = 1;
                 }
+            } else {
+                marker.crash_count = 1;
             }
             CloseHandle(hFile);
         } else {
@@ -217,7 +221,7 @@ namespace CrashReporter {
         hFile = CreateFileW(MARKER_FILE, GENERIC_WRITE, 0, NULL, 
                             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         if (hFile != INVALID_HANDLE_VALUE) {
-            DWORD bytesWritten;
+            DWORD bytesWritten = 0;
             WriteFile(hFile, &marker, sizeof(marker), &bytesWritten, NULL);
             CloseHandle(hFile);
         }
@@ -258,8 +262,7 @@ namespace CrashReporter {
     }
 
     void TriggerManualDump() {
-        // Simulate Access Violation
-        int* p = nullptr;
-        *p = 42;
+        // Raise a non-continuable Access Violation to trigger the VEH dump path
+        RaiseException(EXCEPTION_ACCESS_VIOLATION, EXCEPTION_NONCONTINUABLE, 0, nullptr);
     }
 }
