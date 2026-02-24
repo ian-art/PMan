@@ -28,6 +28,7 @@ ObservedStateDelta RealitySampler::Measure(const SystemSignalSnapshot& before, c
     delta.cpuLoadDelta = static_cast<int>(after.cpuLoad - before.cpuLoad);
     delta.thermalDelta = static_cast<int>(after.isThermalThrottling) - static_cast<int>(before.isThermalThrottling);
     delta.latencyDelta = static_cast<int>(after.latencyMs - before.latencyMs);
+    delta.diskQueueDelta = after.diskQueueLen - before.diskQueueLen;
 
     return delta;
 }
