@@ -252,7 +252,13 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
         result.committed = false;
         result.reason = "SecurityInterlock";
         decision.isReversible = false;
-        Log("[SECURITY] Denied action on Immutable Core Process: " + std::to_string(targetPid));
+        
+        static std::unordered_map<DWORD, uint64_t> s_lastImmutableLog;
+        uint64_t nowLog = GetTickCount64();
+        if (nowLog - s_lastImmutableLog[targetPid] > 60000) {
+            Log("[SECURITY] Denied action on Immutable Core Process: " + std::to_string(targetPid));
+            s_lastImmutableLog[targetPid] = nowLog;
+        }
         return result;
     }
 
