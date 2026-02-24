@@ -109,14 +109,24 @@ void ServiceWatcher::ScanAndTrimManualServices() {
     {
         LPENUM_SERVICE_STATUS_PROCESSW services = reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buffer.data());
 
+        static std::unordered_set<std::wstring> s_rejectionCache;
+
         for (DWORD i = 0; i < servicesReturned; i++) {
             std::wstring svcName = services[i].lpServiceName;
             DWORD pid = services[i].ServiceStatusProcess.dwProcessId;
 
             if (services[i].ServiceStatusProcess.dwCurrentState != SERVICE_RUNNING) continue;
             
-            // 1. Safety: Check Central Critical Whitelist
-            if (PManContext::Get().subs.serviceMgr && PManContext::Get().subs.serviceMgr->IsCriticalService(svcName)) continue;
+            // 0. Safety: Check Rejection Cache
+            if (s_rejectionCache.count(svcName)) continue;
+
+            // 1. Safety: Check Central Critical Whitelist AND Hard Exclusions
+            if (PManContext::Get().subs.serviceMgr) {
+                if (PManContext::Get().subs.serviceMgr->IsCriticalService(svcName) || 
+                    PManContext::Get().subs.serviceMgr->IsHardExcluded(svcName)) {
+                    continue;
+                }
+            }
 
             ScHandle hSvc(OpenServiceW(hSc.get(), svcName.c_str(), SERVICE_QUERY_CONFIG | SERVICE_ENUMERATE_DEPENDENTS));
             if (!hSvc) {
@@ -145,8 +155,13 @@ void ServiceWatcher::ScanAndTrimManualServices() {
                             Log("[AUTO-TRIM] Stopping idle manual service: " + WideToUtf8(svcName.c_str()));
                             
                             // Register & Stop using Operational Bypass
-                            if (PManContext::Get().subs.serviceMgr && PManContext::Get().subs.serviceMgr->AddService(svcName, SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP)) {
-                                PManContext::Get().subs.serviceMgr->SuspendService(svcName, WindowsServiceManager::BypassMode::Operational); 
+                            if (PManContext::Get().subs.serviceMgr) {
+                                if (PManContext::Get().subs.serviceMgr->AddService(svcName, SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP)) {
+                                    PManContext::Get().subs.serviceMgr->SuspendService(svcName, WindowsServiceManager::BypassMode::Operational); 
+                                } else {
+                                    // Cache the rejection to prevent endless polling
+                                    s_rejectionCache.insert(svcName);
+                                }
                             }
                         }
                     }
