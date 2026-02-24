@@ -43,6 +43,8 @@ static int ActionFromString(const std::string& s) {
     if (s.find("Release_Pressure") != std::string::npos) return (int)BrainAction::Release_Pressure;
     if (s.find("Boost_Process") != std::string::npos) return (int)BrainAction::Boost_Process; // [FIX] No longer aliased
     if (s.find("Shield_Foreground") != std::string::npos) return (int)BrainAction::Shield_Foreground;
+    if (s.find("Action_MemoryTrim") != std::string::npos) return (int)BrainAction::Action_MemoryTrim;
+    if (s.find("Action_MemoryHarden") != std::string::npos) return (int)BrainAction::Action_MemoryHarden;
     if (s.find("Maintain") != std::string::npos) return (int)BrainAction::Maintain;
     return -1;
 }
@@ -103,6 +105,8 @@ static std::string ActionToString(int action) {
         case BrainAction::Release_Pressure: return "Release_Pressure";
         case BrainAction::Shield_Foreground: return "Shield_Foreground";
         case BrainAction::Boost_Process: return "Boost_Process"; // [FIX] Added case
+        case BrainAction::Action_MemoryTrim: return "Action_MemoryTrim";
+        case BrainAction::Action_MemoryHarden: return "Action_MemoryHarden";
         case BrainAction::Maintain: return "Maintain";
         default: return "Maintain";
     }
@@ -213,7 +217,9 @@ bool PolicyGuard::Load(const std::wstring& path) {
             (int)BrainAction::Throttle_Mild,
             (int)BrainAction::Optimize_Memory,
             (int)BrainAction::Release_Pressure,
-            (int)BrainAction::Boost_Process
+            (int)BrainAction::Boost_Process,
+            (int)BrainAction::Action_MemoryTrim,
+            (int)BrainAction::Action_MemoryHarden
         };
         Save(path, defaults);
     }
@@ -249,7 +255,17 @@ bool PolicyGuard::Validate(BrainAction action, double cpuVariance, double latenc
     // Rule 1: Allowed Action Check
     // Always allow Maintain
     if (action != BrainAction::Maintain) {
-        if (m_limits.allowedActions.find((int)action) == m_limits.allowedActions.end()) {
+        bool isAllowed = m_limits.allowedActions.find((int)action) != m_limits.allowedActions.end();
+        
+        // [COMPATIBILITY FIX] Allow new memory actions if legacy Optimize_Memory is authorized by the GUI/IPC
+        if (!isAllowed && (action == BrainAction::Action_MemoryTrim || action == BrainAction::Action_MemoryHarden)) {
+            if (m_limits.allowedActions.find((int)BrainAction::Optimize_Memory) != m_limits.allowedActions.end() ||
+                m_limits.allowedActions.find((int)BrainAction::Optimize_Memory_Gentle) != m_limits.allowedActions.end()) {
+                isAllowed = true;
+            }
+        }
+        
+        if (!isAllowed) {
             return false;
         }
     }
