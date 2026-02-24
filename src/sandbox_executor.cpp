@@ -218,7 +218,19 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     }
 
     // [SECURITY FIX] TOCTOU Mitigation: Open Handle FIRST
-    m_hTarget.reset(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid));
+    DWORD accessMask = PROCESS_QUERY_LIMITED_INFORMATION;
+    switch (decision.selectedAction) {
+        case BrainAction::Action_MemoryTrim:
+        case BrainAction::Action_MemoryHarden:
+            accessMask |= PROCESS_SET_QUOTA;
+            break;
+        default:
+            // All other actions require SET_INFORMATION because Rollback() 
+            // unconditionally calls SetPriorityClass when m_wsModified is false.
+            accessMask |= PROCESS_SET_INFORMATION;
+            break;
+    }
+    m_hTarget.reset(OpenProcess(accessMask, FALSE, targetPid));
     if (!m_hTarget) {
         // Provenance: API failure must not be silent — push counterfactual for audit
         decision.rejectedAlternatives.push_back({decision.selectedAction, RejectionReason::TargetAccessDenied});
