@@ -56,7 +56,9 @@ SessionSmartCache::SessionSmartCache(DWORD pid) {
 SessionSmartCache::~SessionSmartCache() {
     // [Lifecycle] Unregister wait before destruction (Blocking safe-guard)
     if (m_hWait) {
-        UnregisterWaitEx(m_hWait, INVALID_HANDLE_VALUE);
+        if (!UnregisterWaitEx(m_hWait, INVALID_HANDLE_VALUE)) {
+            Log("[CACHE] Warning: UnregisterWaitEx failed or wait is pending.");
+        }
         m_hWait = nullptr;
     }
 
