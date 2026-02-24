@@ -521,19 +521,25 @@ void PerformanceGuardian::EstimateFrameTimeFromCPU(DWORD pid) {
         uint64_t deltaTime = now - session.lastCpuTimestamp;
         
 		if (deltaTime > 0) {
+            // Named thresholds: eliminates rigid magic numbers and documents intent
+            static constexpr double kCpuGpuBoundThreshold = 50.0;   // % below which game is considered GPU-bound
+            static constexpr double kCpuHighLoadThreshold  = 150.0;  // % above which 60 FPS target is assumed
+            static constexpr double kFrameTime30Fps        = 33.33;  // ms — 30 FPS baseline (GPU-bound floor)
+            static constexpr double kFrameTime60Fps        = 16.67;  // ms — 60 FPS baseline (CPU-bound ceiling)
+
             // HEURISTIC: Estimate frame time based on CPU usage (Percentage relative to one core)
             // (CPU_Time_ms / Wall_Clock_ms) * 100
             double cpuTimePerFrame = ((deltaCpu / 10000.0) / static_cast<double>(deltaTime)) * 100.0;
-            double estimatedFrameTime = 16.67 * (cpuTimePerFrame / 100.0);
+            double estimatedFrameTime = kFrameTime60Fps * (cpuTimePerFrame / 100.0);
             
-            // If CPU usage is low (<50%), assume GPU-bound and cap at 33ms (30 FPS)
-            if (cpuTimePerFrame < 50.0) {
-                estimatedFrameTime = 33.33;  // GPU-bound games typically 30 FPS min
+            // If CPU usage is low, assume GPU-bound and cap at 30 FPS floor
+            if (cpuTimePerFrame < kCpuGpuBoundThreshold) {
+                estimatedFrameTime = kFrameTime30Fps;
             }
 
-            // If CPU usage is very high (>150%), assume 60 FPS target
-            if (cpuTimePerFrame > 150.0) {
-                estimatedFrameTime = 16.67;
+            // If CPU usage is very high, assume 60 FPS target
+            if (cpuTimePerFrame > kCpuHighLoadThreshold) {
+                estimatedFrameTime = kFrameTime60Fps;
             }
 
             if (estimatedFrameTime < 5.0) estimatedFrameTime = 5.0;
