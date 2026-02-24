@@ -147,7 +147,8 @@ void ExplorerBooster::OnGameStart(DWORD gamePid) {
     // Immediate pre-emptive revert
     std::lock_guard lock(m_mtx);
     if (m_currentState != ExplorerBoostState::LockedOut) {
-        LogState("Game Start detected - Instant Revert", gamePid);
+        // [FIX] Force log bypasses debug filter so user sees the detection
+        Log("[EXPLORER] Game Session Detected (PID: " + std::to_string(gamePid) + ") - Priority Lock Engaged");
         m_currentState = ExplorerBoostState::LockedOut;
         for (auto& [pid, instance] : m_instances) {
             RevertBoosts(pid);
@@ -198,7 +199,8 @@ void ExplorerBooster::OnBrowserStart(DWORD browserPid) {
     // Immediate pre-emptive revert
     std::lock_guard lock(m_mtx);
     if (m_currentState != ExplorerBoostState::LockedOut) {
-        LogState("Browser Start detected - Instant Revert", browserPid);
+        // [FIX] Force log bypasses debug filter so user sees the detection
+        Log("[EXPLORER] Browser Session Detected (PID: " + std::to_string(browserPid) + ") - Shell Boosts Suspended");
         m_currentState = ExplorerBoostState::LockedOut;
         for (auto& [pid, instance] : m_instances) {
             RevertBoosts(pid);

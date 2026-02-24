@@ -157,9 +157,11 @@ void IdleAffinityManager::OnIdleStateChanged(bool isIdle)
     if (wasIdle == isIdle) return; // No change
 
     static GUID* s_pPreIdleScheme = nullptr;
+    static bool s_actuallyParked = false; // [FIX] Track if parking actually executed
 
     if (isIdle) {
         if (IsSafeToPark()) {
+            s_actuallyParked = true;
             Log("[IDLE-PARK] System idle detected. Parking background processes...");
             ApplyIdleAffinity();
 
@@ -172,19 +174,25 @@ void IdleAffinityManager::OnIdleStateChanged(bool isIdle)
                     }
                 }
             }
+        } else {
+            s_actuallyParked = false;
+            Log("[IDLE-PARK] System idle detected, but parking skipped (Safety/Low RAM Config).");
         }
     } else {
-        RestoreAllAffinity();
-        
-        // Restore Original Plan on User Return
-        if (s_pPreIdleScheme != nullptr) {
-            PowerSetActiveScheme(NULL, s_pPreIdleScheme);
-            LocalFree(s_pPreIdleScheme);
-            s_pPreIdleScheme = nullptr;
-            Log("[POWER] User returned: Restored original power plan.");
-        }
+        if (s_actuallyParked) {
+            RestoreAllAffinity();
+            
+            // Restore Original Plan on User Return
+            if (s_pPreIdleScheme != nullptr) {
+                PowerSetActiveScheme(NULL, s_pPreIdleScheme);
+                LocalFree(s_pPreIdleScheme);
+                s_pPreIdleScheme = nullptr;
+                Log("[POWER] User returned: Restored original power plan.");
+            }
 
-        Log("[IDLE-PARK] Activity detected. Restored process affinity.");
+            Log("[IDLE-PARK] Activity detected. Restored process affinity.");
+            s_actuallyParked = false;
+        }
     }
 }
 

@@ -468,9 +468,12 @@ void PerformanceGuardian::OnGameStart(DWORD pid, const std::wstring& exeName) {
     // Check if we have a valid profile (Local Memory)
     GameProfile profile = GetProfile(exeName);
     
+    // [FIX] Always log detection to confirm Neural Center lists are active
+    Log("[PERF] Neural Center Target Detected: " + WideToUtf8(exeName.c_str()));
+
     // Only log if we are actually applying something interesting
     if (profile.useHighIo || profile.useCorePinning || profile.useMemoryCompression) {
-        Log("[PERF] Applying Policy Profile for " + WideToUtf8(exeName.c_str()));
+        Log("[PERF] Applying Policy Profile tweaks...");
         ApplyProfile(pid, profile);
     }
     
