@@ -463,6 +463,7 @@ struct ObservedStateDelta {
     double cpuLoadDelta;
     double thermalDelta;
     double latencyDelta;
+    double diskQueueDelta = 0.0;
 };
 
 // Executor Intent Structure
