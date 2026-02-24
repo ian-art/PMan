@@ -126,8 +126,32 @@ void AutonomousEngine::Tick()
         currentConfidence = ctx.subs.confidence->GetMetrics();
     }
 
+    // Pre-Fetch Allowed Actions from Policy Contract
+    std::unordered_set<int> currentAllowed;
+    if (ctx.subs.policy) {
+        auto& limits = ctx.subs.policy->GetLimits();
+        currentAllowed = limits.allowedActions;
+        
+        // [FIX] Sync dynamic confidence thresholds from Policy to Arbiter
+        ctx.subs.arbiter->SetConfidenceThresholds(
+            limits.minConfidence.cpuVariance,
+            limits.minConfidence.thermalVariance,
+            limits.minConfidence.latencyVariance
+        );
+    } else {
+        currentAllowed.insert((int)BrainAction::Maintain); 
+    }
+
     // 2. PerformanceGovernor (Evaluate Telemetry)
     GovernorDecision priorities = ctx.subs.governor->Decide(telemetry);
+
+    // [FIX] Pre-filter Governor's generic allowed action class against strict Policy Contract
+    // This prevents the Evaluator from wasting cycles predicting forbidden actions.
+    if (priorities.allowedActions == AllowedActionClass::PerformanceBoost) {
+        if (currentAllowed.find((int)BrainAction::Boost_Process) == currentAllowed.end()) {
+            priorities.allowedActions = AllowedActionClass::None;
+        }
+    }
 
     // 3. ConsequenceEvaluator (Predict Consequences)
     ConsequenceResult consequences = ctx.subs.evaluator->Evaluate(
@@ -137,23 +161,6 @@ void AutonomousEngine::Tick()
     );
 
     // 4. DecisionArbiter (Decide)
-    // [FIX] Pass allowed actions to enable "Stability Disabled" logic
-    std::unordered_set<int> currentAllowed;
-    if (ctx.subs.policy) {
-        auto& limits = ctx.subs.policy->GetLimits();
-        currentAllowed = limits.allowedActions;
-        
-        // [FIX] Sync dynamic confidence thresholds from Policy to Arbiter
-        // This ensures policy.json variance settings actually affect the Arbiter's logic.
-        ctx.subs.arbiter->SetConfidenceThresholds(
-            limits.minConfidence.cpuVariance,
-            limits.minConfidence.thermalVariance,
-            limits.minConfidence.latencyVariance
-        );
-    } else {
-        // Fallback: If no policy, assume Maintain is allowed (Safety Default)
-        currentAllowed.insert((int)BrainAction::Maintain); 
-    }
 
     ArbiterDecision decision = ctx.subs.arbiter->Decide(priorities, consequences, currentConfidence, currentAllowed);
 
