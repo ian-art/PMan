@@ -428,14 +428,14 @@ void AutonomousEngine::Tick()
     }
 
     // [FIX] Feed reality back to the Predictive Model (The Brain) so it actually learns
-    if (ctx.subs.model && executedAction != BrainAction::Maintain) {
+    if (ctx.subs.model && executedAction != BrainAction::Maintain && sbResult.committed) {
         OptimizationFeedback fb = {};
         fb.mode = priorities.mode;
         fb.dominant = priorities.dominant;
         fb.action = executedAction;
         fb.cpuDelta = observed.cpuLoadDelta;
         fb.memDelta = 0.0;
-        fb.diskDelta = 0.0;
+        fb.diskDelta = observed.diskQueueDelta;
         fb.latencyDelta = observed.latencyDelta;
         fb.userInterrupted = false;
         
