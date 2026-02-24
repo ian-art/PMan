@@ -674,7 +674,10 @@ std::wstring taskName = std::filesystem::path(self).stem().wstring();
                 // Monitor latency and boost foreground threads
                 if (PManContext::Get().subs.input) PManContext::Get().subs.input->OnInput(msg.time);
                 
+                // [FIX] Single dispatch: call DefWindowProc directly and skip DispatchMessage
+                // to prevent WM_INPUT from being routed through WindowProc->DefWindowProcW a second time.
                 DefWindowProc(msg.hwnd, msg.message, msg.wParam, msg.lParam);
+                continue;
             }
             
             TranslateMessage(&msg); // [FIX] Convert keystrokes to characters for GUI input
