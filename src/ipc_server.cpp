@@ -87,6 +87,7 @@ void IpcServer::WorkerThread() {
     auto AsyncRead = [](HANDLE h, void* buf, DWORD sz, DWORD& read) -> bool {
         OVERLAPPED ov = {0};
         ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!ov.hEvent) return false;
         if (!ReadFile(h, buf, sz, &read, &ov) && GetLastError() != ERROR_IO_PENDING) {
             CloseHandle(ov.hEvent); return false;
         }
@@ -98,6 +99,7 @@ void IpcServer::WorkerThread() {
     auto AsyncWrite = [](HANDLE h, const void* buf, DWORD sz, DWORD& written) -> bool {
         OVERLAPPED ov = {0};
         ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!ov.hEvent) return false;
         if (!WriteFile(h, buf, sz, &written, &ov) && GetLastError() != ERROR_IO_PENDING) {
             CloseHandle(ov.hEvent); return false;
         }
@@ -125,6 +127,10 @@ void IpcServer::WorkerThread() {
         // Async Connect
         OVERLAPPED oConnect = {0};
         oConnect.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!oConnect.hEvent) {
+            CloseHandle(hPipe);
+            continue;
+        }
         
         bool pending = false;
         if (ConnectNamedPipe(hPipe, &oConnect)) {
