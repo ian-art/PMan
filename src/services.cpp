@@ -731,31 +731,35 @@ void WindowsServiceManager::InvalidateSessionSnapshot()
 bool WindowsServiceManager::IsCriticalService(const std::wstring& serviceName) const
 {
     // CRITICAL WHITELIST: Services that must NEVER be killed to preserve OS stability
+    // [FIX] Changed to lowercase for case-insensitive matching
     static const std::unordered_set<std::wstring> CRITICAL_WHITELIST = {
         // --- Core Windows Infrastructure ---
-        L"RpcSs", L"RpcEptMapper", L"DcomLaunch", L"LSM", L"SamSs", L"PlugPlay", 
-        L"Power", L"SystemEventsBroker", L"TimeBrokerSvc", L"KeyIso", L"CryptSvc", 
-        L"ProfSvc", L"SENS", L"Schedule", L"BrokerInfrastructure", L"StateRepository",
+        L"rpcss", L"rpceptmapper", L"dcomlaunch", L"lsm", L"samss", L"plugplay", 
+        L"power", L"systemeventsbroker", L"timebrokersvc", L"keyiso", L"cryptsvc", 
+        L"profsvc", L"sens", L"schedule", L"brokerinfrastructure", L"staterepository",
         
         // --- Network & Connectivity ---
-        L"Dhcp", L"Dnscache", L"NlaSvc", L"Nsi", L"Netman", L"WlanSvc", L"WwanSvc", 
-        L"BFE", L"MpsSvc", L"WinHttpAutoProxySvc", L"LanmanWorkstation", L"LanmanServer",
+        L"dhcp", L"dnscache", L"nlasvc", L"nsi", L"netman", L"wlansvc", L"wwansvc", 
+        L"bfe", L"mpssvc", L"winhttpautoproxysvc", L"lanmanworkstation", L"lanmanserver",
         
         // --- Hardware & Audio ---
-        L"Audiosrv", L"AudioEndpointBuilder", L"BthServ", L"BthHFSrv", 
-        L"ShellHWDetection", L"Themes", L"FontCache", L"Spooler", L"WiaRpc",
+        L"audiosrv", L"audioendpointbuilder", L"bthserv", L"bthhfsrv", 
+        L"shellhwdetection", L"themes", L"fontcache", L"spooler", L"wiarpc",
         
         // --- Security & Updates ---
-        L"WinDefend", L"MsMpSvc", L"SecurityHealthService", L"Sppsvc", L"AppInfo",
+        L"windefend", L"msmpsvc", L"securityhealthservice", L"sppsvc", L"appinfo",
         
         // --- Remote Access ---
-        L"TermService", L"UmRdpService",
+        L"termservice", L"umrdpservice",
         
         // --- Protected Manual Services ---
-        L"lmhosts", L"NgcSvc", L"NgcCtnrSvc", L"WdiSystemHost"
+        L"lmhosts", L"ngcsvc", L"ngcctnrsvc", L"wdisystemhost"
     };
 
-    if (CRITICAL_WHITELIST.count(serviceName)) return true;
+    std::wstring lowerName = serviceName;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::towlower);
+
+    if (CRITICAL_WHITELIST.count(lowerName)) return true;
 
     // Safety: Ignore per-user services (e.g., CDPUserSvc_1a2b3) unless known safe
     if (serviceName.find(L"User_") != std::wstring::npos || 
