@@ -312,6 +312,13 @@ enum class ProcessCategory : uint8_t {
     Suspicious          = 0b100 // Proxy Launch Detected
 };
 
+/*
+ !! IMPORTANT: If you add, remove, or reorder any value in SystemMode,
+ DominantPressure, or AllowedActionClass, you MUST increment
+ PredictiveModel::BRAIN_SCHEMA_VERSION in predictive_model.h.
+ Failure to do so will silently corrupt brain.bin on the next run.
+*/
+
 // Deterministic Governor Types
 enum class DominantPressure : uint8_t {
     None = 0,
