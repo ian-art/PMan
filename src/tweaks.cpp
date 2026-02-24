@@ -337,41 +337,19 @@ BOOL SetProcessIoPriority(DWORD pid, int mode)
     {
         if (IsIoPriorityBlockedBySystem())
         {
-            Log("[I/O] I/O priority APIs blocked by system - using enhanced thread priority fallback");
+            Log("[I/O] I/O priority APIs blocked by system");
         }
         else
         {
-            Log("[I/O] I/O priority setting failed - using enhanced fallback strategy");
+            Log("[I/O] I/O priority setting failed");
         }
 
         // Method 2: Thread Priority (SNAPSHOT REMOVED)
         // Previous implementation used CreateToolhelp32Snapshot which caused massive stuttering.
         Log("[I/O] Advanced I/O Priority unavailable (access denied) - skipping expensive thread fallback");
         
-        // Method 3: Process Priority Class
-        DWORD priorityClass;
-        if (mode == 1) priorityClass = HIGH_PRIORITY_CLASS;
-        else if (mode == 0) priorityClass = NORMAL_PRIORITY_CLASS; // [PATCH] Correctly restore Normal priority
-        else priorityClass = IDLE_PRIORITY_CLASS;
-
-        if (SetPriorityClass(hProcess, priorityClass))
-        {
-            Log("[I/O] Process priority set: " + 
-                std::string(mode == 1 ? "HIGH" : (mode == 0 ? "NORMAL" : "IDLE")) + " using SetPriorityClass");
-        }
-        else
-        {
-            // Fallback for fallback
-            if (mode == 1) priorityClass = ABOVE_NORMAL_PRIORITY_CLASS;
-            else if (mode == 0) priorityClass = NORMAL_PRIORITY_CLASS;
-            else priorityClass = BELOW_NORMAL_PRIORITY_CLASS;
-
-            if (SetPriorityClass(hProcess, priorityClass))
-            {
-                Log("[I/O] Fallback priority set: " + 
-                    std::string(mode == 1 ? "ABOVE_NORMAL" : (mode == 0 ? "NORMAL" : "BELOW_NORMAL")) + " using SetPriorityClass");
-            }
-        }
+        // [FIX] Removed SetPriorityClass fallback to strictly comply with the Sandbox Barrier.
+        // Priority class changes must be orchestrated by the SandboxExecutor, not utility functions.
     }
 
     // Update cache to prevent immediate retry (even if failed, to stop lag)
