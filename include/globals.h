@@ -17,10 +17,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "build_options.h"
 #ifndef PMAN_GLOBALS_H
 #define PMAN_GLOBALS_H
 
+#include "build_options.h"
 #include "types.h"
 #include "context.h" // Integrated Context
 #include "services.h" // Needed for WindowsServiceManager type
