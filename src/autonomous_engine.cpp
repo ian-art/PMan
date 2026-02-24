@@ -393,6 +393,7 @@ void AutonomousEngine::Tick()
 
     // 7. Conditional Execution (The "1 Bit" of Authority)
     // If the action was not marked reversible (and committed) by Sandbox, force inaction.
+    BrainAction executedAction = decision.selectedAction;
     if (!decision.isReversible) {
         decision.selectedAction = BrainAction::Maintain;
     }
@@ -420,11 +421,11 @@ void AutonomousEngine::Tick()
     }
 
     // [FIX] Feed reality back to the Predictive Model (The Brain) so it actually learns
-    if (ctx.subs.model && decision.selectedAction != BrainAction::Maintain) {
+    if (ctx.subs.model && executedAction != BrainAction::Maintain) {
         OptimizationFeedback fb = {};
         fb.mode = priorities.mode;
         fb.dominant = priorities.dominant;
-        fb.action = decision.selectedAction;
+        fb.action = executedAction;
         fb.cpuDelta = observed.cpuLoadDelta;
         fb.memDelta = 0.0;
         fb.diskDelta = 0.0;
