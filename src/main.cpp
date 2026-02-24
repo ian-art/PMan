@@ -129,7 +129,7 @@ static void RestorePointThreadSafe()
     __try {
         EnsureStartupRestorePoint();
     }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
+    __except (GetExceptionCode() == 0x6ba ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
         // Cannot call Log() here — no C++ objects in __try/__except scope.
         // Log absence of [BACKUP] success message will indicate the exception path was hit.
         OutputDebugStringA("[PMAN] Restore thread: SEH 0x6ba caught at thread boundary.\n");
