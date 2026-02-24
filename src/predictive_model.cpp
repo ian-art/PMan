@@ -41,8 +41,15 @@ void PredictiveModel::Initialize() {
             if (!f.is_open()) return false;
             
             uint32_t magic = 0;
-            // Verify Magic Signature and Bounds
-            if (f.read(reinterpret_cast<char*>(&magic), sizeof(magic)) && magic == 0x4E415242) {
+            uint32_t schemaVersion = 0;
+            // Verify Magic Signature, Schema Version, and Bounds
+            f.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+            f.read(reinterpret_cast<char*>(&schemaVersion), sizeof(schemaVersion));
+            if (magic == 0x4E415242 && schemaVersion != BRAIN_SCHEMA_VERSION) {
+                Log("[BRAIN] Schema version mismatch (file=" + std::to_string(schemaVersion) +
+                    " expected=" + std::to_string(BRAIN_SCHEMA_VERSION) + "). Discarding stale brain data.");
+            }
+            if (magic == 0x4E415242 && schemaVersion == BRAIN_SCHEMA_VERSION) {
                 size_t size = 0;
                 if (f.read(reinterpret_cast<char*>(&size), sizeof(size)) && size < 100000) {
                     m_stats.clear(); // Ensure clean slate before loading
@@ -96,6 +103,9 @@ void PredictiveModel::Shutdown() {
     if (f.is_open()) {
         const uint32_t MAGIC_SIG = 0x4E415242; // "BRAN"
         f.write(reinterpret_cast<const char*>(&MAGIC_SIG), sizeof(MAGIC_SIG));
+
+        const uint32_t SCHEMA_VER = BRAIN_SCHEMA_VERSION;
+        f.write(reinterpret_cast<const char*>(&SCHEMA_VER), sizeof(SCHEMA_VER));
 
         size_t size = m_stats.size();
         f.write(reinterpret_cast<const char*>(&size), sizeof(size));

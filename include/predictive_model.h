@@ -62,6 +62,7 @@ private:
     std::deque<PredictionLog> m_logs; 
 
     // Constants
+    static constexpr uint32_t BRAIN_SCHEMA_VERSION = 1;
     static constexpr size_t MAX_LOG_HISTORY = 1000;
     static constexpr double LEARNING_RATE = 0.05; // Very slow adaptation (Minutes to hours)
 
