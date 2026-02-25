@@ -157,14 +157,17 @@ void ProcessScout::UpdateCache() {
         if (pid == 0 || pid == 4) continue;
 
         Snapshot snap;
-        snap.identity = { pid, {0, 0} }; 
-        snap.timestamp = now;
-        
+            FILETIME cTime = {0, 0}, dummyExit, dummyKernel, dummyUser;
+            UniqueHandle hQuery(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+            if (hQuery) GetProcessTimes(hQuery.get(), &cTime, &dummyExit, &dummyKernel, &dummyUser);
+            snap.identity = { pid, cTime };
+            snap.timestamp = now;
+
         // Heuristic categorization of processes based on session and window state
         HWND hFg = GetForegroundWindow();
         DWORD fgPid = 0;
         GetWindowThreadProcessId(hFg, &fgPid);
-        
+
         DWORD sessionId = 0;
         ProcessIdToSessionId(pid, &sessionId);
 
@@ -250,6 +253,19 @@ std::optional<Executor::Receipt> Executor::Execute(const ActionIntent& intent) {
 
     // 1. Identify specific processes to target
     TargetSet targets = ResolveTargets(intent.action);
+
+    // [FIX] Batch Veto Prevention: Remove individual invalid targets before validation
+    // so a single protected or zombie process does not veto the entire system-wide action.
+    targets.targets.erase(std::remove_if(targets.targets.begin(), targets.targets.end(),
+        [](const ProcessIdentity& t) {
+            if (t.pid <= 4 || t.pid == GetCurrentProcessId() || IsProtectedProcess(t.pid)) return true;
+            UniqueHandle hCheck(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, t.pid));
+            if (hCheck) {
+                DWORD_PTR procMask = 0, sysMask = 0;
+                if (GetProcessAffinityMask(hCheck.get(), &procMask, &sysMask) && procMask == 0) return true;
+            }
+            return false;
+        }), targets.targets.end());
 
     // 2. Perform safety validation on targets
     if (!HardValidate(intent, targets)) {
