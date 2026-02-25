@@ -410,12 +410,9 @@ void AutonomousEngine::Tick()
         }
     }
 
-    // 7. Conditional Execution (The "1 Bit" of Authority)
-    // If the action was not marked reversible (and committed) by Sandbox, force inaction.
+    // 7. Authority Resolution
+    // The SandboxExecutor has already processed the action. We retain the executed action for learning.
     BrainAction executedAction = decision.selectedAction;
-    if (!decision.isReversible) {
-        decision.selectedAction = BrainAction::Maintain;
-    }
 
     // 8. RealitySampler (Measure actual outcome)
     // Capture state AFTER the tick (and potential action, if it were enabled)
