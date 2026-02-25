@@ -474,3 +474,20 @@ bool SandboxExecutor::EnforceTrim(DWORD pid) {
     }
     return false;
 }
+
+bool SandboxExecutor::EnforcePriority(DWORD pid, DWORD priorityClass) {
+    if (pid <= 4) return false;
+
+    UniqueHandle hProc(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (!hProc) return false;
+
+    if (IsImmutableSystemProcess(hProc.get())) {
+        Log("[SANDBOX] Blocked Priority change on Immutable Process: " + std::to_string(pid));
+        return false;
+    }
+
+    if (SetPriorityClass(hProc.get(), priorityClass)) {
+        return true;
+    }
+    return false;
+}

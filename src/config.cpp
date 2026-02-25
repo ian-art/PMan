@@ -369,6 +369,7 @@ bool SecureConfigManager::ApplyConfig(const json& j) {
 
             if (g.contains("responsiveness_recovery")) g_responsivenessRecoveryEnabled.store(g["responsiveness_recovery"]);
             if (g.contains("recovery_prompt")) g_recoveryPromptEnabled.store(g["recovery_prompt"]);
+            if (g.contains("enable_brain")) PManContext::Get().conf.enableBrain.store(g["enable_brain"]);
             if (g.contains("icon_theme")) g_iconTheme = Utf8ToWide(g["icon_theme"].get<std::string>().c_str());
         }
 
@@ -494,6 +495,7 @@ bool SecureConfigManager::LoadSecureConfig() {
                 g_idleTimeoutMs.store(g.value("idle_timeout", 300000));
                 g_responsivenessRecoveryEnabled.store(g.value("responsiveness_recovery", true));
                 g_recoveryPromptEnabled.store(g.value("recovery_prompt", true));
+                PManContext::Get().conf.enableBrain.store(g.value("enable_brain", true));
                 g_iconTheme = Utf8ToWide(g.value("icon_theme", "Default").c_str());
             }
 
@@ -566,6 +568,7 @@ void SecureConfigManager::SaveSecureConfig() {
                 {"idle_timeout", g_idleTimeoutMs.load()},
                 {"responsiveness_recovery", g_responsivenessRecoveryEnabled.load()},
                 {"recovery_prompt", g_recoveryPromptEnabled.load()},
+                {"enable_brain", PManContext::Get().conf.enableBrain.load()},
                 {"icon_theme", WideToUtf8(g_iconTheme.c_str())}
             };
             
@@ -683,6 +686,7 @@ bool CreateDefaultConfig(const std::filesystem::path& configPath)
         g_idleTimeoutMs.store(300000);
         g_responsivenessRecoveryEnabled.store(true);
         g_recoveryPromptEnabled.store(true);
+        PManContext::Get().conf.enableBrain.store(true);
         g_iconTheme = L"Default";
         
         ExplorerConfig ec = {};

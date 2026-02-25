@@ -908,6 +908,12 @@ namespace GuiManager {
                 }
 
                 if (ImGui::BeginTabItem("Policy", nullptr, polFlags)) {
+                    bool brainEnabled = PManContext::Get().conf.enableBrain.load();
+                    if (!brainEnabled) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Brain is disabled. Policy enforcement is inactive.");
+                        ImGui::Separator();
+                        ImGui::BeginDisabled();
+                    }
                     BeginCard("pol", {0.14f, 0.10f, 0.10f, 1.0f});
                     
                     // Preset Buttons
@@ -1097,10 +1103,17 @@ namespace GuiManager {
                     }
 
                     EndCard();
+                    if (!PManContext::Get().conf.enableBrain.load()) ImGui::EndDisabled();
                     ImGui::EndTabItem();
                 }
 
                 if (ImGui::BeginTabItem("Verdict")) {
+                    bool brainEnabled = PManContext::Get().conf.enableBrain.load();
+                    if (!brainEnabled) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Brain is disabled. Verdict overrides are inactive.");
+                        ImGui::Separator();
+                        ImGui::BeginDisabled();
+                    }
                     BeginCard("verd", {0.14f, 0.14f, 0.18f, 1.0f});
                     
                     ImGui::TextDisabled("External Safety Override System");
@@ -1176,6 +1189,7 @@ namespace GuiManager {
                     HelpMarker("Applies the selected Status and Duration.");
 
                     EndCard();
+                    if (!PManContext::Get().conf.enableBrain.load()) ImGui::EndDisabled();
                     ImGui::EndTabItem();
                 }
 

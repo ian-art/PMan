@@ -59,6 +59,7 @@ static constexpr UINT    ID_TRAY_HELP_USAGE       = 1011;
 static constexpr UINT    ID_TRAY_REFRESH_GPU      = 1012;
 static constexpr UINT    ID_TRAY_PAUSE_IDLE       = 1013;
 static constexpr UINT    ID_TRAY_KEEP_AWAKE       = 1014;
+static constexpr UINT    ID_TRAY_TOGGLE_BRAIN     = 1015;
 
 
 // Inter-thread communication for Real-Time Logging

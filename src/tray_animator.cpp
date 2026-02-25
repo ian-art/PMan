@@ -421,6 +421,12 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             bool awake = g_keepAwake.load();
             AppendMenuW(hControlMenu, MF_STRING | (awake ? MF_CHECKED : 0), ID_TRAY_KEEP_AWAKE, L"Keep System Awake");
             AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
+            
+            // [PATCH] AI Brain Toggle
+            bool brainEnabled = PManContext::Get().conf.enableBrain.load();
+            AppendMenuW(hControlMenu, MF_STRING | (brainEnabled ? MF_CHECKED : 0), ID_TRAY_TOGGLE_BRAIN, L"Enable AI Governor");
+            AppendMenuW(hControlMenu, MF_SEPARATOR, 0, nullptr);
+            
             AppendMenuW(hControlMenu, MF_STRING, ID_TRAY_REFRESH_GPU, L"Refresh GPU");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hControlMenu, L"Controls");
             SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_CONTROLS, IDI_TRAY_D_CONTROLS, true);
@@ -644,6 +650,19 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             }
             UpdateTrayTooltip(); // Refresh Tooltip
         }
+        else if (wmId == ID_TRAY_TOGGLE_BRAIN) {
+            bool brain = !PManContext::Get().conf.enableBrain.load();
+            PManContext::Get().conf.enableBrain.store(brain);
+
+            // [FIX] Save directly to disk. Do NOT trigger a full system reload.
+            // This prevents the checkmark from being overwritten by the disk config,
+            // and stops the Policy/Config reload spam in the logs.
+            SaveConfig();
+
+            Log(brain ? "[USER] Autonomous Brain ENABLED (Dynamic Machine Learning Active)." 
+                      : "[USER] Autonomous Brain DISABLED (Deterministic Core Engine Mode Active).");
+            UpdateTrayTooltip();
+        }
         return 0;
     } // End of WM_COMMAND Block
 
@@ -698,6 +717,11 @@ void UpdateTrayTooltip()
     // 3. Current Mode
     if (g_sessionLocked.load()) {
          tip += L"\n\u1F3AE Mode: Gaming";
+    }
+
+    // 4. Brain Status
+    if (!PManContext::Get().conf.enableBrain.load()) {
+         tip += L"\n\u2699 Brain: OFF (Core Engine Mode)";
     }
 
     // SRAM Status

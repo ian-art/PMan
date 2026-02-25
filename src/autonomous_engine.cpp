@@ -313,6 +313,18 @@ void AutonomousEngine::Tick()
     // Physically execute (or maintain) the action on a safe target.
     // Checks lease expiry and enforces automatic reversion.
     SandboxResult sbResult = { false, false, false, "None" };
+
+    // [PATCH] AI Killswitch
+    // If the user disabled the AI Brain, we force the AI's final decision to Maintain (Do Nothing).
+    // This allows the entire pipeline to run (Predictive Model learns, UI updates, Ledgers record),
+    // but absolutely NO autonomous actions will be executed.
+    // The deterministic "Captain" (policy.cpp) is completely separate and will continue to work.
+    if (!ctx.conf.enableBrain.load()) {
+        decision.selectedAction = BrainAction::Maintain;
+        decision.reason = DecisionReason::GovernorRestricted;
+        sbResult.reason = "Brain Disabled by User";
+    }
+
     if (ctx.subs.sandbox) {
         sbResult = ctx.subs.sandbox->TryExecute(decision);
 

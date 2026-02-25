@@ -20,6 +20,7 @@
 #include "policy_contract.h"
 #include "logger.h"
 #include "utils.h"
+#include "context.h"
 #include <windows.h>
 #include <wincrypt.h>
 #include <fstream>
@@ -241,11 +242,13 @@ bool PolicyGuard::Load(const std::wstring& path) {
 
     // 3. Parse
     if (ParsePolicy(content)) {
-        std::string logMsg = "[POLICY] Contract Loaded: Budget=" + std::to_string(m_limits.maxAuthorityBudget) +
-                             " | Var_CPU=" + std::to_string(m_limits.minConfidence.cpuVariance) +
-                             " | Var_Lat=" + std::to_string(m_limits.minConfidence.latencyVariance) +
-                             " | Actions=" + std::to_string(m_limits.allowedActions.size());
-        Log(logMsg);
+        if (PManContext::Get().conf.enableBrain.load()) {
+            std::string logMsg = "[POLICY] Contract Loaded: Budget=" + std::to_string(m_limits.maxAuthorityBudget) +
+                                 " | Var_CPU=" + std::to_string(m_limits.minConfidence.cpuVariance) +
+                                 " | Var_Lat=" + std::to_string(m_limits.minConfidence.latencyVariance) +
+                                 " | Actions=" + std::to_string(m_limits.allowedActions.size());
+            Log(logMsg);
+        }
         return true;
     }
     return false;

@@ -49,6 +49,7 @@ public:
     static bool EnforceEcoQoS(DWORD pid, bool enable);
     static bool EnforceAffinity(DWORD pid, DWORD_PTR mask);
     static bool EnforceTrim(DWORD pid);
+    static bool EnforcePriority(DWORD pid, DWORD priorityClass);
 
     ~SandboxExecutor();
 

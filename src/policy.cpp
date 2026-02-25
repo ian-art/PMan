@@ -748,8 +748,8 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
         
         if (pidChanged && mode == lastMode)
         {
-            Log("Process transition: " + std::to_string(lastPid) + " -> " + std::to_string(pid) + 
-                " (Same mode - applying process-specific optimizations only)");
+            Log("[BOOST] Process transition: " + std::to_string(lastPid) + " -> " + std::to_string(pid) + 
+                " (Applying process-specific optimizations to " + WideToUtf8(exe.c_str()) + ")");
             
             g_lastPid.store(pid);
             
@@ -885,14 +885,18 @@ static void PolicyWorkerThread(DWORD pid, HWND hwnd)
 
             if (modeChanged)
             {
-                std::string prefix = "[BROWSER] ";
-                if (mode == 1) {
-                    // Distinguish Game vs Video for logging
-                    bool isVideo = false;
-                    { std::shared_lock lg(g_setMtx); isVideo = g_videoPlayers.count(exe); }
-                    prefix = isVideo ? "[VIDEO] " : "[GAME] ";
+                if (mode == 0) {
+                    Log("[DESKTOP] Restoring baseline system state.");
+                } else {
+                    std::string prefix = "[BROWSER] ";
+                    if (mode == 1) {
+                        // Distinguish Game vs Video for logging
+                        bool isVideo = false;
+                        { std::shared_lock lg(g_setMtx); isVideo = g_videoPlayers.count(exe); }
+                        prefix = isVideo ? "[VIDEO] " : "[GAME] ";
+                    }
+                    Log(prefix + "Boosting foreground target: " + WideToUtf8(exe.c_str()));
                 }
-                Log(prefix + WideToUtf8(exe.c_str()));
             }
             
             // [MOVED] Session lock management (Run BEFORE optimizations to load profiles/cache)

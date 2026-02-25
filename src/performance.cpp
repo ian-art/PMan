@@ -28,6 +28,7 @@
 #include "input_guardian.h"
 #include "globals.h"
 #include "governor.h"
+#include "sandbox_executor.h"
 #include <fstream>
 #include <numeric>
 #include <cmath>
@@ -902,6 +903,14 @@ void PerformanceGuardian::LogStutterData(const std::wstring& exeName, const Syst
 }
 
 void PerformanceGuardian::TriggerEmergencyBoost(DWORD pid) {
+    // [PATCH] Deterministic Fallback: If Brain is disabled, Captain takes direct manual control.
+    if (!PManContext::Get().conf.enableBrain.load()) {
+        if (SandboxExecutor::EnforcePriority(pid, HIGH_PRIORITY_CLASS)) {
+            Log("[PERF] Brain disabled. Guardian applied direct manual Emergency Boost to PID " + std::to_string(pid));
+        }
+        return;
+    }
+
     // [FIX] Traffic Enforcer: Do not act directly. Signal the Brain.
     // Logging the PID resolves C4100 warning and aids diagnostics.
     if (!m_emergencySignal.load()) {
