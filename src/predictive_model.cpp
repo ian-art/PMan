@@ -58,7 +58,7 @@ void PredictiveModel::Initialize() {
                         PredictionStats stats = {};
                         f.read(reinterpret_cast<char*>(&key), sizeof(ModelKey));
                         f.read(reinterpret_cast<char*>(&stats), sizeof(PredictionStats));
-                        if (!f.good()) break;
+                        if (!f.good()) { m_stats.clear(); return false; }
                         m_stats[key] = stats;
                     }
                     return true;
