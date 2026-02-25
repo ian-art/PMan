@@ -1355,6 +1355,21 @@ namespace GuiManager {
 
                         IpcClient::Response resp = IpcClient::SendConfig(root);
                             if (resp.success) {
+                                // Sync local state so UI does not visually revert on reopen
+                                auto& f = PManContext::Get().fault;
+                                f.ledgerWriteFail = g_configState.faultLedger;
+                                f.budgetCorruption = g_configState.faultBudget;
+                                f.sandboxError = g_configState.faultSandbox;
+                                f.intentInvalid = g_configState.faultIntent;
+                                f.confidenceInvalid = g_configState.faultConfidence;
+
+                                ExplorerConfig ec = GetExplorerConfigShadow();
+                                ec.debugLogging = g_configState.debugLog;
+                                SetExplorerConfigShadow(ec);
+                                if (PManContext::Get().subs.explorer) {
+                                    PManContext::Get().subs.explorer->UpdateConfig(ec);
+                                }
+
                                 Log("[USER] Debug settings sent to Service.");
                                 MessageBoxW(g_hwnd, L"Debug configuration synced.", L"PMan Debug", MB_OK);
                             } else {

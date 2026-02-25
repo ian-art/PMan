@@ -23,6 +23,7 @@
 #include "context.h"
 #include "investigator.h"
 #include <unordered_set> // [FIX] Required for policyAllowedActions
+#include <cmath> // Required for std::isnan
 
 ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, const ConsequenceResult& consequence, const ConfidenceMetrics& confidence, const std::unordered_set<int>& policyAllowedActions) {
     ArbiterDecision decision;
@@ -64,7 +65,10 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
         hardReject = true;
     }
     // B. Confidence Rules
-    else if (confidence.cpuVariance > m_maxCpuVariance ||
+    else if (std::isnan(confidence.cpuVariance) ||
+             std::isnan(confidence.thermalVariance) ||
+             std::isnan(confidence.latencyVariance) ||
+             confidence.cpuVariance > m_maxCpuVariance ||
              confidence.thermalVariance > m_maxThermVariance ||
              confidence.latencyVariance > m_maxLatVariance ||
              consequence.confidence < CONFIDENCE_MIN) {

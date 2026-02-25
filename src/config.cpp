@@ -509,6 +509,7 @@ bool SecureConfigManager::LoadSecureConfig() {
                 cfg.disablePowerThrottling = e.value("disable_throttling", true);
                 cfg.preventShellPaging = e.value("prevent_paging", true);
                 cfg.scanIntervalMs = e.value("scan_interval", 5000);
+                cfg.debugLogging = e.value("debug_logging", false);
                 g_lastExplorerConfig = cfg;
                 if (PManContext::Get().subs.explorer) PManContext::Get().subs.explorer->UpdateConfig(cfg);
             }
@@ -580,7 +581,8 @@ void SecureConfigManager::SaveSecureConfig() {
                 {"boost_io", ec.boostIoPriority},
                 {"disable_throttling", ec.disablePowerThrottling},
                 {"prevent_paging", ec.preventShellPaging},
-                {"scan_interval", ec.scanIntervalMs}
+                {"scan_interval", ec.scanIntervalMs},
+                {"debug_logging", ec.debugLogging}
             };
 
             j["tweaks"] = {

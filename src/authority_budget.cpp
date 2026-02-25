@@ -26,8 +26,7 @@ AuthorityBudget::AuthorityBudget() : m_maxBudget(100), m_usedBudget(0), m_exhaus
 bool AuthorityBudget::CanSpend(int cost) const {
     // [FAULT INJECTION]
     if (PManContext::Get().fault.budgetCorruption) {
-        // We do not modify state here, just deny spending.
-        // The main loop will log the denial.
+        Log("[FAULT] AuthorityBudget: Budget Corruption Simulated.");
         return false;
     }
 

@@ -52,6 +52,7 @@ ProvenanceLedger::~ProvenanceLedger() {
 }
 
 bool ProvenanceLedger::IsProvenanceSecure() const {
+    if (PManContext::Get().fault.ledgerWriteFail) return false;
     return m_healthy;
 }
 
@@ -59,11 +60,10 @@ void ProvenanceLedger::Record(const DecisionJustification& record) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
     // [FAULT INJECTION]
-    if (PManContext::Get().fault.ledgerWriteFail) {
-        m_healthy = false;
-        Log("[FAULT] ProvenanceLedger: Write Failure Simulated. Ledger marked unhealthy.");
-        return; 
-    }
+        if (PManContext::Get().fault.ledgerWriteFail) {
+            Log("[FAULT] ProvenanceLedger: Write Failure Simulated.");
+            return;
+        }
 
     if (!m_healthy) return;
 
