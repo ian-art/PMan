@@ -109,8 +109,8 @@ void TelemetryAgent::WorkerLoop() {
             m_cachedMemoryPressure.store((double)mem.dwMemoryLoad, std::memory_order_release);
         }
 
-        // 4. Latency (Atomic read)
-        m_cachedLatency.store(PManContext::Get().telem.lastDpcLatency.load(std::memory_order_relaxed), std::memory_order_release);
+        // 4. Latency (Atomic read) - Converted from microseconds to milliseconds
+        m_cachedLatency.store(PManContext::Get().telem.lastDpcLatency.load(std::memory_order_relaxed) / 1000.0, std::memory_order_release);
 
         // 5. User Activity (Global)
         // Checks if user input occurred in the last 30 seconds
