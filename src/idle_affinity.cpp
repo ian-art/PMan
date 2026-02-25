@@ -22,6 +22,7 @@
 #include "utils.h"
 #include "logger.h"
 #include "sysinfo.h"
+#include "context.h"
 #include <tlhelp32.h>
 #include <vector>
 #include <shared_mutex> // Required for g_setMtx
@@ -141,11 +142,12 @@ bool IdleAffinityManager::IsSafeToPark()
         if (totalGB < m_minRamGB.load()) return false;
     }
 
-    // [FIX] Removed "g_sessionLocked" check. 
-    // Now that we explicitly protect the Foreground Window (in ApplyIdleAffinity), 
-    // it is SAFE and BENEFICIAL to park background apps even during a game session 
-    // (e.g. when using a controller).
-    // if (g_sessionLocked.load()) return false; 
+    // Gate: Never enter idle-park evaluation during an active game session.
+    // The foreground window guard inside ApplyIdleAffinity protects the game process
+    // itself from being parked, but this gate is the correct semantic check for
+    // whether parking should be considered at all.
+    // Routed through PManContext (deprecated g_sessionLocked macro removed per §2).
+    if (PManContext::Get().sessionLocked.load()) return false;
 
     return true;
 }
