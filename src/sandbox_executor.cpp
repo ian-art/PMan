@@ -208,7 +208,8 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
 
     // 3. Target Selection
     DWORD targetPid = decision.targetPid != 0 ? decision.targetPid : GetCurrentProcessId();
-    if (decision.selectedAction == BrainAction::Shield_Foreground) {
+    if (decision.selectedAction == BrainAction::Shield_Foreground || 
+       (decision.selectedAction == BrainAction::Boost_Process && targetPid == GetCurrentProcessId())) {
         GetWindowThreadProcessId(GetForegroundWindow(), &targetPid);
         // Safety: Do not target self or system idle
         if (targetPid <= 4 || targetPid == GetCurrentProcessId()) {
@@ -307,14 +308,7 @@ SandboxResult SandboxExecutor::TryExecute(ArbiterDecision& decision) {
     // Deprecated backward calls to Ring 2 (MemoryOptimizer) have been removed to strictly 
     // enforce the Sandbox Barrier. Duplicate Suspend_Services block has also been removed.
     else if (decision.selectedAction == BrainAction::Boost_Process) {
-        // [FIX] Active Enforcer: High Priority for Games/Browsers
-        // If target is self (default), switch to foreground window
-        if (targetPid == GetCurrentProcessId()) {
-             m_hTarget.reset(); // Auto-closes current
-             GetWindowThreadProcessId(GetForegroundWindow(), &targetPid);
-             m_hTarget.reset(OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid));
-        }
-
+        // [FIX] Target is already securely resolved and validated upstream
         if (m_hTarget) {
             success = SetPriorityClass(m_hTarget.get(), HIGH_PRIORITY_CLASS);
         }
@@ -376,7 +370,7 @@ void SandboxExecutor::Rollback() {
 
     if (m_actionApplied && m_hTarget) {
         if (m_wsModified) {
-            SetProcessWorkingSetSizeEx(m_hTarget.get(), m_originalMinWS, m_originalMaxWS, 0);
+            SetProcessWorkingSetSizeEx(m_hTarget.get(), m_originalMinWS, m_originalMaxWS, m_originalWSFlags);
             m_wsModified = false;
         } else {
             SetPriorityClass(m_hTarget.get(), m_originalPriorityClass);
