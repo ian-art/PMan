@@ -327,6 +327,7 @@ bool SecureConfigManager::ApplyConfig(const json& j) {
             if (j.contains(key)) {
                 target.clear();
                 for (const auto& item : j[key]) target.insert(Utf8ToWide(item.get<std::string>().c_str()));
+                Log("[SECURE_CFG] Updated " + std::string(key) + " list: " + std::to_string(target.size()) + " entries");
             }
         };
 
@@ -472,6 +473,7 @@ bool SecureConfigManager::LoadSecureConfig() {
                 target.clear();
                 if (j.contains(key)) {
                     for (const auto& item : j[key]) target.insert(Utf8ToWide(item.get<std::string>().c_str()));
+                    Log("[SECURE_CFG] Loaded " + std::string(key) + " list: " + std::to_string(target.size()) + " entries");
                 }
             };
 
