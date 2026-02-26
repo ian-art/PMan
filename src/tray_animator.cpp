@@ -78,6 +78,13 @@ void TrayAnimator::StartMemMonitor(DWORD threshold) {
 
             if (!m_memMonitorRunning.load() || !g_running.load()) break;
 
+            // [SAFETY GATE] Halt autonomous trimming to prevent I/O storms and stuttering 
+            // during critical system states, sleep transitions, or gaming sessions.
+            if (g_sessionLocked.load() || g_isSuspended.load() || 
+                SramEngine::Get().GetStatus().state >= LagState::LAGGING) {
+                continue;
+            }
+
             MEMORYSTATUSEX ms = { sizeof(ms) };
             if (!GlobalMemoryStatusEx(&ms)) continue;
 
