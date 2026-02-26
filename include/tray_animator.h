@@ -27,6 +27,7 @@
 #include <mutex>
 #include <memory>
 #include <atomic>
+#include <thread>
 #include "sram_engine.h" // LagState — required for ShowSramNotification
 
 class TrayAnimator {
@@ -50,6 +51,11 @@ public:
     // Helpers
     std::vector<std::wstring> ScanThemes();
     uint64_t GetLastAnimationTime() const { return m_lastTick.load(); }
+
+    // Auto Memory Monitor (called by TrayManager)
+    void StartMemMonitor(DWORD threshold);
+    void StopMemMonitor();
+    bool IsMemMonitorActive(DWORD threshold) const;
 
 private:
     TrayAnimator();
@@ -78,6 +84,11 @@ private:
     std::wstring m_currentTheme = L"Default";
     std::mutex m_mtx; // Protect resource swapping
     std::atomic<uint64_t> m_lastTick{0};
+
+    // Auto Memory Monitor state (private, owned by this class)
+    std::atomic<DWORD>  m_memMonitorThreshold{0};
+    std::atomic<bool>   m_memMonitorRunning{false};
+    std::thread         m_memMonitorThread;
 
     // Constants
     static const UINT TIMER_ID = 9001; // Unique ID to avoid collision

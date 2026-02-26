@@ -61,7 +61,6 @@ static constexpr UINT    ID_TRAY_PAUSE_IDLE       = 1013;
 static constexpr UINT    ID_TRAY_KEEP_AWAKE       = 1014;
 static constexpr UINT    ID_TRAY_TOGGLE_BRAIN     = 1015;
 
-
 // Inter-thread communication for Real-Time Logging
 static constexpr UINT    WM_LOG_UPDATED       = WM_USER + 20;
 
@@ -100,6 +99,12 @@ static constexpr UINT IDI_TRAY_D_LOG            = 4016;
 
 // Audit Export
 static constexpr UINT    ID_TRAY_EXPORT_LOG         = 5001;
+
+// Memory Cleaner Menu
+static constexpr UINT    ID_TRAY_CLEAN_MEM_DEFAULT    = 6001;
+static constexpr UINT    ID_TRAY_CLEAN_MEM_AGGRESSIVE = 6002;
+static constexpr UINT    ID_TRAY_CLEAN_MEM_80         = 6003;
+static constexpr UINT    ID_TRAY_CLEAN_MEM_90         = 6004;
 
 // PAYPAL
 static constexpr wchar_t SUPPORT_URL[] = L"https://paypal.me/ianart/100";

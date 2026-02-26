@@ -43,6 +43,73 @@
 // SaveIconTheme declared in config.h (included above).
 // GuiManager::OpenPolicyTab declared in gui_manager.h (included above).
 
+// Memory Cleaner External Definition
+extern ULONGLONG PerformClean(bool aggressive, bool dryRun);
+
+// ---------------------------------------------------------------------------
+// Auto Memory Monitor — TrayAnimator member implementations
+// ---------------------------------------------------------------------------
+bool TrayAnimator::IsMemMonitorActive(DWORD threshold) const {
+    return m_memMonitorRunning.load() && m_memMonitorThreshold.load() == threshold;
+}
+
+void TrayAnimator::StartMemMonitor(DWORD threshold) {
+    // Stop any existing monitor before starting the new one
+    m_memMonitorRunning.store(false);
+    if (m_memMonitorThread.joinable()) m_memMonitorThread.join();
+
+    m_memMonitorThreshold.store(threshold);
+    m_memMonitorRunning.store(true);
+
+    m_memMonitorThread = std::thread([this, threshold]() {
+        Log("[MEM] Auto-monitor STARTED at " + std::to_string(threshold) + "% threshold.");
+        ShowNotification(L"Memory Monitor",
+            threshold == 80 ? L"Auto-clean active: triggers at 80% usage."
+                            : L"Auto-clean active: triggers at 90% usage.",
+            NIIF_INFO);
+
+        constexpr DWORD POLL_MS     = 10000; // check every 10 seconds
+        constexpr DWORD COOLDOWN_MS = 60000; // minimum 60s between auto-cleans
+
+        uint64_t lastCleanTime = 0;
+
+        while (m_memMonitorRunning.load() && g_running.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(POLL_MS));
+
+            if (!m_memMonitorRunning.load() || !g_running.load()) break;
+
+            MEMORYSTATUSEX ms = { sizeof(ms) };
+            if (!GlobalMemoryStatusEx(&ms)) continue;
+
+            if (ms.dwMemoryLoad >= threshold) {
+                uint64_t now = GetTickCount64();
+                if (now - lastCleanTime < COOLDOWN_MS) continue; // still in cooldown
+
+                lastCleanTime = now;
+                Log("[MEM] Auto-monitor: usage " + std::to_string(ms.dwMemoryLoad) +
+                    "% >= " + std::to_string(threshold) + "%. Running auto-clean.");
+
+                ULONGLONG freed = PerformClean(false, false);
+                double freedMB = static_cast<double>(freed) / (1024.0 * 1024.0);
+                wchar_t msg[128];
+                swprintf_s(msg, 128, L"Auto-clean triggered at %lu%%.\nFreed: %.2f MB",
+                    ms.dwMemoryLoad, freedMB);
+                ShowNotification(L"Memory Monitor", msg, NIIF_INFO);
+                Log("[MEM] Auto-clean freed " + std::to_string(freedMB) + " MB.");
+            }
+        }
+        Log("[MEM] Auto-monitor STOPPED.");
+    });
+}
+
+void TrayAnimator::StopMemMonitor() {
+    m_memMonitorRunning.store(false);
+    m_memMonitorThreshold.store(0);
+    if (m_memMonitorThread.joinable()) m_memMonitorThread.join();
+    Log("[MEM] Auto-monitor STOPPED by user.");
+    ShowNotification(L"Memory Monitor", L"Auto-monitor disabled.", NIIF_INFO);
+}
+
 // Resource IDs (Copied from main.cpp to isolate dependency)
 #define IDI_TRAY_FRAME_1 201
 #define IDI_TRAY_ORANGE_FRAME_1 209
@@ -60,7 +127,11 @@ TrayAnimator::~TrayAnimator() {
 
 void TrayAnimator::Shutdown() {
     if (!m_initialized) return;
-    
+
+    // Stop auto memory monitor — must join before destroying resources
+    m_memMonitorRunning.store(false);
+    if (m_memMonitorThread.joinable()) m_memMonitorThread.join();
+
     KillTimer(m_hwnd, TIMER_ID);
     Shell_NotifyIconW(NIM_DELETE, &m_nid);
     
@@ -431,6 +502,16 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hControlMenu, L"Controls");
             SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_CONTROLS, IDI_TRAY_D_CONTROLS, true);
 
+            // --- Memory Cleaner Submenu ---
+            HMENU hCleanerMenu = CreatePopupMenu();
+            AppendMenuW(hCleanerMenu, MF_STRING, ID_TRAY_CLEAN_MEM_DEFAULT, L"Clean Memory (Default)");
+            AppendMenuW(hCleanerMenu, MF_STRING, ID_TRAY_CLEAN_MEM_AGGRESSIVE, L"Clean Memory (Aggressive)");
+            AppendMenuW(hCleanerMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(hCleanerMenu, MF_STRING | (TrayAnimator::Get().IsMemMonitorActive(80) ? MF_CHECKED : 0), ID_TRAY_CLEAN_MEM_80, L"Auto-Clean Memory (If > 80% Usage)");
+            AppendMenuW(hCleanerMenu, MF_STRING | (TrayAnimator::Get().IsMemMonitorActive(90) ? MF_CHECKED : 0), ID_TRAY_CLEAN_MEM_90, L"Auto-Clean Memory (If > 90% Usage)");
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hCleanerMenu, L"Memory Cleaner");
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_CP, IDI_TRAY_D_CP, true);
+
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
             // 4. Global Actions
@@ -662,6 +743,39 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             Log(brain ? "[USER] Autonomous Brain ENABLED (Dynamic Machine Learning Active)." 
                       : "[USER] Autonomous Brain DISABLED (Deterministic Core Engine Mode Active).");
             UpdateTrayTooltip();
+        }
+        else if (wmId >= ID_TRAY_CLEAN_MEM_DEFAULT && wmId <= ID_TRAY_CLEAN_MEM_90) {
+            bool isAggressive = (wmId == ID_TRAY_CLEAN_MEM_AGGRESSIVE);
+            DWORD threshold = 0;
+            if (wmId == ID_TRAY_CLEAN_MEM_80) threshold = 80;
+            if (wmId == ID_TRAY_CLEAN_MEM_90) threshold = 90;
+
+            if (threshold > 0) {
+                // Toggle continuous auto-monitor for 80% / 90%
+                if (TrayAnimator::Get().IsMemMonitorActive(threshold)) {
+                    Log("[USER] Auto Memory Monitor DISABLED (" + std::to_string(threshold) + "%).");
+                    PManContext::Get().workerQueue.Push([]() {
+                        TrayAnimator::Get().StopMemMonitor();
+                    });
+                } else {
+                    Log("[USER] Auto Memory Monitor ENABLED at " + std::to_string(threshold) + "%.");
+                    PManContext::Get().workerQueue.Push([threshold]() {
+                        TrayAnimator::Get().StartMemMonitor(threshold);
+                    });
+                }
+            } else {
+                // Default / Aggressive — one-shot clean (unchanged behaviour)
+                Log(isAggressive ? "[USER] Triggered Aggressive Memory Clean."
+                                 : "[USER] Triggered Default Memory Clean.");
+                PManContext::Get().workerQueue.Push([isAggressive]() {
+                    ULONGLONG freedBytes = PerformClean(isAggressive, false);
+                    double freedMB = static_cast<double>(freedBytes) / (1024.0 * 1024.0);
+                    wchar_t msg[128];
+                    swprintf_s(msg, 128, L"Memory clean completed.\nFreed: %.2f MB", freedMB);
+                    TrayAnimator::Get().ShowNotification(L"Memory Cleaner", msg, NIIF_INFO);
+                    Log("[MEM] Manual clean freed " + std::to_string(freedMB) + " MB");
+                });
+            }
         }
         return 0;
     } // End of WM_COMMAND Block
