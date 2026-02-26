@@ -510,7 +510,7 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             AppendMenuW(hCleanerMenu, MF_STRING | (TrayAnimator::Get().IsMemMonitorActive(80) ? MF_CHECKED : 0), ID_TRAY_CLEAN_MEM_80, L"Auto-Clean Memory (If > 80% Usage)");
             AppendMenuW(hCleanerMenu, MF_STRING | (TrayAnimator::Get().IsMemMonitorActive(90) ? MF_CHECKED : 0), ID_TRAY_CLEAN_MEM_90, L"Auto-Clean Memory (If > 90% Usage)");
             AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hCleanerMenu, L"Memory Cleaner");
-            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_CP, IDI_TRAY_D_CP, true);
+            SetMenuIcon(hMenu, GetMenuItemCount(hMenu) - 1, IDI_TRAY_L_CLEANMEM, IDI_TRAY_D_CLEANMEM, true);
 
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
