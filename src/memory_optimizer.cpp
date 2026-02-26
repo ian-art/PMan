@@ -60,9 +60,16 @@ void MemoryOptimizer::Initialize() {
 void MemoryOptimizer::Shutdown() {
     m_running = false;
 
+    std::vector<DWORD> pidsToUnlock;
+    {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        pidsToUnlock = m_hardenedPids;
+        m_hardenedPids.clear();
+    }
+
     // [CLEANUP] Release all memory locks ("Return the Keys")
-    if (!m_hardenedPids.empty()) {
-        for (DWORD pid : m_hardenedPids) {
+    if (!pidsToUnlock.empty()) {
+        for (DWORD pid : pidsToUnlock) {
             HANDLE hProc = OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
             if (hProc) {
                 // [SAFETY] Do NOT use -1,-1 (EmptyWorkingSet). That causes lag.
@@ -76,7 +83,6 @@ void MemoryOptimizer::Shutdown() {
                 CloseHandle(hProc);
             }
         }
-        m_hardenedPids.clear();
         Log("[MEMOPT] Released memory locks on shutdown (Seamless Handover).");
     }
 
@@ -90,13 +96,21 @@ void MemoryOptimizer::Shutdown() {
     }
 }
 
+bool MemoryOptimizer::IsShieldActive() {
+    std::lock_guard<std::mutex> lock(m_mtx);
+    return !m_hardenedPids.empty();
+}
+
 void MemoryOptimizer::HardenProcess(DWORD pid) {
-    // [TRACK] Remember this PID so we can unlock it later
-    bool found = false;
-    for (DWORD existing : m_hardenedPids) {
-        if (existing == pid) { found = true; break; }
+    {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        // [TRACK] Remember this PID so we can unlock it later
+        bool found = false;
+        for (DWORD existing : m_hardenedPids) {
+            if (existing == pid) { found = true; break; }
+        }
+        if (!found) m_hardenedPids.push_back(pid);
     }
-    if (!found) m_hardenedPids.push_back(pid);
 
     HANDLE hProc = OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!hProc) return;

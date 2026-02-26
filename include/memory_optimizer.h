@@ -50,6 +50,9 @@ public:
     // Memory Shield - applied by SandboxExecutor via Action_MemoryHarden lease
     void HardenProcess(DWORD pid);
 
+    // [SENSOR] Query if any process is currently shielded
+    bool IsShieldActive();
+
 private:
     struct ProcessState {
         std::chrono::steady_clock::time_point lastTrimTime;

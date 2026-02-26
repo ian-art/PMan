@@ -80,7 +80,8 @@ void TrayAnimator::StartMemMonitor(DWORD threshold) {
 
             // [SAFETY GATE] Halt autonomous trimming to prevent I/O storms and stuttering 
             // during critical system states, sleep transitions, or gaming sessions.
-            if (g_sessionLocked.load() || g_isSuspended.load() || 
+            bool shieldActive = PManContext::Get().subs.mem && PManContext::Get().subs.mem->IsShieldActive();
+            if (g_sessionLocked.load() || g_isSuspended.load() || shieldActive ||
                 SramEngine::Get().GetStatus().state >= LagState::LAGGING) {
                 continue;
             }
