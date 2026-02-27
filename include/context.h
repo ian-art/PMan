@@ -259,7 +259,7 @@ public:
         std::unique_ptr<PolicyOptimizer>       optimizer; // Runtime instance of the parameter optimizer
         std::unique_ptr<PerformanceGovernor>   governor;
         std::unique_ptr<ConsequenceEvaluator>  evaluator; // Engine for calculating the cost/benefit of potential actions
-        std::unique_ptr<PredictiveModel>       model;     // Active predictive model for system load
+        std::shared_ptr<PredictiveModel>       model;     // Active predictive model for system load (RCU ready)
         std::unique_ptr<DecisionArbiter>       arbiter;   // Central arbiter for final decision making
         // Subsystem for safely executing and verifying actions
         std::unique_ptr<Executor>              executor;
@@ -278,7 +278,7 @@ public:
         std::unique_ptr<IpcServer>             ipc;          // Secure IPC Core
         std::unique_ptr<TelemetryAgent>        telemetry;    // Non-blocking Telemetry
         std::unique_ptr<HeartbeatSystem>       heartbeat;    // Dedicated Heartbeat Module
-        std::unique_ptr<AutonomousEngine>      engine;       // Autonomous Engine Orchestrator
+        std::shared_ptr<AutonomousEngine>      engine;       // Autonomous Engine Orchestrator (RCU ready)
         std::unique_ptr<ResponsivenessManager> responsiveness; // Responsiveness Recovery Manager
     } subs;
 

@@ -59,7 +59,7 @@ PManContext::PManContext() {
     subs.optimizer  = std::make_unique<PolicyOptimizer>();
     subs.governor   = std::make_unique<PerformanceGovernor>();
     subs.evaluator  = std::make_unique<ConsequenceEvaluator>();
-    subs.model      = std::make_unique<PredictiveModel>();
+    subs.model      = std::make_shared<PredictiveModel>();
     subs.arbiter    = std::make_unique<DecisionArbiter>();
     if (subs.model) subs.model->Initialize();
     subs.executor   = std::unique_ptr<Executor>(new Executor());
@@ -77,7 +77,7 @@ PManContext::PManContext() {
     subs.investigator = std::make_unique<Investigator>();
     subs.ipc        = std::make_unique<IpcServer>();
     subs.telemetry  = std::make_unique<TelemetryAgent>();
-    subs.engine          = std::make_unique<AutonomousEngine>();
+    subs.engine          = std::make_shared<AutonomousEngine>();
     subs.responsiveness  = std::make_unique<ResponsivenessManager>();
 }
 
