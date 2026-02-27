@@ -428,7 +428,6 @@ ULONGLONG PerformClean(bool aggressive, bool dryRun) {
 
     // Safe operations (always)
     doOp("Emptying working sets", MemoryEmptyWorkingSets);
-    doFileCache();
     doOp("Purging low-priority standby", MemoryPurgeLowPriorityStandbyList);
 
     // Registry cache (Win8.1+)
@@ -459,6 +458,7 @@ ULONGLONG PerformClean(bool aggressive, bool dryRun) {
         printf("\n--- Aggressive operations ---\n");
         doOp("Flushing modified page list", MemoryFlushModifiedList);
         doOp("Purging FULL standby list", MemoryPurgeStandbyList);
+        doFileCache();
         printf("  -> Flushing volume caches... ");
         if (!dryRun) FlushVolumeCacheAccurate();
         else printf("DRY-RUN\n");

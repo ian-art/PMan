@@ -779,6 +779,17 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
                     });
                 }
             } else {
+                if (isAggressive) {
+                    if (MessageBoxW(hwnd, 
+                        L"WARNING: Aggressive memory cleaning flushes the Standby List and trims the System Cache working set.\n\n"
+                        L"This forces Windows to reload previously cached file data from disk, which may cause temporary stuttering and increased disk I/O. "
+                        L"This operation does not increase total available RAM and is rarely necessary under normal conditions. "
+                        L"Proceed only if you are troubleshooting severe memory pressure or testing specific edge cases.\n\n"
+                        L"Are you sure you want to proceed?",
+                        L"PMan - Aggressive Clean", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
+                        return 0;
+                    }
+                }
                 // Default / Aggressive — one-shot clean (unchanged behaviour)
                 Log(isAggressive ? "[USER] Triggered Aggressive Memory Clean."
                                  : "[USER] Triggered Default Memory Clean.");
