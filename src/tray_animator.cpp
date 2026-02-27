@@ -34,6 +34,8 @@
 #include "lifecycle.h"        // Lifecycle::GetStartupMode, InstallTask, UninstallTask
 #include "sram_engine.h"      // SramEngine, LagState
 #include "config.h"           // SaveIconTheme
+#include "ipc_client.h"       // IpcClient Integration
+#include "nlohmann/json.hpp"  // JSON Support
 #include <shellapi.h>
 #include <filesystem>
 #include <fstream>
@@ -741,16 +743,21 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
         }
         else if (wmId == ID_TRAY_TOGGLE_BRAIN) {
             bool brain = !PManContext::Get().conf.enableBrain.load();
-            PManContext::Get().conf.enableBrain.store(brain);
-
-            // [FIX] Save directly to disk. Do NOT trigger a full system reload.
-            // This prevents the checkmark from being overwritten by the disk config,
-            // and stops the Policy/Config reload spam in the logs.
-            SaveConfig();
-
-            Log(brain ? "[USER] Autonomous Brain ENABLED (Dynamic Machine Learning Active)." 
-                      : "[USER] Autonomous Brain DISABLED (Deterministic Core Engine Mode Active).");
-            UpdateTrayTooltip();
+            
+            nlohmann::json root;
+            root["global"]["enable_brain"] = brain;
+            
+            IpcClient::Response resp = IpcClient::SendConfig(root);
+            
+            if (resp.success) {
+                // Sync local UI state to match the successful Service update
+                PManContext::Get().conf.enableBrain.store(brain);
+                Log(brain ? "[USER] Autonomous Brain ENABLED (Dynamic Machine Learning Active)." 
+                          : "[USER] Autonomous Brain DISABLED (Deterministic Core Engine Mode Fully Active).");
+                UpdateTrayTooltip();
+            } else {
+                Log("[ERROR] Failed to toggle AI Brain via IPC: " + resp.message);
+            }
         }
         else if (wmId >= ID_TRAY_CLEAN_MEM_DEFAULT && wmId <= ID_TRAY_CLEAN_MEM_90) {
             bool isAggressive = (wmId == ID_TRAY_CLEAN_MEM_AGGRESSIVE);
