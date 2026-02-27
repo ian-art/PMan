@@ -474,7 +474,7 @@ void AutonomousEngine::Tick()
     }
 
     // [FIX] Log Silencer: Log if we actually DID something or INTENDED to do something
-    if (rawIntent != BrainAction::Maintain || sbResult.executed) { // || (int)priorities.dominant != 0) {
+    if (sbResult.executed || (rawIntent != BrainAction::Maintain && (int)priorities.dominant != 0)) {
         // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Sandbox -> Reality -> Error -> Confidence"
         std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
                           " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
