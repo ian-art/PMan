@@ -96,6 +96,14 @@ void AutonomousEngine::Tick()
         return;
     }
 
+    // Periodic Heartbeat: Confirms engine is ticking, only while brain is enabled.
+    if (ctx.conf.enableBrain.load()) {
+        static uint64_t s_tickCount = 0;
+        if ((++s_tickCount % 20) == 0) {
+            Log("[AUTONOMOUS_ENGINE] Heartbeat. Tick: " + std::to_string(s_tickCount));
+        }
+    }
+
     // 0. Outcome-Based Early Termination (Reactive Rollback Guard)
     // "Stop immediately if this is going badly."
     // We check if the active lease (from previous tick) is causing actual harm.
@@ -349,8 +357,9 @@ void AutonomousEngine::Tick()
                 return r.reason == RejectionReason::TargetAccessDenied ||
                        r.reason == RejectionReason::ApiFailure;
             });
-        bool shouldRecord = (decision.selectedAction != BrainAction::Maintain && sbResult.executed) ||
-                            hasApiRejection;
+        bool shouldRecord = ((decision.selectedAction != BrainAction::Maintain && sbResult.executed) ||
+                            hasApiRejection) &&
+                            ctx.conf.enableBrain.load();
         
         // Force record if a fault is active (Audit Proof of Failure)
         if (faultActive) shouldRecord = true;
