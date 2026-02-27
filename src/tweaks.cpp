@@ -335,21 +335,27 @@ BOOL SetProcessIoPriority(DWORD pid, int mode)
 
     if (!ioPrioritySet)
     {
-        if (IsIoPriorityBlockedBySystem())
+        static uint64_t lastLogTime = 0;
+        uint64_t now = GetTickCount64();
+        if (now - lastLogTime > 60000)
         {
-            Log("[I/O] I/O priority APIs blocked by system");
-        }
-        else
-        {
-            Log("[I/O] I/O priority setting failed");
-        }
+            if (IsIoPriorityBlockedBySystem())
+            {
+                Log("[I/O] I/O priority APIs blocked by system");
+            }
+            else
+            {
+                Log("[I/O] I/O priority setting failed");
+            }
 
-        // Method 2: Thread Priority (SNAPSHOT REMOVED)
-        // Previous implementation used CreateToolhelp32Snapshot which caused massive stuttering.
-        Log("[I/O] Advanced I/O Priority unavailable (access denied) - skipping expensive thread fallback");
-        
-        // [FIX] Removed SetPriorityClass fallback to strictly comply with the Sandbox Barrier.
-        // Priority class changes must be orchestrated by the SandboxExecutor, not utility functions.
+            // Method 2: Thread Priority (SNAPSHOT REMOVED)
+            // Previous implementation used CreateToolhelp32Snapshot which caused massive stuttering.
+            Log("[I/O] Advanced I/O Priority unavailable (access denied) - skipping expensive thread fallback");
+            
+            // [FIX] Removed SetPriorityClass fallback to strictly comply with the Sandbox Barrier.
+            // Priority class changes must be orchestrated by the SandboxExecutor, not utility functions.
+            lastLogTime = now;
+        }
     }
 
     // Update cache to prevent immediate retry (even if failed, to stop lag)
