@@ -270,13 +270,11 @@ void ServiceWatcher::SuspendAllowedServices() {
     // Simple Bubble Sort approach (List is tiny, ~4-5 items)
     // If candidates[j] depends on candidates[i], swap them so candidates[j] comes first.
     
+    ScHandle hSc(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
     bool changed = true;
-    while(changed) {
+    while(changed && hSc) {
         changed = false;
         for (size_t i = 0; i < candidates.size(); ++i) {
-            ScHandle hSc(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
-            if (!hSc) break;
-
             ScHandle hSvc(OpenServiceW(hSc.get(), candidates[i].c_str(), SERVICE_ENUMERATE_DEPENDENTS));
             if (!hSvc) continue;
 
