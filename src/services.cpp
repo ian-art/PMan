@@ -753,7 +753,11 @@ bool WindowsServiceManager::IsCriticalService(const std::wstring& serviceName) c
         L"termservice", L"umrdpservice",
         
         // --- Protected Manual Services ---
-        L"lmhosts", L"ngcsvc", L"ngcctnrsvc", L"wdisystemhost"
+        L"lmhosts", L"ngcsvc", L"ngcctnrsvc", L"wdisystemhost",
+        
+        // --- Core OS / Backup / Telemetry ---
+        L"vss", L"swprv", L"trustedinstaller", L"tiworker", 
+        L"frameserver", L"frameservermonitor", L"wbengine", L"sensorservice"
     };
 
     std::wstring lowerName = serviceName;
