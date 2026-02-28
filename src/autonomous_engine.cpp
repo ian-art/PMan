@@ -329,14 +329,17 @@ void AutonomousEngine::Tick()
     // This allows the entire pipeline to run (Predictive Model learns, UI updates, Ledgers record),
     // but absolutely NO autonomous actions will be executed.
     // The deterministic "Captain" (policy.cpp) is completely separate and will continue to work.
-    if (!ctx.conf.enableBrain.load()) {
+    bool brainDisabled = !ctx.conf.enableBrain.load();
+    if (brainDisabled) {
         decision.selectedAction = BrainAction::Maintain;
         decision.reason = DecisionReason::GovernorRestricted;
-        sbResult.reason = "Brain Disabled by User";
     }
 
     if (ctx.subs.sandbox) {
         sbResult = ctx.subs.sandbox->TryExecute(decision);
+        if (brainDisabled) {
+            sbResult.reason = "Brain Disabled by User";
+        }
 
         // Budget Spending
         // Only spend if the action was committed and wasn't forced to Maintain by budget check
@@ -474,7 +477,7 @@ void AutonomousEngine::Tick()
     }
 
     // [FIX] Log Silencer: Log if we actually DID something or INTENDED to do something
-    if (sbResult.executed || (rawIntent != BrainAction::Maintain && (int)priorities.dominant != 0)) {
+    if (sbResult.executed || (rawIntent != BrainAction::Maintain && (int)priorities.dominant != 0 && ctx.conf.enableBrain.load())) {
         // "Logs show Governor -> Evaluator -> Arbiter -> Shadow -> Sandbox -> Reality -> Error -> Confidence"
         std::string log = "[TICK] Gov:" + std::to_string((int)priorities.dominant) + 
                           " EvalCost:" + std::to_string(consequences.cost.cpuDelta) + 
