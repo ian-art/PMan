@@ -481,8 +481,10 @@ void SramEngine::WorkerThread() {
                 lastPoll = now;
             }
 
-            // Yield to avoid 100% CPU, but stay responsive
-            Sleep(5); 
+            // Yield efficiently: Wait until next poll OR a message arrives (prevents battery drain)
+            uint64_t current = GetTickCount64();
+            DWORD timeToWait = (current - lastPoll >= SENSOR_POLL_RATE_MS) ? 0 : static_cast<DWORD>(SENSOR_POLL_RATE_MS - (current - lastPoll));
+            MsgWaitForMultipleObjects(0, nullptr, FALSE, timeToWait > 0 ? timeToWait : 5, QS_ALLINPUT); 
         }
     } else {
         Log("[SRAM] FATAL: Failed to create message window: " + std::to_string(GetLastError()));
