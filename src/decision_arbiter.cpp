@@ -124,13 +124,19 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
              // Try to fallback to Boost_Process (Low risk active state)
              // But ONLY if it wasn't the action we just rejected.
              if (intentAction != BrainAction::Boost_Process) {
-                 DecisionReason dummyReason;
-                 if (CheckCooldown(BrainAction::Boost_Process, dummyReason)) {
-                     decision.selectedAction = BrainAction::Boost_Process;
-                     decision.reason = DecisionReason::Approved; // Fallback Approved
-                     m_cooldowns[BrainAction::Boost_Process] = decision.decisionTime;
-                     fallbackSuccess = true;
-                 }
+                 // Enforce physical cooldown for fallbacks to prevent Policy rejection spam loops
+                     bool fallbackReady = true;
+                     auto it = m_cooldowns.find(BrainAction::Boost_Process);
+                     if (it != m_cooldowns.end() && (decision.decisionTime - it->second) < ACTION_COOLDOWN_MS) {
+                         fallbackReady = false;
+                     }
+                     
+                     if (fallbackReady) {
+                         decision.selectedAction = BrainAction::Boost_Process;
+                         decision.reason = DecisionReason::Approved; // Fallback Approved
+                         m_cooldowns[BrainAction::Boost_Process] = decision.decisionTime;
+                         fallbackSuccess = true;
+                     }
              }
         }
 
