@@ -152,6 +152,11 @@ void ProcessScout::UpdateCache() {
 
     uint64_t now = GetTickCount64();
 
+    // Hoist foreground window query outside the loop to prevent O(N) syscall overhead
+    HWND hFg = GetForegroundWindow();
+    DWORD fgPid = 0;
+    GetWindowThreadProcessId(hFg, &fgPid);
+
     for (size_t i = 0; i < count; i++) {
         DWORD pid = pids[i];
         if (pid == 0 || pid == 4) continue;
@@ -164,10 +169,6 @@ void ProcessScout::UpdateCache() {
             snap.timestamp = now;
 
         // Heuristic categorization of processes based on session and window state
-        HWND hFg = GetForegroundWindow();
-        DWORD fgPid = 0;
-        GetWindowThreadProcessId(hFg, &fgPid);
-
         DWORD sessionId = 0;
         ProcessIdToSessionId(pid, &sessionId);
 
