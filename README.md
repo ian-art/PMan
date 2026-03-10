@@ -248,7 +248,7 @@ This project includes the following third-party software:
 <div align="center">
 
 Vibe coding. ❎   
-Arch coding. ✅
+[Arch coding. ✅](https://github.com/ian-art/ARCH-CODING)
 
 `I'm not a traditional programmer. I'm building PMan as a systems architecture project using AI as a development tool. I'm learning deeply as I go.`
 
