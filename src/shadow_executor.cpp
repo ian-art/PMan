@@ -22,6 +22,12 @@
 PredictedStateDelta ShadowExecutor::Simulate(const ArbiterDecision& decision, const SystemSignalSnapshot& telemetry) {
     PredictedStateDelta delta = { 0, 0, 0 };
 
+    // [IMPROVEMENT] Non-linear scheduler saturation awareness.
+    // Saturated processor queues (> 1.0 ready threads per core) non-linearly amplify the latency cost of disruptive actions.
+    double queueSaturationMultiplier = (telemetry.cpuSaturation > 1.0) ? telemetry.cpuSaturation : 1.0;
+    // High context switching indicates dispatcher pressure, adding flat latency penalties.
+    double contextSwitchPenalty = (telemetry.contextSwitches > 15000) ? 5.0 : 0.0;
+
     switch (decision.selectedAction) {
         case BrainAction::Maintain:
             delta = {0, 0, 0};
@@ -38,14 +44,14 @@ PredictedStateDelta ShadowExecutor::Simulate(const ArbiterDecision& decision, co
             // Simulation: Aggressive throttling reduces CPU load by ~25%
             // But significantly risks latency if user is active or load is high
             delta.cpuLoadDelta = -(telemetry.cpuLoad * 0.25);
-            delta.latencyDelta = (telemetry.cpuLoad * 0.20); // 20% latency penalty risk
+            delta.latencyDelta = ((telemetry.cpuLoad * 0.20) * queueSaturationMultiplier) + contextSwitchPenalty; // 20% latency penalty risk, amplified by queue congestion
             delta.thermalDelta = -2.0; // Good for cooling
             break;
 
         case BrainAction::Optimize_Memory:
             // Simulation: Trimming spikes CPU and Latency momentarily
-            delta.cpuLoadDelta = 5.0; 
-            delta.latencyDelta = 15.0; // Hard faults cause stutter
+            delta.cpuLoadDelta = 5.0 * queueSaturationMultiplier; 
+            delta.latencyDelta = (15.0 * queueSaturationMultiplier) + contextSwitchPenalty; // Hard faults cause stutter, multiplied by queue wait time
             break;
 
         case BrainAction::Action_MemoryHarden:
@@ -56,8 +62,8 @@ PredictedStateDelta ShadowExecutor::Simulate(const ArbiterDecision& decision, co
 
         case BrainAction::Action_MemoryTrim:
             // Simulation: Trimming spikes CPU and Latency momentarily
-            delta.cpuLoadDelta = 5.0; 
-            delta.latencyDelta = 15.0;
+            delta.cpuLoadDelta = 5.0 * queueSaturationMultiplier; 
+            delta.latencyDelta = (15.0 * queueSaturationMultiplier) + contextSwitchPenalty;
             break;
 
         case BrainAction::Suspend_Services:
