@@ -219,6 +219,13 @@ void AutonomousEngine::Tick()
              static std::string lastVerdictReason = "";
              if (verdictResult.reason != lastVerdictReason) {
                 Log("[EXTERNAL_VERDICT] Authority Revoked: " + verdictResult.reason);
+                if (verdictResult.reason == "Verdict Expired") {
+                    TrayAnimator::Get().ShowNotification(
+                        L"External Verdict Expired", 
+                        L"The external authority override has expired. Click here to review or grant authority.", 
+                        NIIF_WARNING
+                    );
+                }
                 lastVerdictReason = verdictResult.reason;
              }
         }

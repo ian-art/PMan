@@ -413,6 +413,8 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             // If budget is exhausted, redirect user to Policy tab
             if (PManContext::Get().subs.budget && PManContext::Get().subs.budget->IsExhausted()) {
                 GuiManager::OpenPolicyTab();
+            } else {
+                GuiManager::ShowConfigWindow();
             }
         }
         // Double Click -> Open Neural Center
