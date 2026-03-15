@@ -168,6 +168,7 @@ public:
         std::atomic<bool> recoveryPromptEnabled{true};
         std::atomic<bool> keepAwake{false};
         std::atomic<bool> enableBrain{true}; // [PATCH] Autonomous AI Toggle
+        std::atomic<uint32_t> autoCleanMemoryThreshold{0};
         std::wstring iconTheme{L"Default"};
 
         // Process Lists

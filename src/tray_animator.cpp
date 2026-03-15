@@ -376,6 +376,11 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             TrayAnimator::Get().SetTheme(g_iconTheme);
         }
         TrayAnimator::Get().SetPaused(g_userPaused.load());
+        
+        // Restore Memory Monitor state
+        if (g_autoCleanMemoryThreshold.load() > 0) {
+            TrayAnimator::Get().StartMemMonitor(g_autoCleanMemoryThreshold.load());
+        }
 
         UpdateTrayTooltip(); // Set initial text
 
@@ -771,13 +776,17 @@ LRESULT TrayManager::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
                 // Toggle continuous auto-monitor for 80% / 90%
                 if (TrayAnimator::Get().IsMemMonitorActive(threshold)) {
                     Log("[USER] Auto Memory Monitor DISABLED (" + std::to_string(threshold) + "%).");
+                    g_autoCleanMemoryThreshold.store(0);
                     PManContext::Get().workerQueue.Push([]() {
                         TrayAnimator::Get().StopMemMonitor();
+                        SaveConfig();
                     });
                 } else {
                     Log("[USER] Auto Memory Monitor ENABLED at " + std::to_string(threshold) + "%.");
+                    g_autoCleanMemoryThreshold.store(threshold);
                     PManContext::Get().workerQueue.Push([threshold]() {
                         TrayAnimator::Get().StartMemMonitor(threshold);
+                        SaveConfig();
                     });
                 }
             } else {

@@ -371,6 +371,7 @@ bool SecureConfigManager::ApplyConfig(const json& j) {
             if (g.contains("responsiveness_recovery")) g_responsivenessRecoveryEnabled.store(g["responsiveness_recovery"]);
             if (g.contains("recovery_prompt")) g_recoveryPromptEnabled.store(g["recovery_prompt"]);
             if (g.contains("enable_brain")) PManContext::Get().conf.enableBrain.store(g["enable_brain"]);
+            if (g.contains("auto_clean_memory_threshold")) g_autoCleanMemoryThreshold.store(g["auto_clean_memory_threshold"]);
             if (g.contains("icon_theme")) g_iconTheme = Utf8ToWide(g["icon_theme"].get<std::string>().c_str());
         }
 
@@ -498,6 +499,7 @@ bool SecureConfigManager::LoadSecureConfig() {
                 g_responsivenessRecoveryEnabled.store(g.value("responsiveness_recovery", true));
                 g_recoveryPromptEnabled.store(g.value("recovery_prompt", true));
                 PManContext::Get().conf.enableBrain.store(g.value("enable_brain", true));
+                g_autoCleanMemoryThreshold.store(g.value("auto_clean_memory_threshold", 0));
                 g_iconTheme = Utf8ToWide(g.value("icon_theme", "Default").c_str());
             }
 
@@ -572,6 +574,7 @@ void SecureConfigManager::SaveSecureConfig() {
                 {"responsiveness_recovery", g_responsivenessRecoveryEnabled.load()},
                 {"recovery_prompt", g_recoveryPromptEnabled.load()},
                 {"enable_brain", PManContext::Get().conf.enableBrain.load()},
+                {"auto_clean_memory_threshold", g_autoCleanMemoryThreshold.load()},
                 {"icon_theme", WideToUtf8(g_iconTheme.c_str())}
             };
             
@@ -691,6 +694,7 @@ bool CreateDefaultConfig(const std::filesystem::path& configPath)
         g_responsivenessRecoveryEnabled.store(true);
         g_recoveryPromptEnabled.store(true);
         PManContext::Get().conf.enableBrain.store(true);
+        g_autoCleanMemoryThreshold.store(0);
         g_iconTheme = L"Default";
         
         ExplorerConfig ec = {};

@@ -94,6 +94,9 @@
 
 #define g_iconTheme (PManContext::Get().conf.iconTheme)
 
+// Memory Clean Config
+#define g_autoCleanMemoryThreshold (PManContext::Get().conf.autoCleanMemoryThreshold)
+
 // Responsiveness Recovery Config
 #define g_responsivenessRecoveryEnabled (PManContext::Get().conf.responsivenessRecoveryEnabled)
 #define g_recoveryPromptEnabled (PManContext::Get().conf.recoveryPromptEnabled)
