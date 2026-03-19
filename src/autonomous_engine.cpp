@@ -195,6 +195,8 @@ void AutonomousEngine::Tick()
     // [GATE] External Verdict Interface (Jurisdictional Boundary)
     // "The system is not sovereign. It is a licensed operator."
     VerdictResult verdictResult = { false, "NONE", 0, "" };
+    static std::string lastVerdictReason = "";
+    
     if (ctx.subs.verdict) {
         verdictResult = ctx.subs.verdict->Check(decision.selectedAction);
 
@@ -216,7 +218,6 @@ void AutonomousEngine::Tick()
              
              // Log only on state change or significant denial to avoid spam, or verbose
              // Prompt says "Missing / expired / malformed verdicts fail closed"
-             static std::string lastVerdictReason = "";
              if (verdictResult.reason != lastVerdictReason) {
                 Log("[EXTERNAL_VERDICT] Authority Revoked: " + verdictResult.reason);
                 if (verdictResult.reason == "Verdict Expired") {
@@ -228,6 +229,9 @@ void AutonomousEngine::Tick()
                 }
                 lastVerdictReason = verdictResult.reason;
              }
+        } else {
+             // Reset state when allowed, so future expirations trigger the notification again
+             lastVerdictReason = "";
         }
     } else {
         // Missing Module -> Fail Closed
