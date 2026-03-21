@@ -34,6 +34,7 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
     
     // 1. Identify Candidate
     BrainAction intentAction = MapIntentToAction(govDecision);
+    BrainAction originalIntent = intentAction; // [FIX] Track original intent to prevent infinite hysteresis loop
 
     // [PATCH] Policy Enforcement: Force Active Mode
     // If Maintain is forbidden (User unchecked "Stability"), override Idle with Boost.
@@ -154,7 +155,10 @@ ArbiterDecision DecisionArbiter::Decide(const GovernorDecision& govDecision, con
         } else {
             decision.reason = DecisionReason::Approved;
             // Update state
+            // [FIX] Prevent infinite hysteresis loop by only updating cooldown if it was a genuine governor request
+            if (intentAction != BrainAction::Boost_Process || originalIntent == BrainAction::Boost_Process) {
             m_cooldowns[intentAction] = decision.decisionTime;
+            }
         }
     }
 
