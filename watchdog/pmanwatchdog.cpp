@@ -265,7 +265,7 @@ static std::wstring GetPManVersionString() {
 }
 
 // [FIX] Use wWinMain to run in background (no console window)
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) {
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR lpCmdLine, int) {
     InitLogShared(); // [PATCH] Initialize Logging Channel
     Log(L"Watchdog Started.");
 
